@@ -133,11 +133,13 @@ class MultiHeadAttention(nn.Module):
         O's shape: (batch_size, n_queries, num_hiddens)
     
     explains:
-        After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections, and a final linear project is followed.
+        After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
+        and a final linear project is followed.
         In detail:
             1. H linear projections on Q K V whom projected to num_hiddens // h dimensions, which stands for H heads
             2. For every head's result, perform scaled-dot-prod attention pool
-            3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to num_hiddens linear project is followed
+            3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to 
+               num_hiddens linear project is followed
     '''
     def __init__(self, num_heads, num_hiddens, dropout, **kwargs):
         super().__init__(**kwargs)
