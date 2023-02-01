@@ -105,9 +105,6 @@ class ScaledDotProductAttention(nn.Module):
         self.attention_weights = masked_softmax(S_batch, valid_lens)
         return torch.bmm( self.dropout(self.attention_weights), V_batch )
 
-### queries: batch of shape(m, dq); keys: batch of shape(n, dk); values: batch of shape(n, dv)
-### po: num_hiddens, dim -1 of final output; po % h == 0, 即h整除po
-### m: n_query, dq:query_size; n: n_kv, dk:key_size; dv:value_size; h:num_heads
 def transpose_qkv(X, num_heads):
     h = num_heads
     batch_size, n, _ = X.shape
