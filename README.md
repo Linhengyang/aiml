@@ -21,9 +21,8 @@ NOTE:
     │   ├── Utils  
     │   │   ├── Common  
     │   │   │   └── SeqOperations.py  
-    │   │   ├── Text  
-    │   │   │   └── TextPreprocess.py  
-    │   │   └── Image  
+    │   │   └── Text  
+    │   │       └── TextPreprocess.py  
     │   └── projs  
     │       ├── bert  
     │       └── transformer  
