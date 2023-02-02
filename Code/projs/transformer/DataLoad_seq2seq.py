@@ -1,11 +1,11 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.TextPreprocess import Vocab
-from ...Utils.Text.TextPreprocess import truncate_pad
+from ...Utils.Common.SeqOperations import truncate_pad
 from ...Base.Tools.DataTools import batch_iter_tor
 import torch
 
 def read_text2str(path):
-    """s
+    """
     inputs: path
         path: str path of the text data
     
@@ -64,6 +64,27 @@ def build_array(lines, vocab, num_steps):
     return array, valid_len
 
 def data_loader_seq2seq(path, batch_size, num_steps, num_examples=None, is_train=True):
+    """
+    inputs: path, batch_size, num_steps, num_examples(optional), is_train(optional)
+        path: seq2seq text file path
+        batch_size: batch size for minibatch
+        num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
+        num_examples: total sample size if given. None to read all
+        is_train: tag to see if shuffle data when iterator
+
+    returns: denoted as data_iter, src_vocab, tgt_vocab
+        data_iter: data iterator of minibatch of
+            1. source seq batch, with shape (batch_size, num_steps)
+            2. source seq valid(not-pad) lens, with shape (batch_size, )
+            3. target seq batch, with shape (batch_size, num_steps)
+            4. target seq valid(not-pad) lens, with shape (batch_size, )
+        src_vocab: vocab of source language corpus
+        tgt_vocabL vocab of target language corpus
+    
+    explains:
+        return data iterator and vocabs
+        返回 seq2seq的data iter(4个成份), 以及源语料和目标语料的vocabs
+    """
     raw_text = read_text2str(path) # read text
     text = preprocess_space(raw_text) # preprocess
     source, target = tokenize_seq2seq(text, num_examples) # 词元化, 得到source语料序列和target语料序列

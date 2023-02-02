@@ -19,9 +19,10 @@ NOTE:
     │   │       ├── DataTools.py  
     │   │       └── VisualizeTools.py  
     │   ├── Utils  
-    │   │   ├── Text  
-    │   │   │   └── TextPreprocess.py  
-    │   │   └── image  
+    │   │   ├── Common  
+    │   │   │   └── SeqOperations.py  
+    │   │   └── Text  
+    │   │       └── TextPreprocess.py  
     │   └── projs  
     │       ├── bert  
     │       └── transformer  
