@@ -1,6 +1,6 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.TextPreprocess import Vocab
-from ...Utils.Text.TextPreprocess import truncate_pad
+from ...Utils.Common.SeqOperations import truncate_pad
 from ...Base.Tools.DataTools import batch_iter_tor
 import torch
 
