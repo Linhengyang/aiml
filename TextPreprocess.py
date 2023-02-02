@@ -80,3 +80,33 @@ class Vocab:
     @property
     def token_freqs(self):
         return self._token_freqs
+
+def preprocess_space(text, need_lower=True, separate_puncs=',.!?'):
+    '''
+    inputs: text, need_lower(optional), separate_puncs(optional)
+        text: a str object
+        need_lower: Bool, default as True. If true, then input str will be lowered
+        separate_puncs: punctuations that shall be seen as independent tokens, such as ,.!?
+
+    returns: A str obejct
+        whose spaces are normal single space ' ', and single space is inserted before every independent token
+
+    explains:
+        preprocess spaces inside a str obeject
+    '''
+    text = text.replace('\u202f', ' ').replace('\xa0', ' ') #替换不间断空格为单空格
+    if need_lower:
+        text = text.lower()
+    # 在文字和[,.!?]之间插入空格
+    ## 判断 当前字符是否是separate_puncs，且前一个字符不是空格
+    def no_space(char, prev_char):
+        return char in set(separate_puncs) and prev_char != " "
+    ## 从第二个字符开始遍历。如果它是,.!?且前一个字符不是空格，则将它变成 " "+标点
+    out = [ " " + char if i > 0 and no_space(char, text[i-1]) else char for i, char in enumerate(text)]
+    return "".join(out)
+
+def truncate_pad(line, num_steps, padding_token):
+    if len(line) >= num_steps:
+        return line[:num_steps]
+    else:
+        return line + [padding_token] * (num_steps - len(line))
