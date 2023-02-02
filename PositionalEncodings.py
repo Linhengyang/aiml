@@ -2,7 +2,7 @@ import math
 import torch
 from torch import nn
 
-class TrigonoPosEnc(nn.Module):
+class TrigonoAbsPosEnc(nn.Module):
     '''
     args: num_hiddens, dropout
         num_hiddens: the feature dimentions of input X, simply as d
@@ -15,7 +15,7 @@ class TrigonoPosEnc(nn.Module):
         S's shape: (batch_size, seq_len, d=num_hiddens)
 
     explains:
-        When input X (batch_size, seq_len, d) arrives, Sinusoidal positional encoding P with shape (seq_len, d)
+        When input X (batch_size, seq_len, d) arrives, Sinusoidal absolute positional encoding P with shape (seq_len, d)
         is added to every sample of X. P with shape (seq_len, d), whose
             (k, 2j) element is sin( k/10000^(2j/d) )
             (k, 2j+1) element is cos( k/10000^(2j/d) )
@@ -39,7 +39,7 @@ class TrigonoPosEnc(nn.Module):
         X = X + self.P[:, :X.shape[1], :].to(X.device)
         return self.dropout(X)
 
-class LearnPosEnc(nn.Module):
+class LearnAbsPosEnc(nn.Module):
     '''
     args: seq_len, num_hiddens, dropout
         seq_len: the sequence length of input X
@@ -53,7 +53,7 @@ class LearnPosEnc(nn.Module):
         S's shape: (batch_size, seq_len, d=num_hiddens)
 
     explains:
-        THe Learnable positional encodes P shall be shared in different position encoding layers
+        THe Learnable absolute positional encodes P shall be shared in different position encoding layers
         When input X (batch_size, seq_len, d) arrives, Learnable positional encoding P with shape (seq_len, d)
         is added to every sample of X. P with shape (seq_len, d), whose elements are all learnable parameters.
     '''
