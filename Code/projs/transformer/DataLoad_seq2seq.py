@@ -1,11 +1,11 @@
-from TextPreprocess import preprocess_space
-from TextPreprocess import Vocab
-from TextPreprocess import truncate_pad
-from DataTools import batch_iter_tor
+from ...Utils.Text.TextPreprocess import preprocess_space
+from ...Utils.Text.TextPreprocess import Vocab
+from ...Utils.Text.TextPreprocess import truncate_pad
+from ...Base.Tools.DataTools import batch_iter_tor
 import torch
 
 def read_text2str(path):
-    """
+    """s
     inputs: path
         path: str path of the text data
     
@@ -73,34 +73,3 @@ def data_loader_seq2seq(path, batch_size, num_steps, num_examples=None, is_train
     tgt_array, tgt_valid_len = build_array(target, tgt_vocab, num_steps)
     data_iter = batch_iter_tor((src_array, src_valid_len, tgt_array, tgt_valid_len), batch_size, is_train) # batch iterator
     return data_iter, src_vocab, tgt_vocab
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-if __name__ == "__main__":
-    eng2fra = "../../data/seq2seq/eng2fra.txt"
-    train_iter, src_vocab, tgt_vocab = data_loader_seq2seq(path=eng2fra, batch_size=2, num_steps=8, num_examples=600)
-    for X, X_valid_len, Y, Y_valid_len in train_iter:
-        print('X:', X)
-        print('valid lengths for X:', X_valid_len)
-        print('Y:', Y)
-        print('valid lengths for Y:', Y_valid_len)
-        print(X.dtype, Y.dtype)
-        break
