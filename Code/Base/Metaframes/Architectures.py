@@ -33,7 +33,7 @@ class EncoderDecoder(nn.Module):
         dec_state = self.decoder.init_state(enc_all_outputs, *args)
         return self.decoder(dec_X, dec_state)
 
-########## Attention-Customized architectures ##########
+########## Attention-Customized decoder ##########
 class AttentionDecoder(Decoder):
     """The base attention-based decoder interface."""
     def __init__(self):
