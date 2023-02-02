@@ -15,7 +15,6 @@ def count_corpus(tokens):
         tokens = [token for line in tokens for token in line]
     return collections.Counter(tokens)
 
-# 用面向对象编程的方法, 定义一个vocab类, 它提供上述的映射功能, 并可以自定义token去除的阈值, 和预存tokens
 class Vocab:
     '''
     args: tokens, min_freq(optional), reserved_tokens(optional)
@@ -25,6 +24,9 @@ class Vocab:
     
     returns:
         A mapper whose main function is to map tokens(words, chars) to indices, or vice versa.
+    
+    explains:
+        用面向对象编程的方法, 定义一个vocab类, 它提供上述的映射功能, 并可以自定义token去除的阈值, 和预存tokens
     '''
     # 初始化, 需要提供tokens, token去除阈值, 预存tokens
     def __init__(self, tokens=None, min_freq=0, reserved_tokens=None):
