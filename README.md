@@ -5,14 +5,27 @@ NOTE:
 * run test.py to test module code  
 * run main.py to run formal code
 
+in Base: 
+    RootLayers --> SubModules
+    MetaFrames
+in Modules:
+    invoke components from RootLayers, SubModules --> Modules
+in proj: 
+    invoke components from RootLayers, SubModules and Modules --> Block
+    invoke frameworks from MetaFrames                         --> Architecture
+    Block + Architecture = Network
+
 ---
     autodl  
     ├── Code  
     │   ├── Base  
-    │   │   ├── Layers  
+    │   │   ├── RootLayers  
     │   │   │   ├── AttentionPools.py  
     │   │   │   └── PositionalEncodings.py  
-    │   │   ├── Metaframes  
+    │   │   ├── SubModules  
+    │   │   │   ├── AttentionPools.py  
+    │   │   │   └── PositionalEncodings.py  
+    │   │   ├── MetaFrames  
     │   │   │   ├── __init__.py  
     │   │   │   └── Architectures.py  
     │   │   └── Tools  

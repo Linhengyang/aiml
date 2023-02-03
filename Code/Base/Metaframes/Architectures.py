@@ -3,7 +3,12 @@ from torch import nn
 
 ########## Basic Encoder-Decoder architectures ##########
 class Encoder(nn.Module):
-    """The base encoder interface for the encoder-decoder architecture."""
+    """The base encoder interface for the encoder-decoder architecture.
+
+    inputs: source input data batch, others(optional)
+
+    return: denoted as enc_outputs
+    """
     def __init__(self):
         super().__init__()
     
@@ -11,7 +16,12 @@ class Encoder(nn.Module):
         raise NotImplementedError
 
 class Decoder(nn.Module):
-    """The base decoder interface for the encoder-decoder architecture."""
+    """The base decoder interface for the encoder-decoder architecture.
+
+    inputs: target input data batch, state extracted from enc_outputs bt init_state method
+
+    return: denoted as dec_outputs
+    """
     def __init__(self):
         super().__init__()
 
@@ -22,7 +32,19 @@ class Decoder(nn.Module):
         raise NotImplementedError
 
 class EncoderDecoder(nn.Module):
-    """The base class for the encoder-decoder architecture."""
+    """The base class for the encoder-decoder architecture.
+
+    args: encoder, decoder
+
+    inputs: enc_X, dec_X, others(optional)
+        encoder(enc_X, others) --> enc_outputs
+        extract enc_outputs --> state
+        decoder(dec_X, state) --> dec_outputs
+    
+    returns: denoted as dec_outputs, y_hat is included
+
+    explains: be careful to design proper work for infer and train mode.
+    """
     def __init__(self, encoder, decoder):
         super().__init__()
         self.encoder = encoder
@@ -35,7 +57,20 @@ class EncoderDecoder(nn.Module):
 
 ########## Attention-Customized decoder ##########
 class AttentionDecoder(Decoder):
-    """The base attention-based decoder interface."""
+    """The base attention-based decoder interface.
+    args: encoder, decoder
+
+    inputs: enc_X, dec_X, others(optional)
+        encoder(enc_X, others) --> enc_outputs
+        extract enc_outputs --> state
+        decoder(dec_X, state) --> dec_outputs
+    
+    returns: denoted as dec_outputs, y_hat is included
+
+    attributes: attention_weights
+    
+    explains: be careful to design proper work for infer and train mode.
+    """
     def __init__(self):
         super().__init__()
 

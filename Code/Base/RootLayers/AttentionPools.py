@@ -141,15 +141,15 @@ class MultiHeadAttention(nn.Module):
             3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to 
                num_hiddens linear project is followed
     '''
-    def __init__(self, num_heads, num_hiddens, dropout, **kwargs):
+    def __init__(self, num_heads, num_hiddens, dropout, use_bias=False, **kwargs):
         super().__init__(**kwargs)
         self.h = num_heads
-        self.W_q = nn.LazyLinear(num_hiddens, bias=False)
-        self.W_k = nn.LazyLinear(num_hiddens, bias=False)
-        self.W_v = nn.LazyLinear(num_hiddens, bias=False)
-        self.W_o = nn.LazyLinear(num_hiddens, bias=False)
+        self.W_q = nn.LazyLinear(num_hiddens, bias=use_bias)
+        self.W_k = nn.LazyLinear(num_hiddens, bias=use_bias)
+        self.W_v = nn.LazyLinear(num_hiddens, bias=use_bias)
+        self.W_o = nn.LazyLinear(num_hiddens, bias=use_bias)
         self.attention = ScaledDotProductAttention(dropout)
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens):
+    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
         Q = transpose_qkv(self.W_q(Q_batch), self.h)
         K = transpose_qkv(self.W_k(K_batch), self.h)
         V = transpose_qkv(self.W_v(V_batch), self.h)
