@@ -16,34 +16,38 @@ in proj:
     Block + Architecture = Network
 
 ---
-    autodl  
-    ├── Code  
-    │   ├── Base  
-    │   │   ├── RootLayers  
-    │   │   │   ├── AttentionPools.py  
-    │   │   │   └── PositionalEncodings.py  
-    │   │   ├── SubModules  
-    │   │   │   ├── AttentionPools.py  
-    │   │   │   └── PositionalEncodings.py  
-    │   │   ├── MetaFrames  
-    │   │   │   ├── __init__.py  
-    │   │   │   └── Architectures.py  
-    │   │   └── Tools  
-    │   │       ├── DataTools.py  
-    │   │       └── VisualizeTools.py  
-    │   ├── Utils  
-    │   │   ├── Common  
-    │   │   │   └── SeqOperations.py  
-    │   │   └── Text  
-    │   │       └── TextPreprocess.py  
-    │   └── projs  
-    │       ├── bert  
-    │       └── transformer  
-    │           └── DataLoad_seq2seq.py  
-    ├── Config  
-    │   ├── __init__.py  
-    │   └── params.py  
-    ├── README.md  
-    ├── main.py  
-    └── test.py  
+    autodl
+    ├── Code
+    │   ├── Base
+    │   │   ├── MetaFrames
+    │   │   │   ├── Architectures.py
+    │   │   │   └── __init__.py
+    │   │   ├── RootLayers
+    │   │   │   ├── AttentionPools.py
+    │   │   │   └── PositionalEncodings.py
+    │   │   ├── SubModules
+    │   │   │   └── AddLNorm.py
+    │   │   └── Tools
+    │   │       ├── DataTools.py
+    │   │       └── VisualizeTools.py
+    │   ├── Loss
+    │   ├── Modules
+    │   │   └── _transformer.py
+    │   ├── Optimizer
+    │   ├── Utils
+    │   │   ├── Common
+    │   │   │   └── SeqOperations.py
+    │   │   └── Text
+    │   │       └── TextPreprocess.py
+    │   └── projs
+    │       └── bert
+    │       └── transformer
+    │           ├── DataLoad_seq2seq.py
+    │           └── network.py
+    ├── Config
+    │   ├── __init__.py
+    │   └── params.py
+    ├── README.md
+    ├── main.py
+    └── test.py
 ---
