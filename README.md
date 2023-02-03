@@ -11,7 +11,7 @@ in Base:  (avoid unnecessary modification)
 in Modules:  (module blocks/units for project networks)  
 &nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers, SubModules --> Modules  
 
-in proj:  (desigend functions and networks for projects)  
+in proj:  (designed functions and networks for projects)  
 &nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers, SubModules and Modules --> Block  
 &nbsp;&nbsp;&nbsp;&nbsp;invoke frameworks from MetaFrames                         --> Architecture  
 &nbsp;&nbsp;&nbsp;&nbsp;Block + Architecture = Network  
