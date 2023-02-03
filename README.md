@@ -1,36 +1,57 @@
 # repo skeleton  
 NOTE:  
-* when a `__init__.py` file shows, that means the package imports all from underlying modules.  
-* please always execute .py files under **autodl** directory in case of relative importing  
-* run test.py to test module code  
-* run main.py to run formal code
+* a `__init__.py` file shows that the package imports all from underlying modules.  
+* always run .py files under `autodl` directory in case of relative importing  
+* run `python -B test.py` to test code from modules  
+
+in Base:  (avoid unnecessary modification)  
+&nbsp;&nbsp;&nbsp;&nbsp;RootLayers --> SubModules  
+&nbsp;&nbsp;&nbsp;&nbsp;MetaFrames  
+
+in Modules:  (module blocks/units for project networks)  
+&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers, SubModules --> Modules  
+
+in proj:  (desigend functions and networks for projects)  
+&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers, SubModules and Modules --> Block  
+&nbsp;&nbsp;&nbsp;&nbsp;invoke frameworks from MetaFrames                         --> Architecture  
+&nbsp;&nbsp;&nbsp;&nbsp;Block + Architecture = Network  
 
 ---
-    autodl  
-    ├── Code  
-    │   ├── Base  
-    │   │   ├── Layers  
-    │   │   │   ├── AttentionPools.py  
-    │   │   │   └── PositionalEncodings.py  
-    │   │   ├── Metaframes  
-    │   │   │   ├── __init__.py  
-    │   │   │   └── Architectures.py  
-    │   │   └── Tools  
-    │   │       ├── DataTools.py  
-    │   │       └── VisualizeTools.py  
-    │   ├── Utils  
-    │   │   ├── Common  
-    │   │   │   └── SeqOperations.py  
-    │   │   └── Text  
-    │   │       └── TextPreprocess.py  
-    │   └── projs  
-    │       ├── bert  
-    │       └── transformer  
-    │           └── DataLoad_seq2seq.py  
-    ├── Config  
-    │   ├── __init__.py  
-    │   └── params.py  
-    ├── README.md  
-    ├── main.py  
-    └── test.py  
+    autodl
+    ├── Code
+    │   ├── Base
+    │   │   ├── MetaFrames
+    │   │   │   ├── Architectures.py
+    │   │   │   └── __init__.py
+    │   │   ├── RootLayers
+    │   │   │   ├── AttentionPools.py
+    │   │   │   └── PositionalEncodings.py
+    │   │   ├── SubModules
+    │   │   │   └── AddLNorm.py
+    │   │   └── Tools
+    │   │       ├── DataTools.py
+    │   │       └── VisualizeTools.py
+    │   ├── Loss
+    │   │   └── __init__.py
+    │   ├── Modules
+    │   │   └── _transformer.py
+    │   ├── Optimizer
+    │   │   └── __init__.py
+    │   ├── Utils
+    │   │   ├── Common
+    │   │   │   └── SeqOperations.py
+    │   │   └── Text
+    │   │       └── TextPreprocess.py
+    │   └── projs
+    │       ├── bert
+    │       │   └── __init__.py
+    │       └── transformer
+    │           ├── DataLoad_seq2seq.py
+    │           └── network.py
+    ├── Config
+    │   ├── __init__.py
+    │   └── params.py
+    ├── README.md
+    ├── main.py
+    └── test.py
 ---
