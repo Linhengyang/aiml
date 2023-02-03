@@ -32,16 +32,19 @@ in proj:  (desigend functions and networks for projects)
     │   │       ├── DataTools.py
     │   │       └── VisualizeTools.py
     │   ├── Loss
+    │   │   └── __init__.py
     │   ├── Modules
     │   │   └── _transformer.py
     │   ├── Optimizer
+    │   │   └── __init__.py
     │   ├── Utils
     │   │   ├── Common
     │   │   │   └── SeqOperations.py
     │   │   └── Text
     │   │       └── TextPreprocess.py
     │   └── projs
-    │       └── bert
+    │       ├── bert
+    │       │   └── __init__.py
     │       └── transformer
     │           ├── DataLoad_seq2seq.py
     │           └── network.py
