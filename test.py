@@ -1,7 +1,7 @@
 import os
 import torch
 from Config import base_data_dpath, seq2seq_dname, eng2fra_fname
-import Code.projs.transformer.DataLoad_seq2seq as test1
+# import Code.projs.transformer.DataLoad_seq2seq as test1
 import Code.Modules._transformer as test2
 
 ## net tester
@@ -26,10 +26,13 @@ if __name__ == "__main__":
     #     print(X.dtype, Y.dtype)
     #     break
     ### test2
-    batch_size, num_steps, d_dim = 2, 3, 4
+    batch_size, num_steps, d_dim = 2, 3, 6
     test_input_shape = (batch_size, num_steps, d_dim)
-    test_input = torch.ones(test_input_shape)
-    test_args = (4, 8)
-    testnet = test2.PositionWiseFFN(*test_args)
+    test_input_X = torch.ones(test_input_shape)
+    test_valid_lens = torch.tensor([1, 2])
+    num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 6, 0.1, False, 8
+    test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
+                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens}
+    testnet = test2.TransformerEncoderBlock(**test_args)
     testnet.eval()
-    print(testnet(test_input).shape)
+    print(testnet(test_input_X, test_valid_lens).shape)
