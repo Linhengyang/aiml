@@ -2,18 +2,19 @@
 NOTE:  
 * when a `__init__.py` file shows, that means the package imports all from underlying modules.  
 * please always execute .py files under **autodl** directory in case of relative importing  
-* run test.py to test module code  
-* run main.py to run formal code
+* run `python -B test.py` to test code from modules  
 
-in Base: 
-    RootLayers --> SubModules
-    MetaFrames
-in Modules:
-    invoke components from RootLayers, SubModules --> Modules
-in proj: 
-    invoke components from RootLayers, SubModules and Modules --> Block
-    invoke frameworks from MetaFrames                         --> Architecture
-    Block + Architecture = Network
+in Base:  (please avoid unnecessary modification)  
+    RootLayers --> SubModules  
+    MetaFrames  
+
+in Modules:  (module blocks/units for project networks)  
+    invoke components from RootLayers, SubModules --> Modules  
+    
+in proj:  (desigend functions and networks for projects)  
+    invoke components from RootLayers, SubModules and Modules --> Block  
+    invoke frameworks from MetaFrames                         --> Architecture  
+    Block + Architecture = Network  
 
 ---
     autodl
