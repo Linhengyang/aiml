@@ -1,5 +1,7 @@
 import torch
 from torch import nn
+from ..Base.SubModules.AddLNorm import AddLNorm
+from ..Base.RootLayers.AttentionPools import MultiHeadAttention
 
 class PositionWiseFFN(nn.Module):
     '''
@@ -25,29 +27,31 @@ class PositionWiseFFN(nn.Module):
 
 class TransformerEncoderBlock(nn.Module):
     '''
-    args: num_heads, num_hiddens, dropout
-        num_heads: number of heads (num_heads | num_hiddens), see explains
-        num_hiddens: number of hiddens (num_heads | num_hiddens), see explains
-        dropout: dropout rate. Regularization on the attention weight matrices
+    components:
+        1. multihead attention(self-att)
+        2. addLnorm
+        3. positionwiseFFN
+        4. addLnorm
     
-    inputs: X, valid_lens
-        Q_batch's shape: (batch_size, n_queries, query_size)
-        K_batch's shape: (batch_size, n_kvs, key_size)
-        V_batch's shape: (batch_size, n_kvs, value_size)
-        valid_lens(optional)'s shape: (batch_size,) or (batch_size, n_queries)
+    inputs: enc_X, valid_lens(optional)
+        enc_X's shape: (batch_size, seq_len, d_dim)
+        valid_lens(optional)'s shape: (batch_size,) since it's self-att here
     
-    returns: denoted as O
-        O's shape: (batch_size, n_queries, num_hiddens)
+    returns: denoted as enc_O
+        enc_O's shape: (batch_size, seq_len, d_dim), the same as enc_X
     
     explains:
-        After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
-        and a final linear project is followed.
-        In detail:
-            1. H linear projections on Q K V whom projected to num_hiddens // h dimensions, which stands for H heads
-            2. For every head's result, perform scaled-dot-prod attention pool
-            3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to 
-               num_hiddens linear project is followed
+        keep batch shape at every layer's input/output through the block
     '''
-    def __init__(self, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens):
+    def __init__(self, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False):
         super().__init__()
-        
+        self.attention = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
+        self.addlnorm1 = AddLNorm(num_hiddens, dropout)
+        self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
+        self.addlnorm2 = AddLNorm(num_hiddens, dropout)
+    
+    def forward(self, X, valid_lens):
+        self_att_X = self.attention(X, X, X, valid_lens)
+        Y = self.addlnorm1(X, self_att_X)
+        posffn_Y = self.PosFFN(Y)
+        return self.addlnorm2(Y, posffn_Y)
