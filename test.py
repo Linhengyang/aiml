@@ -26,11 +26,10 @@ if __name__ == "__main__":
     #     print(X.dtype, Y.dtype)
     #     break
     ### test2
-    # batch_size, num_steps, d_dim = 2, 3, 4
-    # test_input_shape = (batch_size, num_steps, d_dim)
-    # test_input = torch.ones(test_input_shape)
-    # test_args = (4, 8)
-    # testnet = test2.PositionWiseFFN(*test_args)
-    # testnet.eval()
-    # print(testnet(test_input).shape)
-    
+    batch_size, num_steps, d_dim = 2, 3, 4
+    test_input_shape = (batch_size, num_steps, d_dim)
+    test_input = torch.ones(test_input_shape)
+    test_args = (4, 8)
+    testnet = test2.PositionWiseFFN(*test_args)
+    testnet.eval()
+    print(testnet(test_input).shape)
