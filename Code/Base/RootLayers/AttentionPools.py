@@ -142,6 +142,7 @@ class MultiHeadAttention(nn.Module):
                num_hiddens linear project is followed
     '''
     def __init__(self, num_heads, num_hiddens, dropout, use_bias=False, **kwargs):
+        assert num_hiddens % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
         super().__init__(**kwargs)
         self.h = num_heads
         self.W_q = nn.LazyLinear(num_hiddens, bias=use_bias)
