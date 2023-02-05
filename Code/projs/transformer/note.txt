@@ -1,6 +1,6 @@
 sequence to sequence 学习，即翻译 translate，是一项生成式的任务，详细地说，它是：在source序列已知的情况下，从<bos>开始，逐个生成target序列
 所以translate learning(seq2seq learning)，在infer时一定是recursive的
-这里要先明确infer的过程: 《》
+这里要先明确infer的过程: 输入一个token, 其他所需的信息在state中输入, infer过程输出下一个token。
 
 encoder-decoder结构的不同: 
     encoder实质是在做编码、表示工作, 即它将time 1 to T的序列，表示（编码、解析、计算、投射）为下一层 time 1 to T的序列, 类比MLP中的浅层网络, 是在深层次地表示data
@@ -21,4 +21,4 @@ transformer的decoder的recursive是:
     也就是说, 使用self-att生成一个length为T的序列的decode过程中, 内部不存在时间前后依赖关系, 没有类似rnn的state参数在传递.
     即一次前向计算, 就得到了hat_sequence
     infer:
-    但是在infer时, 没办法并行化这个操作,
+    但是在infer时, 没办法并行化这个操作

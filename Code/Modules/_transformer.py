@@ -100,3 +100,4 @@ class TransformerDecoderBlock(nn.Module):
         Y = self.addlnorm1(X, self_att_X)
         posffn_Y = self.PosFFN(Y)
         return self.addlnorm2(Y, posffn_Y)
+    
