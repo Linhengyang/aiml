@@ -61,7 +61,7 @@ class TransformerEncoderBlock(nn.Module):
 class TransformerDecoderBlock(nn.Module):
     '''
     components:
-        1. masked multihead attention(self-att but recursively)
+        1. masked multihead attention(self-att but auto-regressively)
         2. addLnorm
         3. encoder-decoder attention
         4. addLnorm
@@ -76,7 +76,7 @@ class TransformerDecoderBlock(nn.Module):
     
     explains:
         keep batch shape at every layer's input/output through the block
-        encode target sequence time 0 to T-1 recursively to deep sequence time 1 to T, that is:
+        transfer target sequence time 0 to T-1 auto-regressively to deep sequence time 1 to T, that is:
         Infer steps:
             f(0) --> node 1 on next layer, 1_hat
             f(0, 1_hat) --> node 2 on next layer, 2_hat
