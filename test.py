@@ -26,24 +26,24 @@ if __name__ == "__main__":
     #     print(X.dtype, Y.dtype)
     #     break
     ### test2
-    ## 测试train
-    batch_size, num_steps, d_dim = 2, 3, 6
-    test_input_shape = (batch_size, num_steps, d_dim)
-    test_src_X = torch.ones(test_input_shape)
-    test_src_valid_lens = torch.tensor([1, 2])
-    test_tgt_X = torch.ones(test_input_shape)
-    # 设定模型参数
-    num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 6, 0.1, False, 8
-    test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens}
-    # encode
-    test_enc = test2.TransformerEncoderBlock(**test_args)
-    enc_info = (test_enc(test_src_X, test_src_valid_lens), test_src_valid_lens)
-    # decode
-    test_dec = test2.TransformerDecoderBlock(blk_ind=0, **test_args)
-    dec_output = test_dec(test_tgt_X, enc_info)
-    print(dec_output[0].shape)
-    print(dec_output[1])
+    # ## 测试train
+    # batch_size, num_steps, d_dim = 2, 3, 6
+    # test_input_shape = (batch_size, num_steps, d_dim)
+    # test_src_X = torch.ones(test_input_shape)
+    # test_src_valid_lens = torch.tensor([1, 2])
+    # test_tgt_X = torch.ones(test_input_shape)
+    # # 设定模型参数
+    # num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 6, 0.1, False, 8
+    # test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
+    #              "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens}
+    # # encode
+    # test_enc = test2.TransformerEncoderBlock(**test_args)
+    # enc_info = (test_enc(test_src_X, test_src_valid_lens), test_src_valid_lens)
+    # # decode
+    # test_dec = test2.TransformerDecoderBlock(blk_ind=0, **test_args)
+    # dec_output = test_dec(test_tgt_X, enc_info)
+    # print(dec_output[0].shape)
+    # print(dec_output[1])
 
     # ## 测试infer
     # batch_size, num_steps, d_dim = 1, 3, 6
