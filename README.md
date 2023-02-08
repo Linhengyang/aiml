@@ -22,8 +22,8 @@ in Optimizer:  (customized optimizer for project train)
 in Utils:  (general codes relying only official packages. avoid unnecessary modification)  
 
 in proj:  (designed functions and networks for projects)  
-&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers(Base), SubModules(Base) --> Blocks (Modules)
-&nbsp;&nbsp;&nbsp;&nbsp;invoke frameworks from MetaFrames                         --> Architecture  
+&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers(Base), SubModules(Base) --> Blocks (Modules)  
+&nbsp;&nbsp;&nbsp;&nbsp;invoke frameworks from MetaFrames(Base)                   --> Architecture  
 &nbsp;&nbsp;&nbsp;&nbsp;Block + Architecture = Network  
 
 ---
