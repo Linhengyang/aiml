@@ -27,23 +27,25 @@ class PositionWiseFFN(nn.Module):
 
 class TransformerEncoderBlock(nn.Module):
     '''
-    components:
-        1. multihead attention(self-att)
-        2. addLnorm
-        3. positionwiseFFN
-        4. addLnorm
+    components: 
+        1. multihead attention(self-att) 
+        2. addLnorm 
+        3. positionwiseFFN 
+        4. addLnorm 
+    args:
+        num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False
+
+    inputs: enc_X, valid_lens(optional) 
+        enc_X's shape: (batch_size, seq_len, d_dim) 
+        valid_lens(optional)'s shape: (batch_size,) since it's self-att here 
     
-    inputs: enc_X, valid_lens(optional)
-        enc_X's shape: (batch_size, seq_len, d_dim)
-        valid_lens(optional)'s shape: (batch_size,) since it's self-att here
+    returns: denoted as enc_O 
+        enc_O's shape: (batch_size, seq_len, d_dim), the same as enc_X 
     
-    returns: denoted as enc_O
-        enc_O's shape: (batch_size, seq_len, d_dim), the same as enc_X
-    
-    explains:
-        keep batch shape at every layer's input/output through the block
-        encode source sequence time 1 to T directly to deep sequence time 1 to T, that is:
-            f(time 1 to T) --> node 1 to T on next layer
+    explains: 
+        keep batch shape at every layer's input/output through the block 
+        encode source sequence time 1 to T directly to deep sequence time 1 to T, that is: 
+            f(time 1 to T) --> node 1 to T on next layer 
     '''
     def __init__(self, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False):
         super().__init__()
@@ -67,7 +69,10 @@ class TransformerDecoderBlock(nn.Module):
         4. addLnorm
         5. positionwiseFFN
         6. addLnorm
-    
+
+    args:
+        blk_ind, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False
+        
     inputs: dec_X, state
         dec_X's shape: (batch_size, seq_len, d_dim)
         state:
@@ -90,14 +95,14 @@ class TransformerDecoderBlock(nn.Module):
         self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
         self.addlnorm3 = AddLNorm(num_hiddens, dropout)
     
-    def forward(self, X, enc_info, infer_recorder=None):
-        enc_output, enc_valid_lens = enc_info
+    def forward(self, X, enc_info, infer_recorder=None): # 函数内部对infer_recorder作in-place操作
+        src_enc_seqs, src_valid_lens = enc_info
         # X' shape, train: (batch_size, seq_len, d_dim), infer: (1, 1, d_dim)
-        # enc_output'shape, train: (batch_size, seq_len, d_dim), infer: (1, seq_len, d_dim)
-        # enc_valid_lens's shape, train: (batch_size,), infer: (1,) or None
+        # src_enc_seqs'shape, train: (batch_size, seq_len, d_dim), infer: (1, seq_len, d_dim)
+        # src_valid_lens's shape, train: (batch_size,), infer: (1,)
         if self.training: # train过程中
-            assert X.shape == enc_output.shape, 'training: encoder output & decoder input block ' + self.blk_ind + ' are not in same shape'
-            assert enc_output.shape[0] == enc_valid_lens.shape[0], 'encoder output & encoder valid lens have different batch_size'
+            assert X.shape == src_enc_seqs.shape, 'training: encoder output & decoder input block ' + self.blk_ind + ' are not in same shape'
+            assert src_enc_seqs.shape[0] == src_valid_lens.shape[0], 'encoder output & encoder valid lens have different batch_size'
             batch_size, seq_len = X.shape[:-1]
             mask = torch.arange(1, seq_len+1, dtype=torch.int32, device=X.device).repeat(batch_size, 1)
             KVs = X # 自注意力, 用上面的mask实现auto-regressive, train过程中不需要infer_recorder
@@ -112,7 +117,7 @@ class TransformerDecoderBlock(nn.Module):
             mask = None # infer过程中不需要mask
         X2 = self.attention1(X, KVs, KVs, mask)
         Y = self.addlnorm1(X, X2)
-        Y2 = self.attention2(Y, enc_output, enc_output, enc_valid_lens)
+        Y2 = self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens)
         Z = self.addlnorm2(Y, Y2)
         Z2 = self.PosFFN(Z)
         return self.addlnorm3(Z, Z2), infer_recorder
