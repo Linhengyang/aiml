@@ -18,7 +18,7 @@ class TransformerEncoder(Encoder):
     def forward(self, src_X, valid_lens):
         # src_X shape: (batch_size, num_steps), valid_lens shape: (batch_size,)
         embed_X = self.embedding(src_X)
-        X = self.pos_encoding(embed_X * math.sqr(self.num_hiddens)) # 在embed后, 位置编码前, 将embed结果scale sqrt(d)
+        X = self.pos_encoding(embed_X * math.sqrt(self.num_hiddens)) # 在embed后, 位置编码前, 将embed结果scale sqrt(d)
         for i, blk in enumerate(self.blks):
             X = blk(X, valid_lens)
         return X, valid_lens
