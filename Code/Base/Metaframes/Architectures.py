@@ -12,7 +12,7 @@ class Encoder(nn.Module):
     def __init__(self):
         super().__init__()
     
-    def forward(self, X, *args):
+    def forward(self, enc_X, *args, **kwargs):
         raise NotImplementedError
 
 class Decoder(nn.Module):
@@ -30,10 +30,10 @@ class Decoder(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def init_state(self, enc_all_outputs, *args):
+    def init_state(self, enc_outputs, *args, **kwargs):
         raise NotImplementedError
 
-    def forward(self, X, state):
+    def forward(self, dec_X, *args, **kwargs):
         raise NotImplementedError
 
 ########## Attention-Customized decoder ##########
@@ -72,12 +72,8 @@ class EncoderDecoder(nn.Module):
 
     explains: be careful to design proper work for infer and train mode.
     """
-    def __init__(self, encoder, decoder):
+    def __init__(self):
         super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
 
-    def forward(self, enc_X, dec_X, *args):
-        enc_all_outputs = self.encoder(enc_X, *args)
-        dec_state = self.decoder.init_state(enc_all_outputs, *args)
-        return self.decoder(dec_X, dec_state)
+    def forward(self, enc_X, dec_X, *args, **kwargs):
+        raise NotImplementedError

@@ -4,16 +4,26 @@ NOTE:
 * always run .py files under `autodl` directory in case of relative importing  
 * run `python -B test.py` to test code from modules  
 
-in Base:  (avoid unnecessary modification)  
+in Base:  (general codes relying only official packages. avoid unnecessary modification)  
+model & data related  
 &nbsp;&nbsp;&nbsp;&nbsp;RootLayers --> SubModules  
 &nbsp;&nbsp;&nbsp;&nbsp;MetaFrames  
 
-in Modules:  (module blocks/units for project networks)  
+in Utils:  (general codes relying only official packages. avoid unnecessary modification)  
+logic & utility related  
+
+in Modules:  (customized module blocks/units for project networks)  
 &nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers, SubModules --> Modules  
 
-in proj:  (desigend functions and networks for projects)  
-&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers, SubModules and Modules --> Block  
-&nbsp;&nbsp;&nbsp;&nbsp;invoke frameworks from MetaFrames                         --> Architecture  
+in Loss:  (customized loss functions for project train)  
+
+in Optimizer:  (customized optimizer for project train)  
+
+in Utils:  (general codes relying only official packages. avoid unnecessary modification)  
+
+in proj:  (designed functions and networks for projects)  
+&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers(Base), SubModules(Base) --> Blocks (Modules)  
+&nbsp;&nbsp;&nbsp;&nbsp;invoke frameworks from MetaFrames(Base)                   --> Architecture  
 &nbsp;&nbsp;&nbsp;&nbsp;Block + Architecture = Network  
 
 ---

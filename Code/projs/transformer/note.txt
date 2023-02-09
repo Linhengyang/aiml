@@ -1,0 +1,30 @@
+sequence to sequence 学习，即翻译 translate，是一项生成式的任务，详细地说，它是：在source序列已知的情况下，从<bos>开始，逐个生成target序列
+所以translate learning(seq2seq learning)，在infer时一定是recursive的, 所以训练时必须要auto-regressive. 
+这里要先明确infer的过程: 输入一个token, 其他所需的信息在state中输入, infer过程输出下一位置token. 
+
+encoder-decoder结构的不同: 
+    encoder实质是在做编码、表征工作, 即它将time 1 to T的序列，表征（编码、解析、计算、投射）为下一层 time 1 to T的序列, 类比MLP中的浅层网络, 是在深层次地表示data
+    decoder实质是在做生成、推测工作, 即它将time 0 to T-1的序列, 生成（推测、续写、延续、给出）为下一层 time 1 to T的序列, 类比和MLP中的FC层网络, 是在深层次地推测label
+
+rnn: 
+    train: 
+    单步: 从time 0到i-1生成 time i，具体方法是: MLP(time i-1, state extracted from time 0到i-2)), 伴随生成了 state extracted from time 0到i-1
+    T步(「生成一个length为T的decode过程」): 重复单步T次, i从1到T
+    decode过程中, 存在时间前后依赖关系. 具体是因为前后的MLP之间在传递state, state从前一个MLP出来, 输入后一个MLP
+    state在其中按时间步更新, 必须要做完前一时间步的生成, 才能用它的state去做下一时间步的生成.
+    infer:
+    这个state关于顺序的依赖性, 在infer中也存在
+    单步: 输入当前(指time i-1)token(上一步输出的or初始的), 其他信息(指包含了time 0到i-2的信息的综合state), 输出time i的token
+    T步: 重复单步T次, i从1到T. 和train是一样的
+transformer's self-att层
+    train:
+    单步: 从time 0到i-1生成 time i，具体方法是: self-att(time i-1作为q, time 0到i-1作为k和v).
+    T步(「生成一个length为T的decode过程」): 并行化, 即: time 0 到time T-1 作为 queries, time 0到time T-1作为keys和values, 同时设定valid_lens分别为(1, 2, 3,...,T)
+    valid_lens是可同时作用在qkv上的, 即保证了time i在作为QUERY时, KEYS和VALUES只包含了time 0到i（被valid_lens=i+1限定了）
+    也就是说, 使用masked self-att的decode过程中, 内部不存在时间前后依赖关系, 没有参数在时间步上传递, 一次前向计算, 就得到了hat_sequence
+    infer:
+    但是在infer时, 没办法并行化这个操作
+    单步: 输入当前(指time i-1)token(上一步输出的or初始的), 作为QUERY; 其他信息(指time 0到i-2的所有token, 预测的or初始的), 作为KEYS&VALUES, 输出time i的token
+    T步: 重复单步T次, i从1到T. 和train不一样, train时可以直接输入time 0到t-1的sequence作为X, 而infer时只能输入当前time i-1 token作为X.
+    需要在一个独立的外部变量中, 输入time 0到t-2的token sequence.
+    
