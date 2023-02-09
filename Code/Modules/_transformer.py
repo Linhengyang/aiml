@@ -55,10 +55,8 @@ class TransformerEncoderBlock(nn.Module):
         self.addlnorm2 = AddLNorm(num_hiddens, dropout)
     
     def forward(self, X, valid_lens):
-        self_att_X = self.attention(X, X, X, valid_lens)
-        Y = self.addlnorm1(X, self_att_X)
-        posffn_Y = self.PosFFN(Y)
-        return self.addlnorm2(Y, posffn_Y)
+        Y = self.addlnorm1(X, self.attention(X, X, X, valid_lens))
+        return self.addlnorm2(Y, self.PosFFN(Y))
 
 class TransformerDecoderBlock(nn.Module):
     '''
@@ -115,9 +113,6 @@ class TransformerDecoderBlock(nn.Module):
                 infer_recorder[self.blk_ind] = X
             KVs = infer_recorder[self.blk_ind] # 用所有recorded tokens作自注意力
             mask = None # infer过程中不需要mask
-        X2 = self.attention1(X, KVs, KVs, mask)
-        Y = self.addlnorm1(X, X2)
-        Y2 = self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens)
-        Z = self.addlnorm2(Y, Y2)
-        Z2 = self.PosFFN(Z)
-        return self.addlnorm3(Z, Z2), infer_recorder
+        Y = self.addlnorm1(X, self.attention1(X, KVs, KVs, mask))
+        Z = self.addlnorm2(Y, self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens))
+        return self.addlnorm3(Z, self.PosFFN(Z)), infer_recorder
