@@ -72,7 +72,7 @@ class EncoderDecoder(nn.Module):
 
     explains: be careful to design proper work for infer and train mode.
     """
-    def __init__(self, encoder, decoder):
+    def __init__(self):
         super().__init__()
 
     def forward(self, enc_X, dec_X, *args, **kwargs):
