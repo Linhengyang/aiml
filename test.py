@@ -5,7 +5,7 @@ import torch
 from Config import base_data_dpath, seq2seq_dname, eng2fra_fname
 import Code.projs.transformer.DataLoad_seq2seq as test1
 # import Code.Modules._transformer as test2
-import Code.projs.transformer.network as test3
+import Code.projs.transformer.Network as test3
 
 ## net tester
 # 拿到类定义, 手动net_args定义, 手动input_batch_shape定义
