@@ -57,7 +57,10 @@ in proj:  (designed functions and networks for projects)
     │       │   └── __init__.py
     │       └── transformer
     │           ├── DataLoad_seq2seq.py
-    │           └── network.py
+    │           ├── Network.py
+    │           ├── Pred_seq2seq.py
+    │           ├── Train_seq2seq.py
+    │           └── note.txt
     ├── Config
     │   ├── __init__.py
     │   └── params.py
