@@ -29,7 +29,7 @@ if __name__ == "__main__":
         print(X.dtype, Y.dtype)
         print("**********")
         break
-    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 3, 2, 6, 0.1, False, 8
+    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 2, 6, 0.1, False, 8
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
                  "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     transenc = test3.TransformerEncoder(vocab_size=len(src_vocab), **test_args)
