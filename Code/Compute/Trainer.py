@@ -2,11 +2,16 @@
 class Trainer(object):
     '''
     components: 
-        net, loss, optimizer(None), train_data_iter, valid_data_iter(None), grad_clip_val(None), num_epochs, device(None)
+        net, loss, optimizer(None), train_data_iter, valid_data_iter(None), 
+        grad_clip_val(None), num_epochs, device(None)
     '''
     def __init__(self):
         super().__init__()
     
+    def net_resolver(self):
+        '''用train_data_iter的first batch对net作一次forward计算, 使得所有lazyLayer被确定, 然后再初始化参数'''
+        raise NotImplementedError
+
     def param_initializer(self, *args, **kwargs):
         '''对net的parameters作初始化'''
         raise NotImplementedError
