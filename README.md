@@ -41,12 +41,13 @@ in proj:  (designed functions and networks for projects)
     │   │   └── Tools
     │   │       ├── DataTools.py
     │   │       └── VisualizeTools.py
+    │   ├── Compute
+    │   │   ├── Trainer.py
+    │   │   └── __init__.py
     │   ├── Loss
     │   │   └── __init__.py
     │   ├── Modules
     │   │   └── _transformer.py
-    │   ├── Optimizer
-    │   │   └── __init__.py
     │   ├── Utils
     │   │   ├── Common
     │   │   │   └── SeqOperations.py
@@ -58,13 +59,14 @@ in proj:  (designed functions and networks for projects)
     │       └── transformer
     │           ├── DataLoad_seq2seq.py
     │           ├── Network.py
-    │           ├── Pred_seq2seq.py
-    │           ├── Train_seq2seq.py
+    │           ├── Predictor.py
+    │           ├── Trainer.py
     │           └── note.txt
     ├── Config
     │   ├── __init__.py
     │   └── params.py
     ├── README.md
     ├── main.py
+    ├── nettester.py
     └── test.py
 ---
