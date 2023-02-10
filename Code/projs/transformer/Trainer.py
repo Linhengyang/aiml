@@ -14,6 +14,11 @@ class transformerTrainer(Trainer):
     
     def topo_logger(self, fname, topos_dir='/Users/lhy/studyspace/online/topos'):
         '''log the topology of the network to topos directory'''
-        with open(os.path.join(topos_dir, 'transformer', fname)) as f:
+        with open(os.path.join(topos_dir, 'transformer', fname), 'w') as f:
             print(self.net, file=f)
     
+    def net_resolver(self):
+        self.net.train()
+        for X, X_valid_len, Y, Y_valid_len in self.train_data_iter:
+            break
+        self.net(X, Y, X_valid_len)
