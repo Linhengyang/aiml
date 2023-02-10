@@ -1,5 +1,5 @@
 import os
-from Network import Transformer
+from .Network import Transformer
 from ...Compute import Trainer
 
 class transformerTrainer(Trainer):
@@ -15,6 +15,5 @@ class transformerTrainer(Trainer):
     def topo_logger(self, fname, topos_dir='/Users/lhy/studyspace/online/topos'):
         '''log the topology of the network to topos directory'''
         with open(os.path.join(topos_dir, 'transformer', fname)) as f:
-            print("Filename", fname, file=f)
-    
+            print(self.net, file=f)
     
