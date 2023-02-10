@@ -13,7 +13,7 @@ class TransformerEncoder(Encoder):
         self.blks = nn.Sequential()
         for i in range(num_blk):
             cur_blk = TransformerEncoderBlock(num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
-            self.blks.add_module("block"+str(i), cur_blk)
+            self.blks.add_module("encblock"+str(i), cur_blk)
 
     def forward(self, src_X, valid_lens):
         # src_X shape: (batch_size, num_steps), valid_lens shape: (batch_size,)
@@ -32,7 +32,7 @@ class TransformerDecoder(AttentionDecoder):
         self.blks = nn.Sequential()
         for i in range(num_blk):
             cur_blk = TransformerDecoderBlock(i, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
-            self.blks.add_module("block"+str(i), cur_blk)
+            self.blks.add_module("decblock"+str(i), cur_blk)
         self.dense = nn.Linear(num_hiddens, vocab_size)
 
     def init_state(self, enc_outputs):
@@ -55,7 +55,7 @@ class Transformer(EncoderDecoder):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-
+    
     def forward(self, src_X, tgt_X, src_valid_lens):
         enc_outputs = self.encoder(src_X, src_valid_lens)
         enc_info = self.decoder.init_state(enc_outputs)
