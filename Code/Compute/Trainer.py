@@ -11,11 +11,14 @@ class Trainer(object):
     def topo_logger(self):
         '''log the topology of the network to topos directory'''
         raise NotImplementedError
-
+    
     def net_resolver(self):
-        '''用train_data_iter的first batch对net作一次forward计算, 使得所有lazyLayer被确定, 然后再初始化参数'''
+        '''
+        用train_data_iter的first batch对net作一次forward计算, 使得所有lazyLayer被确定,
+        然后再初始化参数
+        '''
         raise NotImplementedError
-
+    
     def param_initializer(self, *args, **kwargs):
         '''对net的parameters作初始化'''
         raise NotImplementedError
@@ -41,7 +44,9 @@ class Trainer(object):
         raise NotImplementedError
     
     def fit(self, *args, **kwargs):
-        '''run整个train过程'''
+        '''run整个train过程:
+        device, topo_logger, net_resolver, topo_logger, param_initializer, train
+        '''
         raise NotImplementedError
     
     def model_saver(self):
