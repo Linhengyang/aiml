@@ -105,7 +105,7 @@ class TransformerDecoderBlock(nn.Module):
             mask = torch.arange(1, seq_len+1, dtype=torch.int32, device=X.device).repeat(batch_size, 1)
             KVs, infer_recorder = X, None # 自注意力, 用上面的mask实现auto-regressive, train过程中不需要infer_recorder
         else: # infer过程中
-            # infer_recoder是一个list of (1, _, d_dim) tensor
+            # infer_recoder是一个dict of (1, _, d_dim) tensor
             assert type(infer_recorder) == dict, 'in infer mode, a dictionary as infer recorder should be input'
             try: 
                 infer_recorder[self.blk_ind] = torch.cat([infer_recorder[self.blk_ind], X], dim=1)
