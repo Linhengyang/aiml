@@ -50,12 +50,12 @@ class easyTrainer(object):
         '''可视化train过程'''
         raise NotImplementedError
     
+    def save_model(self, *args, **kwargs):
+        '''save the model to model directory'''
+        raise NotImplementedError
+
     def fit(self, *args, **kwargs):
         '''run整个train过程:
         device, topo_logger, net_resolver, topo_logger, param_initializer, train
         '''
-        raise NotImplementedError
-    
-    def save_model(self):
-        '''save the model to model directory'''
         raise NotImplementedError
