@@ -7,8 +7,9 @@ import math
 def masked_softmax(S, valid_lens):
     '''
     inputs: S, valid_lens
-        S: 3-Dtensor, valid_lens: 1-D or 2—D tensor
-        S'shape: (batch_size, n_queries, n_kvpairs); valid_lens'shape: (batch_size,) or (batch_size, n_queries)
+        S: 3-Dtensor, shape: (batch_size, n_queries, n_kvpairs);
+        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_queries)
+        (if len=0 in valid_lens, it means average all Vs in QKV pool)
     
     returns: convex weight tensor with shape (batch_size, n_queries, n_kvpairs), denoted as W
         W[sample_idx][query_idx] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
@@ -28,7 +29,7 @@ def masked_softmax(S, valid_lens):
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
         return nn.functional.softmax(S, dim=-1)
     else:
-        shape = S.shape # 保存X的shape
+        shape = S.shape # 保存S的shape
         if valid_lens.dim() == 1:
             valid_lens = torch.repeat_interleave(valid_lens, shape[1]) # 拉长，返回还是是1-D tensor
         else:
