@@ -24,7 +24,10 @@ class Trainer(object):
         raise NotImplementedError
     
     def device_manager(self, *args, **kwargs):
-        '''对train过程的设备device作管理'''
+        '''对train过程的设备device作管理
+        1. net移动到device上
+        2. train data batch移动到device上
+        '''
         raise NotImplementedError
     
     def param_optimizer(self, *args, **kwargs):
