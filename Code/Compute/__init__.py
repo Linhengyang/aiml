@@ -1,1 +1,1 @@
-from .Trainer import easyTrainer
+from .Trainers import easyTrainer
