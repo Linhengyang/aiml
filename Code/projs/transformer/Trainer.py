@@ -5,16 +5,13 @@ from .Network import Transformer
 from ...Compute import easyTrainer
 
 class transformerTrainer(easyTrainer):
-    def __init__(self, net, loss, train_data_iter, num_epochs, device, 
-                 test_data_iter=None, init_batch=None):
+    def __init__(self, net, loss, num_epochs):
         super().__init__()
         self.net = net
         self.loss = loss
-        self.device = device
         self.num_epochs = num_epochs
-        self.train_data_iter = train_data_iter
-        self.test_data_iter = test_data_iter
-        self.init_batch = init_batch
+        self.net_resolve_data_iter = None
+        self.device = torch.device('cpu')
     
     def log_topology(self, fname, topos_dir='/Users/lhy/studyspace/online/topos'):
         '''log the topology of the network to topos directory
@@ -24,30 +21,43 @@ class transformerTrainer(easyTrainer):
             print(self.net, file=f)
     
     def set_device(self, device=None):
-        if device is not None:
+        if device is not None and torch.cuda.is_available():
             self.device = device
-        else:
-            self.device = torch.device('cpu')
+        self.net.to(self.device)
 
-    def set_data_iter(self, train_data_iter, test_data_iter=None):
-        def inner_iter(data_iter):
+    @staticmethod
+    def _decorate_data_iter(device, data_iter, tgt_vocab):
             if data_iter is None:
                 return None
             for batch in data_iter:
-                # set device
-                yield batch
-        self.train_data_iter = inner_iter(train_data_iter)
-        self.test_data_iter = inner_iter(test_data_iter)
+                X, X_valid_len, Y, Y_valid_len = [t.to(device) for t in batch]
+                bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=device).reshape(-1, 1)
+                dec_X = torch.cat(bos, Y[:, :-1], dim=1)
+                net_inputs_batch = [X, dec_X, X_valid_len]
+                loss_inputs_batch = [Y, Y_valid_len]
+                yield (net_inputs_batch, loss_inputs_batch)
 
-    def resolve_net(self):
-        '''
-        only when init_batch is a train_iter-like data generator, this function can be executed
-        '''
-        assert self.init_batch is not None, "A data iter as init_batch is needed to resolve net's lazy layer"
-        self.net.train()
-        for X, X_valid_len, Y, Y_valid_len in self.init_batch:
-            break
-        self.net(X, Y, X_valid_len)
+    def set_data_iter(self, tgt_vocab, train_data_iter, valid_data_iter, test_data_iter=None):
+        self.train_data_iter = self._decorate_data_iter(self.device, train_data_iter, tgt_vocab)
+        self.valid_data_iter = self._decorate_data_iter(self.device, valid_data_iter, tgt_vocab)
+        self.test_data_iter = self._decorate_data_iter(self.device, test_data_iter, tgt_vocab)
+
+    def resolve_net(self, need_resolve=False):
+        if need_resolve:
+            assert self.test_data_iter is not None, 'Please set the test_data_iter when setting data iters if net resolving and checking wanted'
+            self.net.train()
+            for net_inputs_batch, loss_inputs_batch in self.test_data_iter:
+                break
+            try:
+                Y_hat, _ = self.net(*net_inputs_batch)
+                l = self.loss(Y_hat, *loss_inputs_batch).sum()
+                del Y_hat, l
+                print('Net resolved. Net & Loss checked. Ready to fit')
+                return True
+            except:
+                raise AssertionError('Net or Loss has problems. Please check code before fit')
+        print('Net unresolved. Net & Loss unchecked. Ready to skip param init and fit')
+        return False
     
     def init_params(self):
         '''
@@ -76,19 +86,20 @@ class transformerTrainer(easyTrainer):
         assert self.optimizer is not None, 'No optimizer detected in trainer'
         self.net.train()
         for epoch in range(self.num_epochs):
-            for batch in self.train_data_iter:
+            for batches in self.train_data_iter:
                 self.optimizer.zero_grad()
-                ## get data and compute loss
-                X, X_valid_len, Y, Y_valid_len = batch
-                Y_hat, _ = self.net(X, Y, X_valid_len)
-                l = self.loss(Y_hat, Y, Y_valid_len)
-                ## bp/update params/evaluate model
+                net_inputs_batch, loss_inputs_batch = batches
+                Y_hat, _ = self.net(*net_inputs_batch)
+                l = self.loss(Y_hat, *loss_inputs_batch)
                 l.sum().backward()
                 if self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
                 self.optimizer.step()
                 with torch.no_grad():
-                    self.evaluator()
+                    pass
+                    # self.evaluator()
+                del net_inputs_batch, loss_inputs_batch, Y_hat, l
             if (epoch + 1) % 100 == 0:
-                self.visualizer()
+                # self.visualizer()
+                # self.save_model()
     
