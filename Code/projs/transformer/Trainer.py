@@ -10,8 +10,8 @@ class transformerTrainer(easyTrainer):
         self.net = net
         self.loss = loss
         self.num_epochs = num_epochs
-        self.net_resolve_data_iter = None
-        self.device = torch.device('cpu')
+        self.device = None
+        self.grad_clip_val = None
     
     def log_topology(self, fname, topos_dir='/Users/lhy/studyspace/online/topos'):
         '''log the topology of the network to topos directory
@@ -23,6 +23,9 @@ class transformerTrainer(easyTrainer):
     def set_device(self, device=None):
         if device is not None and torch.cuda.is_available():
             self.device = device
+        else:
+            print('Using cpu as device')
+            self.device = torch.device('cpu')
         self.net.to(self.device)
 
     @staticmethod
@@ -32,12 +35,13 @@ class transformerTrainer(easyTrainer):
             for batch in data_iter:
                 X, X_valid_len, Y, Y_valid_len = [t.to(device) for t in batch]
                 bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=device).reshape(-1, 1)
-                dec_X = torch.cat(bos, Y[:, :-1], dim=1)
+                dec_X = torch.cat([bos, Y[:, :-1]], dim=1)
                 net_inputs_batch = [X, dec_X, X_valid_len]
                 loss_inputs_batch = [Y, Y_valid_len]
                 yield (net_inputs_batch, loss_inputs_batch)
 
     def set_data_iter(self, tgt_vocab, train_data_iter, valid_data_iter, test_data_iter=None):
+        assert self.device is not None, "Device not set. Please set trainer's device before setting data_iters"
         self.train_data_iter = self._decorate_data_iter(self.device, train_data_iter, tgt_vocab)
         self.valid_data_iter = self._decorate_data_iter(self.device, valid_data_iter, tgt_vocab)
         self.test_data_iter = self._decorate_data_iter(self.device, test_data_iter, tgt_vocab)
@@ -99,7 +103,7 @@ class transformerTrainer(easyTrainer):
                     pass
                     # self.evaluator()
                 del net_inputs_batch, loss_inputs_batch, Y_hat, l
-            if (epoch + 1) % 100 == 0:
+            # if (epoch + 1) % 100 == 0:
                 # self.visualizer()
                 # self.save_model()
     
