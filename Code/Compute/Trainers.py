@@ -17,14 +17,6 @@ class easyTrainer(object):
         '''指定trainer的设备'''
         raise NotImplementedError
 
-    @staticmethod
-    def _decorate_data_iter(*args, **kwargs):
-        '''
-        输入dataloader生产的data_iter生成器, yield出train和loss接受的input batch
-        yield (net_inputs_batch, loss_inputs_batch)
-        '''
-        raise NotImplementedError
-
     def set_data_iter(self, *args, **kwargs):
         '''
         设定trainer的data_iters, 包括:
