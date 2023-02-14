@@ -2,8 +2,8 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
-from Config import base_data_dpath, seq2seq_dname, eng2fra_fname
-import Code.projs.transformer.DataLoad_seq2seq as test1
+from Config import base_data_dpath, seq2seq_dname, eng2fra_train_fname
+import Code.projs.transformer.Dataset as test1
 # import Code.Modules._transformer as test2
 import Code.projs.transformer.Network as test3
 from Code.Loss.MaskedCELoss import MaskedSoftmaxCELoss
@@ -18,39 +18,30 @@ from Code.Loss.MaskedCELoss import MaskedSoftmaxCELoss
 # 检测batch是否满足条件
 
 if __name__ == "__main__":
-    eng2fra = os.path.join(base_data_dpath, seq2seq_dname, eng2fra_fname)
-    train_iter, src_vocab, tgt_vocab = test1.data_loader_seq2seq(path=eng2fra, batch_size=2, num_steps=8, num_examples=600)
-    for X, X_valid_len, Y, Y_valid_len in train_iter:
-        print('X:', X)
-        print('valid lengths for X:', X_valid_len)
-        print('Y:', Y)
-        print('valid lengths for Y:', Y_valid_len)
-        print(X.dtype, Y.dtype)
-        print("**********")
-        break
-    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 2, 6, 0.1, False, 8
-    test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
-    transenc = test3.TransformerEncoder(vocab_size=len(src_vocab), **test_args)
-    transdec = test3.TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
-    net = test3.Transformer(transenc, transdec)
-    print("********** net before first batch **********")
-    # print(net)
-    print('********* test train transformer **********')
-    net.train()
-    dec_outputs = net(X, Y, X_valid_len)
-    print(dec_outputs[0].shape == torch.Size([2, 8, len(tgt_vocab)]))
-    print(dec_outputs[1] is None)
-    print("********** net after first batch **********")
-    # print(net)
-    print("********** test loss **********")
-    loss = MaskedSoftmaxCELoss()
-    l = loss(dec_outputs[0], Y, Y_valid_len)
-    print(' loss is ', l)
-    print('Y shape: ', Y.shape)
-    print('Y_valid_lens shape: ', Y_valid_len.shape)
-    print("********** test BP **********")
-    l.sum().backward()
+    pass
+    # num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 2, 6, 0.1, False, 8
+    # test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
+    #              "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
+    # transenc = test3.TransformerEncoder(vocab_size=len(src_vocab), **test_args)
+    # transdec = test3.TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
+    # net = test3.Transformer(transenc, transdec)
+    # print("********** net before first batch **********")
+    # # print(net)
+    # print('********* test train transformer **********')
+    # net.train()
+    # dec_outputs = net(X, Y, X_valid_len)
+    # print(dec_outputs[0].shape == torch.Size([2, 8, len(tgt_vocab)]))
+    # print(dec_outputs[1] is None)
+    # print("********** net after first batch **********")
+    # # print(net)
+    # print("********** test loss **********")
+    # loss = MaskedSoftmaxCELoss()
+    # l = loss(dec_outputs[0], Y, Y_valid_len)
+    # print(' loss is ', l)
+    # print('Y shape: ', Y.shape)
+    # print('Y_valid_lens shape: ', Y_valid_len.shape)
+    # print("********** test BP **********")
+    # l.sum().backward()
     # print('********* test infer transformer **********')
     # net.eval()
     # eng = "i lost ."
