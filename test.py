@@ -12,7 +12,7 @@ if __name__ == "__main__":
     eng2fra_train = os.path.join(base_data_dpath, seq2seq_dname, eng2fra_train_fname)
     eng2fra_valid = os.path.join(base_data_dpath, seq2seq_dname, eng2fra_valid_fname)
     eng2fra_test = os.path.join(base_data_dpath, seq2seq_dname, eng2fra_test_fname)
-    train_iter, src_vocab, tgt_vocab = data_loader_seq2seq(path=eng2fra_train, batch_size=2, num_steps=8)
+    train_iter, src_vocab, tgt_vocab = data_loader_seq2seq(path=eng2fra_train, batch_size=2, num_steps=8, num_examples=600)
     valid_iter, _, _ = data_loader_seq2seq(path=eng2fra_valid, batch_size=2, num_steps=8)
     test_iter, _, _ = data_loader_seq2seq(path=eng2fra_test, batch_size=2, num_steps=8, num_examples=3)
     # design net & loss
@@ -25,20 +25,20 @@ if __name__ == "__main__":
     loss = MaskedSoftmaxCELoss()
     # init trainer
     trainer = transformerTrainer(net=net, loss=loss, num_epochs=3)
-    ## set the data iters
-    trainer.set_data_iter(tgt_vocab, train_iter, valid_iter, test_iter)
     ## set the device
     trainer.set_device(torch.device('cuda'))
+    ## set the data iters
+    trainer.set_data_iter(tgt_vocab, train_iter, valid_iter, test_iter)
     ## set the optimizer
     trainer.set_optimizer(lr=0.005)
     ## set the grad clipper
-    trainer.set_grad_clipping(grad_clip_val=1.0)
+    trainer.set_grad_clipping(grad_clip_val=None)
     ## print the lazy topology
     trainer.log_topology('lazy_topo.txt')
     ## check the net & loss
     check_flag = trainer.resolve_net(need_resolve=True)
     if check_flag:
         ## print the defined topology
-        trainer.log_topology('defined_topo.txt')
+        trainer.log_topology('def_topo.txt')
         trainer.init_params()
-    trainer.fit()
+    # trainer.fit()
