@@ -40,13 +40,15 @@ in proj:  (designed functions and networks for projects)
     │   │   │   └── AddLNorm.py
     │   │   └── Tools
     │   │       ├── DataTools.py
+    │   │       ├── EvaluateTools.py
     │   │       └── VisualizeTools.py
-    │   ├── Loss
+    │   ├── Compute
+    │   │   ├── Trainers.py
     │   │   └── __init__.py
+    │   ├── Loss
+    │   │   └── MaskedCELoss.py
     │   ├── Modules
     │   │   └── _transformer.py
-    │   ├── Optimizer
-    │   │   └── __init__.py
     │   ├── Utils
     │   │   ├── Common
     │   │   │   └── SeqOperations.py
@@ -56,15 +58,16 @@ in proj:  (designed functions and networks for projects)
     │       ├── bert
     │       │   └── __init__.py
     │       └── transformer
-    │           ├── DataLoad_seq2seq.py
+    │           ├── Dataset.py
     │           ├── Network.py
-    │           ├── Pred_seq2seq.py
-    │           ├── Train_seq2seq.py
+    │           ├── Predictor.py
+    │           ├── Trainer.py
     │           └── note.txt
     ├── Config
     │   ├── __init__.py
     │   └── params.py
     ├── README.md
     ├── main.py
+    ├── nettester.py
     └── test.py
 ---

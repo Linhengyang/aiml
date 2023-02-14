@@ -1,7 +1,6 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.TextPreprocess import Vocab
 from ...Utils.Common.SeqOperations import truncate_pad
-from ...Base.Tools.DataTools import batch_iter_tor
 import torch
 
 def read_text2str(path):
@@ -34,7 +33,7 @@ def tokenize_seq2seq(text, num_examples=None):
     """
     source, target = [], []
     for i, line in enumerate(text.split('\n')): # 大文本按行分隔
-        if num_examples and i > num_examples: # 当有最大样本数限制, 且循环已经收集足够样本时, 跳出循环
+        if num_examples and i >= num_examples: # 当有最大样本数限制, 且循环已经收集足够样本时, 跳出循环
             break
         parts = line.split('\t') # 每一行按制表符分开
         if len(parts) == 2:
@@ -42,7 +41,7 @@ def tokenize_seq2seq(text, num_examples=None):
             target.append(parts[1].split(' ')) # target列表添加法文序列token list
     return source, target
 
-def build_array(lines, vocab, num_steps):
+def build_tensorDataset(lines, vocab, num_steps):
     """
     inputs: lines, vocab, num_steps
         lines: 2D list of token(word, char) sequences
@@ -63,34 +62,58 @@ def build_array(lines, vocab, num_steps):
     valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数
     return array, valid_len
 
-def data_loader_seq2seq(path, batch_size, num_steps, num_examples=None, is_train=True):
+def build_dataset_vocab(path, num_steps, num_examples=None):
     """
-    inputs: path, batch_size, num_steps, num_examples(optional), is_train(optional)
+    inputs: path, num_steps, num_examples(optional), is_train(optional)
         path: seq2seq text file path
-        batch_size: batch size for minibatch
         num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
         num_examples: total sample size if given. None to read all
-        is_train: tag to see if shuffle data when iterator
 
-    returns: denoted as data_iter, src_vocab, tgt_vocab
-        data_iter: data iterator of minibatch of
-            1. source seq batch, with shape (batch_size, num_steps)
-            2. source seq valid(not-pad) lens, with shape (batch_size, )
-            3. target seq batch, with shape (batch_size, num_steps)
-            4. target seq valid(not-pad) lens, with shape (batch_size, )
+    returns: denoted as tuple of tensors(tensor dataset), tuple of vocabs
+        tensor dataset:
+            1. source seqs, shape (num_examples, num_steps)
+            2. source seqs valid(not-pad) lens, shape (num_examples, )
+            3. target seqs, with shape (num_examples, num_steps)
+            4. target seqs valid(not-pad) lens, with shape (num_examples, )
         src_vocab: vocab of source language corpus
-        tgt_vocabL vocab of target language corpus
+        tgt_vocab: vocab of target language corpus
     
     explains:
-        return data iterator and vocabs
-        返回 seq2seq的data iter(4个成份), 以及源语料和目标语料的vocabs
+        返回seq2seq翻译数据集, 其中tensors是(src数据集, src有效长度集, tgt数据集, tgt有效长度集)
+        返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
     """
     raw_text = read_text2str(path) # read text
     text = preprocess_space(raw_text) # preprocess
     source, target = tokenize_seq2seq(text, num_examples) # 词元化, 得到source语料序列和target语料序列
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作词表
     tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'])
-    src_array, src_valid_len = build_array(source, src_vocab, num_steps) # 全部data
-    tgt_array, tgt_valid_len = build_array(target, tgt_vocab, num_steps)
-    data_iter = batch_iter_tor((src_array, src_valid_len, tgt_array, tgt_valid_len), batch_size, is_train) # batch iterator
-    return data_iter, src_vocab, tgt_vocab
+    src_array, src_valid_len = build_tensorDataset(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
+    tgt_array, tgt_valid_len = build_tensorDataset(target, tgt_vocab, num_steps)# all tgt data, shapes (num_examples, num_stpes), (num_examples,)
+    return (src_array, src_valid_len, tgt_array, tgt_valid_len), (src_vocab, tgt_vocab)
+
+class seq2seqDataset(torch.utils.data.Dataset):
+    def __init__(self, path, num_steps, num_examples=None):
+        super().__init__()
+        (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples)
+        bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
+        dec_X = torch.cat([bos, Y[:, :-1]], dim=1)
+        self._net_inputs = (X, dec_X, X_valid_lens)
+        self._loss_inputs = (Y, Y_valid_lens)
+        self._src_vocab = src_vocab
+        self._tgt_vocab = tgt_vocab
+    
+    def __getitem__(self, index):
+        return (tuple(tensor[index] for tensor in self._net_inputs),
+                tuple(tensor[index] for tensor in self._loss_inputs))
+    
+    def __len__(self):
+        return len(self._net_inputs[0])
+
+    @property
+    def src_vocab(self):
+        return self._src_vocab
+    
+    @property
+    def tgt_vocab(self):
+        return self._tgt_vocab
+
