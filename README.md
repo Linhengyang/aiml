@@ -40,12 +40,13 @@ in proj:  (designed functions and networks for projects)
     │   │   │   └── AddLNorm.py
     │   │   └── Tools
     │   │       ├── DataTools.py
+    │   │       ├── EvaluateTools.py
     │   │       └── VisualizeTools.py
     │   ├── Compute
-    │   │   ├── Trainer.py
+    │   │   ├── Trainers.py
     │   │   └── __init__.py
     │   ├── Loss
-    │   │   └── __init__.py
+    │   │   └── MaskedCELoss.py
     │   ├── Modules
     │   │   └── _transformer.py
     │   ├── Utils
@@ -57,7 +58,7 @@ in proj:  (designed functions and networks for projects)
     │       ├── bert
     │       │   └── __init__.py
     │       └── transformer
-    │           ├── DataLoad_seq2seq.py
+    │           ├── Dataset.py
     │           ├── Network.py
     │           ├── Predictor.py
     │           ├── Trainer.py
