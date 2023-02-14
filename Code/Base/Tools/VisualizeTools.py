@@ -2,39 +2,6 @@ import numpy as np
 from matplotlib_inline import backend_inline
 from matplotlib import pyplot as plt
 from IPython import display
-import collections
-import re
-import random
-import time
-import math
-
-class Timer:  #@save
-    """Record multiple running times."""
-    def __init__(self):
-        self.times = []
-        self.start()
-
-    def start(self):
-        """Start the timer."""
-        self.tik = time.time()
-
-    def stop(self):
-        """Stop the timer and record the time in a list."""
-        self.times.append(time.time() - self.tik)
-        return self.times[-1]
-
-    def avg(self):
-        """Return the average time."""
-        return sum(self.times) / len(self.times)
-
-    def sum(self):
-        """Return the sum of time."""
-        return sum(self.times)
-
-    def cumsum(self):
-        """Return the accumulated time."""
-        return np.array(self.times).cumsum().tolist()
-
 
 def use_svg_display():  #@save
     """使用svg格式在Jupyter中显示绘图"""
@@ -92,21 +59,6 @@ def plot(X, Y=None, xlabel=None, ylabel=None, legend=None, xlim=None,
         else:
             axes.plot(y, fmt)
     set_axes(axes, xlabel, ylabel, xlim, ylim, xscale, yscale, legend)
-
-    
-class Accumulator:  #@save
-    """在n个变量上累加"""
-    def __init__(self, n):
-        self.data = [0.0] * n
-
-    def add(self, *args):
-        self.data = [a + float(b) for a, b in zip(self.data, args)]
-
-    def reset(self):
-        self.data = [0.0] * len(self.data)
-
-    def __getitem__(self, idx):
-        return self.data[idx]
     
 class Animator:  #@save
     """在动画中绘制数据"""
