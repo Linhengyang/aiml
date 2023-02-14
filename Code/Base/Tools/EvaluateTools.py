@@ -1,4 +1,5 @@
 import time
+import numpy as np
 
 class Timer:  #@save
     """Record multiple running times."""
