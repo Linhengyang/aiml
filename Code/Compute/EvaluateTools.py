@@ -52,4 +52,7 @@ class epochEvaluator(object):
 
     def cast(self, *args, **kwargs):
         raise NotImplementedError
-    
+
+class trainEvaluator(object):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
