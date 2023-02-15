@@ -2,7 +2,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
-from Config import base_data_dpath, seq2seq_dname, eng2fra_train_fname, eng2fra_valid_fname, eng2fra_test_fname
+from Config import base_data_dir, seq2seq_dir, eng2fra_train_fname, eng2fra_valid_fname, eng2fra_test_fname
 from Code.projs.transformer.Trainer import transformerTrainer
 from Code.projs.transformer.Evaluator import transformerEpochEvaluator
 from Code.projs.transformer.Network import TransformerEncoder, TransformerDecoder, Transformer
@@ -11,9 +11,9 @@ from Code.projs.transformer.Dataset import seq2seqDataset
 
 if __name__ == "__main__":
     # build datasets
-    trainset = seq2seqDataset(path=os.path.join(base_data_dpath, seq2seq_dname, eng2fra_train_fname), num_steps=10)
-    validset = seq2seqDataset(path=os.path.join(base_data_dpath, seq2seq_dname, eng2fra_valid_fname), num_steps=10)
-    testset = seq2seqDataset(path=os.path.join(base_data_dpath, seq2seq_dname, eng2fra_test_fname), num_steps=10)
+    trainset = seq2seqDataset(path=os.path.join(base_data_dir, seq2seq_dir, eng2fra_train_fname), num_steps=10)
+    validset = seq2seqDataset(path=os.path.join(base_data_dir, seq2seq_dir, eng2fra_valid_fname), num_steps=10)
+    testset = seq2seqDataset(path=os.path.join(base_data_dir, seq2seq_dir, eng2fra_test_fname), num_steps=10)
     # design net & loss
     num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.2, False, 64
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
