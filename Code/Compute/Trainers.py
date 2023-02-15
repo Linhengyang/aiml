@@ -2,9 +2,8 @@
 class easyTrainer(object):
     '''
     components: 
-        net, loss, optimizer(None), train_data_iter, valid_data_iter(None), 
-        grad_clip_val(None), num_epochs, device(None)
-    单机单卡
+        net, loss, num_epochs, batch_size
+    单机单卡训练任务的trainer接口
     '''
     def __init__(self):
         super().__init__()
