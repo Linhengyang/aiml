@@ -8,6 +8,10 @@ class easyTrainer(object):
     def __init__(self):
         super().__init__()
     
+    def set_log_file(self, *args, **kwargs):
+        '''set the path of log txt file'''
+        raise NotImplementedError
+
     def log_topology(self, *args, **kwargs):
         '''log the topology of the network to topos directory'''
         raise NotImplementedError
@@ -45,12 +49,8 @@ class easyTrainer(object):
         '''train过程的参数裁剪'''
         raise NotImplementedError
     
-    def evaluator(self, *args, **kwargs):
+    def set_epoch_eval(self, *args, **kwargs):
         '''train过程中的评价器'''
-        raise NotImplementedError
-    
-    def visualizer(self, *args, **kwargs):
-        '''可视化train过程'''
         raise NotImplementedError
     
     def save_model(self, *args, **kwargs):
