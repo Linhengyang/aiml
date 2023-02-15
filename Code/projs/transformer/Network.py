@@ -45,6 +45,8 @@ class TransformerDecoder(AttentionDecoder):
         X = self.pos_encoding(emb_X * math.sqrt(self.num_hiddens))
         for i, blk in enumerate(self.blks):
             X, infer_recorder = blk(X, enc_info, infer_recorder)
+        #train: output[0] shape: (batch_size, num_steps, vocab_size), output[2]: None
+        #infer: output[0] shape: (1, 1, vocab_size), output[2]: dict of (1, cur_infer_step, d_dim) tensor
         return self.dense(X), infer_recorder
 
 class Transformer(EncoderDecoder):
