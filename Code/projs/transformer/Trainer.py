@@ -2,8 +2,8 @@ import os
 import torch
 from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
-from ...Compute import easyTrainer
-from ...Base.Tools.EvaluateTools import Timer, Accumulator
+from ...Compute.Trainers import easyTrainer
+from ....Config import online_log_dir, online_model_save_dir
 
 class transformerTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
@@ -12,11 +12,15 @@ class transformerTrainer(easyTrainer):
         self.loss = loss
         self.num_epochs = num_epochs
         self.batch_size = batch_size
-        self.eval_cnts = 10
     
-    def log_topology(self, fname, topos_dir='/Users/lhy/studyspace/online/topos'):
-        '''file path: /Users/lhy/studyspace/online/topos/transformer/XXXXX.txt'''
-        with open(os.path.join(topos_dir, 'transformer', fname), 'w') as f:
+    def set_log_file(self, fname, logs_dir=online_log_dir):
+        self.log_file_path = os.path.join(logs_dir, 'transformer', fname)
+        with open(self.log_file_path, 'w') as f:
+            print('train begin', file=f)
+
+    def log_topology(self, fname, logs_dir=online_log_dir):
+        '''file path: online_log_dir/transformer/XXX_topo.txt'''
+        with open(os.path.join(logs_dir, 'transformer', fname), 'w') as f:
             print(self.net, file=f)
     
     def set_device(self, device=None):
@@ -83,36 +87,22 @@ class transformerTrainer(easyTrainer):
         '''set the grad_clip_val at attribute grad_clip_val if input a float'''
         self.grad_clip_val = grad_clip_val
 
-    def evaluator(self, l, net_inputs_batch):
-        '''
-        train过程中的评价器, 记录每一个epoch的:
-            1. train loss(sum of loss among train batch/valid hat nums among train batch) 
-            2. train accuracy(sum of correct preds among train batch/nums among train batch)
-            3. valid loss(sum of loss among valid batch/valid hat nums among valid batch)(可选)
-            4. valid accuracy(sum of correct preds among valid batch/nums among valid batch)
-        其中前两个train的指标, 在batch内部记录得到; 后两个valid的指标, 在当前epoch对valid_data作用net得到
-        '''
-        raise NotImplementedError
+    def set_epoch_eval(self, epoch_evaluator):
+        '''set the epochEvaluator to evaluate epochs during train'''
+        self.epoch_evaluator = epoch_evaluator
 
-    def visualizer(self, *args, **kwargs):
-        '''可视化train过程'''
-        raise NotImplementedError
-    
-    def save_model(self, fname, models_dir='/Users/lhy/studyspace/model'):
-        '''save the model to model directory'''
+    def save_model(self, fname, models_dir=online_model_save_dir):
+        '''save the model to online model directory'''
         save_path = os.path.join(models_dir, 'transformer', fname)
         torch.save(self.net.state_dict(), save_path)
 
     def fit(self):
         assert hasattr(self, 'optimizer'), 'Optimizer is not defined'
         assert hasattr(self, 'train_iter'), 'Data_iter is not defined'
+        assert os.path.exists(self.log_file_path), 'log file is not existed'
         self.net.train()
         for epoch in range(self.num_epochs):
-            record_flag = (epoch + 1) % (self.num_epochs // self.eval_cnts) == 0
-            if record_flag:
-                timer = Timer()
-                metric = Accumulator(2)
-            
+            self.epoch_evaluator.epoch_judge(epoch, self.num_epochs)
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
                 self.optimizer.zero_grad()
                 Y_hat, _ = self.net(*net_inputs_batch)
@@ -121,15 +111,8 @@ class transformerTrainer(easyTrainer):
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
                 self.optimizer.step()
-
                 with torch.no_grad():
-                    if record_flag:
-                        # batch loss(sum of loss of sample), batch num_tokens(sum of Y_valid_lens pf sample)
-                        metric.add( l.sum(), loss_inputs_batch[1].sum() )
-
+                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, Y_hat, l)
                 del net_inputs_batch, loss_inputs_batch, Y_hat, l
-            
-            if record_flag:
-                cur_epoch_time = timer.stop()
-                print(f'train epoch {epoch+1}: loss {metric[0] / metric[1]:.3f}, speed {metric[1] / cur_epoch_time:.1f} tokens/sec on {str(self.device)}')
+            self.epoch_evaluator.epoch_metric_cast(self.log_file_path, verbose=True)
         print('Fitting finished successfully')

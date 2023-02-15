@@ -1,32 +1,33 @@
 # repo skeleton  
-NOTE:  
+## Execute Note:  
 * a `__init__.py` file shows that the package imports all from underlying modules.  
-* always run .py files under `autodl` directory in case of relative importing  
-* run `python -B test.py` to test code from modules  
+* always run `python -B xxx.py` file under `autodl` directory in case of relative importing  
 
-in Base:  (general codes relying only official packages. avoid unnecessary modification)  
-model & data related  
-&nbsp;&nbsp;&nbsp;&nbsp;RootLayers --> SubModules  
-&nbsp;&nbsp;&nbsp;&nbsp;MetaFrames  
+## Code Note:
+* Base:  
+&nbsp;&nbsp;&nbsp;&nbsp;model & tool  
+* Compute:  
+&nbsp;&nbsp;&nbsp;&nbsp;performance & hardware-sensitive  
+* Utils:  
+&nbsp;&nbsp;&nbsp;&nbsp;data & algo  
+* Modules:  
+&nbsp;&nbsp;&nbsp;&nbsp;customized module blocks/bulks for project network  
+* Loss:  
+&nbsp;&nbsp;&nbsp;&nbsp;customized loss functions for project loss  
+* proj:  
+&nbsp;&nbsp;&nbsp;&nbsp;designed networks/datasets/trainers for projects  
 
-in Utils:  (general codes relying only official packages. avoid unnecessary modification)  
-logic & utility related  
+## Work Note:
 
-in Modules:  (customized module blocks/units for project networks)  
-&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers, SubModules --> Modules  
-
-in Loss:  (customized loss functions for project train)  
-
-in Optimizer:  (customized optimizer for project train)  
-
-in Utils:  (general codes relying only official packages. avoid unnecessary modification)  
-
-in proj:  (designed functions and networks for projects)  
-&nbsp;&nbsp;&nbsp;&nbsp;invoke components from RootLayers(Base), SubModules(Base) --> Blocks (Modules)  
-&nbsp;&nbsp;&nbsp;&nbsp;invoke frameworks from MetaFrames(Base)                   --> Architecture  
-&nbsp;&nbsp;&nbsp;&nbsp;Block + Architecture = Network  
-
+the online working space must contain following directories:  
+* model: consisting directory named by the proj_name which will save trained params of the proj
+* logs: consisting directory named by the proj_name which will save logs of the proj
+* autodl: git clone https://github.com/Linhengyang/autodl.git
 ---
+    model
+    ├── transformer
+    logs
+    ├── transformer
     autodl
     ├── Code
     │   ├── Base
@@ -43,8 +44,7 @@ in proj:  (designed functions and networks for projects)
     │   │       ├── EvaluateTools.py
     │   │       └── VisualizeTools.py
     │   ├── Compute
-    │   │   ├── Trainers.py
-    │   │   └── __init__.py
+    │   │   └── Trainers.py
     │   ├── Loss
     │   │   └── MaskedCELoss.py
     │   ├── Modules
@@ -55,8 +55,7 @@ in proj:  (designed functions and networks for projects)
     │   │   └── Text
     │   │       └── TextPreprocess.py
     │   └── projs
-    │       ├── bert
-    │       │   └── __init__.py
+    │       ├── mlp
     │       └── transformer
     │           ├── Dataset.py
     │           ├── Network.py
