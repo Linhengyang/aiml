@@ -3,7 +3,7 @@ import torch
 from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.Trainers import easyTrainer
-from ...Base.Tools.EvaluateTools import Timer, Accumulator
+from ...Compute.EvaluateTools import Timer, Accumulator
 
 class transformerTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
