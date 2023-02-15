@@ -98,7 +98,7 @@ class transformerTrainer(easyTrainer):
         '''可视化train过程'''
         raise NotImplementedError
     
-    def save_model(self, fname, models_dir='/Users/lhy/studyspace/model'):
+    def save_model(self, fname, models_dir='/Users/lhy/studyspace/online/model'):
         '''save the model to model directory'''
         save_path = os.path.join(models_dir, 'transformer', fname)
         torch.save(self.net.state_dict(), save_path)
