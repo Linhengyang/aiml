@@ -133,5 +133,5 @@ class transformerTrainer(easyTrainer):
                 cur_epoch_time = timer.stop()
                 print(f' train epoch {epoch+1}: loss {metric[0] / metric[1]:.3f}'
                       f' speed {metric[1] / cur_epoch_time:.1f} tokens/sec on {str(self.device)}'
-                      f' expected remaining time {cur_epoch_time * (self.num_epochs-epoch-1) / 60:.1f} min')
+                      f' expected remaining time {cur_epoch_time * (self.num_epochs-epoch-1) / 60:.1f} mins')
         print('Fitting finished successfully')
