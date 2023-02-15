@@ -27,12 +27,12 @@ class transformerEpochEvaluator(epochEvaluator):
             self.metric.add(l.sum(), loss_inputs_batch[1].sum())
     
     def epoch_metric_cast(self, fpath, verbose=False):
-        '''file path: /Users/lhy/studyspace/online/logs/transformer/.txt'''
+        '''file path: trainer.log_file_path'''
         if self.reveal_flag:
             time_cost, loss_avg, speed = self.timer.stop(), round(self.metric[0]/self.metric[1],3), round(self.metric[1]/time_cost)
             log = ",".join(['epoch: '+str(self.epoch+1), 'loss(loss/validtoken): '+str(loss_avg), 'speed(tokens/sec): '+str(speed),
                             'remain_time(min): '+str(round(time_cost*(self.num_epochs-self.epoch-1)/60))])
             with open(fpath, 'a+') as f:
-                f.write(log)
+                f.write(log+'\n')
             if verbose:
                 print(log)
