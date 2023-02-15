@@ -2,7 +2,7 @@ import os
 import torch
 from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
-from ...Compute import easyTrainer
+from ...Compute.Trainers import easyTrainer
 from ...Base.Tools.EvaluateTools import Timer, Accumulator
 
 class transformerTrainer(easyTrainer):
@@ -14,9 +14,9 @@ class transformerTrainer(easyTrainer):
         self.batch_size = batch_size
         self.eval_cnts = 10
     
-    def log_topology(self, fname, topos_dir='/Users/lhy/studyspace/online/topos'):
-        '''file path: /Users/lhy/studyspace/online/topos/transformer/XXXXX.txt'''
-        with open(os.path.join(topos_dir, 'transformer', fname), 'w') as f:
+    def log_topology(self, fname, logs_dir='/Users/lhy/studyspace/online/logs'):
+        '''file path: /Users/lhy/studyspace/online/logs/transformer/XXXXX.txt'''
+        with open(os.path.join(logs_dir, 'transformer', fname), 'w') as f:
             print(self.net, file=f)
     
     def set_device(self, device=None):
