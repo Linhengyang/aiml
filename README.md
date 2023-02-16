@@ -33,7 +33,6 @@ the online working space must contain following directories:
     ├── transformer
     logs
     ├── transformer
-    autodl
     ├── Code
     │   ├── Base
     │   │   ├── MetaFrames
@@ -45,7 +44,10 @@ the online working space must contain following directories:
     │   │   └── SubModules
     │   │       └── AddLNorm.py
     │   ├── Compute
-    │   │   └── Trainers.py
+    │   │   ├── EvaluateTools.py
+    │   │   ├── PredictTools.py
+    │   │   ├── Trainers.py
+    │   │   └── VisualizeTools.py
     │   ├── Loss
     │   │   └── MaskedCELoss.py
     │   ├── Modules
@@ -60,17 +62,16 @@ the online working space must contain following directories:
     │       ├── mlp
     │       └── transformer
     │           ├── Dataset.py
+    │           ├── Evaluator.py
     │           ├── Network.py
     │           ├── Predictor.py
     │           ├── Trainer.py
-    │           ├── Evaluator.py
-    │           ├── settings.py
-    │           └── note.txt
+    │           ├── note.txt
+    │           └── settings.py
     ├── Config
     │   ├── __init__.py
     │   └── params.py
     ├── README.md
     ├── main.py
-    ├── nettester.py
     └── test.py
 ---
