@@ -5,24 +5,29 @@
 
 ## Code Note:
 * Base:  
-&nbsp;&nbsp;&nbsp;&nbsp;model & tool  
+&nbsp;&nbsp;&nbsp;&nbsp;model & layer & frames
 * Compute:  
-&nbsp;&nbsp;&nbsp;&nbsp;performance & hardware-sensitive  
+&nbsp;&nbsp;&nbsp;&nbsp;performance & tools & hardware-sensitive  
 * Utils:  
-&nbsp;&nbsp;&nbsp;&nbsp;data & algo  
+&nbsp;&nbsp;&nbsp;&nbsp;data & algo & preprocess  
 * Modules:  
-&nbsp;&nbsp;&nbsp;&nbsp;customized module blocks/bulks for project network  
+&nbsp;&nbsp;&nbsp;&nbsp;customized module blocks/bulks for projs
 * Loss:  
-&nbsp;&nbsp;&nbsp;&nbsp;customized loss functions for project loss  
-* proj:  
-&nbsp;&nbsp;&nbsp;&nbsp;designed networks/datasets/trainers for projects  
+&nbsp;&nbsp;&nbsp;&nbsp;customized loss functions for projs
+* projs:  
+&nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:
+    * Dataset
+    * Network
+    * Trainer
+    * Evaluator
+    * Predictor
 
 ## Work Note:
 
 the online working space must contain following directories:  
-* model: consisting directory named by the proj_name which will save trained params of the proj
-* logs: consisting directory named by the proj_name which will save logs of the proj
-* autodl: git clone https://github.com/Linhengyang/autodl.git
+* `model`: consisting directory named by the `proj_name` -- save trained params
+* `logs`: consisting directory named by the `proj_name`  -- save logs
+* `autodl`: `git clone https://github.com/Linhengyang/autodl.git`
 ---
     model
     ├── transformer
@@ -37,12 +42,8 @@ the online working space must contain following directories:
     │   │   ├── RootLayers
     │   │   │   ├── AttentionPools.py
     │   │   │   └── PositionalEncodings.py
-    │   │   ├── SubModules
-    │   │   │   └── AddLNorm.py
-    │   │   └── Tools
-    │   │       ├── DataTools.py
-    │   │       ├── EvaluateTools.py
-    │   │       └── VisualizeTools.py
+    │   │   └── SubModules
+    │   │       └── AddLNorm.py
     │   ├── Compute
     │   │   └── Trainers.py
     │   ├── Loss
@@ -51,7 +52,8 @@ the online working space must contain following directories:
     │   │   └── _transformer.py
     │   ├── Utils
     │   │   ├── Common
-    │   │   │   └── SeqOperations.py
+    │   │   │   ├── DataAssemble.py
+    │   │   │   └── SeqOperation.py
     │   │   └── Text
     │   │       └── TextPreprocess.py
     │   └── projs
