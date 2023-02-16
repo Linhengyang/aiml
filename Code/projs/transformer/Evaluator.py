@@ -1,6 +1,6 @@
 import os
 from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator
-from ....Config import reveal_cnt_in_train, eval_cnt_in_train
+from .settings import reveal_cnt_in_train, eval_cnt_in_train
 
 class transformerEpochEvaluator(epochEvaluator):
     reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集
@@ -26,12 +26,31 @@ class transformerEpochEvaluator(epochEvaluator):
             # batch loss(sum of loss of sample), batch num_tokens(sum of Y_valid_lens pf sample)
             self.metric.add(l.sum(), loss_inputs_batch[1].sum())
     
+    def evaluate_model(self, net, loss, valid_iter):
+        if self.eval_flag:
+            self.eval_metric = Accumulator(self.num_metrics)
+            for net_inputs_batch, loss_inputs_batch in valid_iter:
+                net_output = net(*net_inputs_batch)
+                if len(net_output) == 1: # Y_hat一般都是net输出/net输出第一个
+                    Y_hat = net_output
+                else:
+                    Y_hat = net_output[0]
+                l = loss(Y_hat, *loss_inputs_batch)
+                self.eval_metric.add(l.sum(), loss_inputs_batch[1].sum())
+
     def epoch_metric_cast(self, fpath, verbose=False):
         '''file path: trainer.log_file_path'''
         if self.reveal_flag:
-            time_cost, loss_avg, speed = self.timer.stop(), round(self.metric[0]/self.metric[1],3), round(self.metric[1]/time_cost)
-            log = ",".join(['epoch: '+str(self.epoch+1), 'loss(loss/validtoken): '+str(loss_avg), 'speed(tokens/sec): '+str(speed),
+            time_cost = self.timer.stop()
+            loss_avg, speed = round(self.metric[0]/self.metric[1],3), round(self.metric[1]/time_cost)
+            log = ",\t".join(['epoch: '+str(self.epoch+1), 'train_loss(/token): '+str(loss_avg), 'speed(tokens/sec): '+str(speed),
                             'remain_time(min): '+str(round(time_cost*(self.num_epochs-self.epoch-1)/60))])
+            with open(fpath, 'a+') as f:
+                f.write(log+'\n')
+            if verbose:
+                print(log)
+        if self.eval_flag:
+            log = f'epoch: {self.epoch+1}, eval_loss(/token): {self.eval_metric[0]/self.eval_metric[1]:.3f}'
             with open(fpath, 'a+') as f:
                 f.write(log+'\n')
             if verbose:
