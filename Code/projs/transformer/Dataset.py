@@ -83,7 +83,7 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
         返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
     """
     raw_text = read_text2str(path) # read text
-    text = preprocess_space(raw_text) # preprocess, 保证文字和,.!?符号之间有空格
+    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?') # 小写,替换其他空格为单空格, 保证文字和,.!?符号之间有空格
     source, target = tokenize_seq2seq(text, num_examples) # 词元化, 得到source语料序列和target语料序列
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
     tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作tgt词表
