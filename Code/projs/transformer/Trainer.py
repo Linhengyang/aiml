@@ -3,7 +3,7 @@ import torch
 from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.Trainers import easyTrainer
-from ....Config import online_log_dir, online_model_save_dir
+from .settings import online_log_dir, online_model_save_dir, proj_name
 
 class transformerTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
@@ -14,13 +14,13 @@ class transformerTrainer(easyTrainer):
         self.batch_size = batch_size
     
     def set_log_file(self, fname, logs_dir=online_log_dir):
-        self.log_file_path = os.path.join(logs_dir, 'transformer', fname)
+        self.log_file_path = os.path.join(logs_dir, proj_name, fname)
         with open(self.log_file_path, 'w') as f:
             print('train begin', file=f)
 
     def log_topology(self, fname, logs_dir=online_log_dir):
         '''file path: online_log_dir/transformer/XXX_topo.txt'''
-        with open(os.path.join(logs_dir, 'transformer', fname), 'w') as f:
+        with open(os.path.join(logs_dir, proj_name, fname), 'w') as f:
             print(self.net, file=f)
     
     def set_device(self, device=None):
@@ -93,7 +93,7 @@ class transformerTrainer(easyTrainer):
 
     def save_model(self, fname, models_dir=online_model_save_dir):
         '''save the model to online model directory'''
-        save_path = os.path.join(models_dir, 'transformer', fname)
+        save_path = os.path.join(models_dir, proj_name, fname)
         torch.save(self.net.state_dict(), save_path)
 
     def fit(self):
@@ -114,5 +114,7 @@ class transformerTrainer(easyTrainer):
                 with torch.no_grad():
                     self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, Y_hat, l)
                 del net_inputs_batch, loss_inputs_batch, Y_hat, l
-            self.epoch_evaluator.epoch_metric_cast(self.log_file_path, verbose=True)
+            with torch.no_grad():
+                self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter)
+                self.epoch_evaluator.epoch_metric_cast(self.log_file_path, verbose=True)
         print('Fitting finished successfully')

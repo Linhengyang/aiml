@@ -61,6 +61,7 @@ the online working space must contain following directories:
     │           ├── Network.py
     │           ├── Predictor.py
     │           ├── Trainer.py
+    │           ├── settings.py
     │           └── note.txt
     ├── Config
     │   ├── __init__.py

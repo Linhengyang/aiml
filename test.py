@@ -11,11 +11,11 @@ from Code.projs.transformer.Dataset import seq2seqDataset
 
 if __name__ == "__main__":
     # build datasets
-    trainset = seq2seqDataset(path=os.path.join(base_data_dir, seq2seq_dir, eng2fra_train_fname), num_steps=8, num_examples=400)
+    trainset = seq2seqDataset(path=os.path.join(base_data_dir, seq2seq_dir, eng2fra_train_fname), num_steps=8, num_examples=1000)
     validset = seq2seqDataset(path=os.path.join(base_data_dir, seq2seq_dir, eng2fra_valid_fname), num_steps=8)
     testset = seq2seqDataset(path=os.path.join(base_data_dir, seq2seq_dir, eng2fra_test_fname), num_steps=8, num_examples=3)
     # design net & loss
-    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 1, 1, 2, 0.1, False, 2
+    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 2, 4, 0.1, False, 4
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
                  "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     transenc = TransformerEncoder(vocab_size=len(trainset.src_vocab), **test_args)
@@ -23,7 +23,7 @@ if __name__ == "__main__":
     net = Transformer(transenc, transdec)
     loss = MaskedSoftmaxCELoss()
     # init trainer
-    trainer = transformerTrainer(net=net, loss=loss, num_epochs=30, batch_size=2)
+    trainer = transformerTrainer(net=net, loss=loss, num_epochs=300, batch_size=4)
     ## set the device
     trainer.set_device(torch.device('cuda'))
     ## set the data iters
@@ -45,4 +45,4 @@ if __name__ == "__main__":
         trainer.log_topology('def_topo.txt')
         trainer.init_params()
     trainer.fit()
-    trainer.save_model('transformer_v1.params')
+    trainer.save_model('transformer_test.params')
