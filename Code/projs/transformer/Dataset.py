@@ -1,6 +1,6 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.TextPreprocess import Vocab
-from ...Utils.Common.SeqOperations import truncate_pad
+from ...Utils.Common.SeqOperation import truncate_pad
 import torch
 
 def read_text2str(path):
