@@ -89,6 +89,3 @@ def bleu(pred_seq, label_seq, k):
                 label_subs[' '.join(pred_tokens[i: i + n])] -= 1
         score *= math.pow(num_matches / (len_pred - n + 1), math.pow(0.5, n))
     return score
-
-if __name__ == "__main__":
-    print(bleu("he\'s calm .", 'il est calme .', 5))
