@@ -1,4 +1,5 @@
 base_data_dir = '../../data'
+local_model_save_dir = '/Users/lhy/studyspace/model'
 seq2seq_dir = 'seq2seq'
 eng2fra_train_fname = 'eng2fra.txt'
 eng2fra_valid_fname = 'eng2fra_valid.txt'

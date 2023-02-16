@@ -26,7 +26,8 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
     def forward(self, pred, label, valid_len):
         '''
         pred: (batch_size, num_steps, num_cls)
-        label: (batch_size, num_steps)
+        label: (batch_size, num_steps)int64
+        valid_len: (batch_size, )int32
         '''
         self.reduction = 'none'
         # unmasked_loss shape: (batch_size, num_steps) with float elements

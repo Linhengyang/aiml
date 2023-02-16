@@ -1,6 +1,6 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.TextPreprocess import Vocab
-from ...Utils.Common.SeqOperations import truncate_pad
+from ...Utils.Common.SeqOperation import truncate_pad
 import torch
 
 def read_text2str(path):
@@ -49,8 +49,8 @@ def build_tensorDataset(lines, vocab, num_steps):
         num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
 
     returns: denoted as array, valid_len
-        array: 2-dim tensor, shape as ( sample_size, num_steps )
-        valid_len: 1-dim tensor, shape as ( sample_size, ), whose elements are the counts of non-padding tokens of lines
+        array: 2-dim tensor, shape as ( sample_size, num_steps )int64
+        valid_len: 1-dim tensor, shape as ( sample_size, )int32, whose elements are the counts of non-padding tokens of lines
     
     explains:
         map tokens of input lines into indices according to input vocab, and set the sequence length
@@ -58,8 +58,8 @@ def build_tensorDataset(lines, vocab, num_steps):
     """
     lines = [vocab[l] for l in lines] # id映射
     lines = [ l + [vocab['<eos>']] for l in lines ] # 每句末尾加<eos>
-    array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines]) # tensor化 truncate_pad之后的token 序列
-    valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数
+    array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines]) # tensor化 truncate_pad之后的token序列, int64
+    valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数, int32
     return array, valid_len
 
 def build_dataset_vocab(path, num_steps, num_examples=None):
@@ -79,14 +79,14 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
         tgt_vocab: vocab of target language corpus
     
     explains:
-        返回seq2seq翻译数据集, 其中tensors是(src数据集, src有效长度集, tgt数据集, tgt有效长度集)
+        返回seq2seq翻译数据集, 其中tensors是(src数据集int64, src有效长度集int32, tgt数据集int64, tgt有效长度集int32)
         返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
     """
     raw_text = read_text2str(path) # read text
-    text = preprocess_space(raw_text) # preprocess
+    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?') # 小写,替换其他空格为单空格, 保证文字和,.!?符号之间有空格
     source, target = tokenize_seq2seq(text, num_examples) # 词元化, 得到source语料序列和target语料序列
-    src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作词表
-    tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'])
+    src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
+    tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作tgt词表
     src_array, src_valid_len = build_tensorDataset(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
     tgt_array, tgt_valid_len = build_tensorDataset(target, tgt_vocab, num_steps)# all tgt data, shapes (num_examples, num_stpes), (num_examples,)
     return (src_array, src_valid_len, tgt_array, tgt_valid_len), (src_vocab, tgt_vocab)

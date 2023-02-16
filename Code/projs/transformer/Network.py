@@ -16,7 +16,7 @@ class TransformerEncoder(Encoder):
             self.blks.add_module("encblock"+str(i), cur_blk)
 
     def forward(self, src_X, valid_lens):
-        # src_X shape: (batch_size, num_steps), valid_lens shape: (batch_size,)
+        # src_X shape: (batch_size, num_steps)int64, valid_lens shape: (batch_size,)int32
         embed_X = self.embedding(src_X)
         X = self.pos_encoding(embed_X * math.sqrt(self.num_hiddens)) # 在embed后, 位置编码前, 将embed结果scale sqrt(d)
         for i, blk in enumerate(self.blks):
@@ -39,8 +39,8 @@ class TransformerDecoder(AttentionDecoder):
         return enc_outputs # encoder returns encoded_src, src_valid_lens
 
     def forward(self, tgt_X, enc_info, infer_recorder=None):
-        #train: tgt_X shape: (batch_size, num_steps), enc_info: [(batch_size, num_steps, d_dim), (batch_size,)]
-        #infer: tgt_X shape: (1, 1), enc_info: [(1, num_stepss, d_dim), (1,)], A dict as infer_recorder
+        #train: tgt_X shape: (batch_size, num_steps)int64, enc_info: [(batch_size, num_steps, d_dim), (batch_size,)]
+        #infer: tgt_X shape: (1, 1)int64, enc_info: [(1, num_stepss, d_dim), (1,)], A dict as infer_recorder
         emb_X = self.embedding(tgt_X)
         X = self.pos_encoding(emb_X * math.sqrt(self.num_hiddens))
         for i, blk in enumerate(self.blks):
