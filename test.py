@@ -57,7 +57,7 @@ if __name__ == "__main__":
     # set device
     device = torch.device('cpu')
     # load model
-    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.2, False, 64
+    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.0, False, 64
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
                  "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     transenc = TransformerEncoder(vocab_size=len(trainset.src_vocab), **test_args)
@@ -66,8 +66,12 @@ if __name__ == "__main__":
     trained_net_path = os.path.join(local_model_save_dir, 'transformer', 'transformer_v1.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
-    translator = sentenceTranslator(device=device)
+    search_mode = 'beam'
+    if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用train mode网络
+        search_mode = 'greedy'
+    translator = sentenceTranslator(search_mode=search_mode, device=device)
     # predict
     src_sentence = 'i\'m home .'
     print(translator.predict(src_sentence, net, src_vocab, tgt_vocab, num_steps=num_steps))
     print('bleu score: ', translator.evaluate())
+    print('pred score: ', translator.pred_scores)

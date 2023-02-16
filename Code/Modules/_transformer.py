@@ -99,8 +99,8 @@ class TransformerDecoderBlock(nn.Module):
         # src_enc_seqs'shape, train: (batch_size, seq_len, d_dim), infer: (1, seq_len, d_dim)
         # src_valid_lens's shape, train: (batch_size,), infer: (1,)
         if self.training: # train过程中
-            assert X.shape == src_enc_seqs.shape, 'training: encoder output & decoder input block ' + self.blk_ind + ' are not in same shape'
-            assert src_enc_seqs.shape[0] == src_valid_lens.shape[0], 'encoder output & encoder valid lens have different batch_size'
+            assert X.shape[-1] == src_enc_seqs.shape[-1], f'training: enc output & dec input block {self.blk_ind} are not in same shape'
+            assert X.shape[0] == src_enc_seqs.shape[0] == src_valid_lens.shape[0], f'enc output & enc valid lens & dec input block {self.blk_ind} differ batch_size'
             batch_size, seq_len = X.shape[:-1]
             mask = torch.arange(1, seq_len+1, dtype=torch.int32, device=X.device).repeat(batch_size, 1)
             KVs, infer_recorder = X, None # 自注意力, 用上面的mask实现auto-regressive, train过程中不需要infer_recorder
