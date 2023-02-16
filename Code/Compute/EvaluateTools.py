@@ -1,5 +1,7 @@
 import time
 import numpy as np
+import collections
+import math
 
 class Timer:  #@save
     """Record multiple running times."""
@@ -66,6 +68,27 @@ class epochEvaluator(object):
     def epoch_metric_cast(self, *args, **kwargs):
         raise NotImplementedError
 
-class trainEvaluator(object):
-    def __init__(self, *args, **kwargs):
-        super().__init__()
+def bleu(pred_seq, label_seq, k):
+    """计算BLEU.
+    inputs:
+        1. pred_seq和label_seq: 输入前需要lower/替换非正常空格为单空格/文字和,.?!之间需要有单空格
+        2. k: 用于匹配的n-gram的最大长度, k <= min(len(pred_seq), len(label_seq))
+    """
+    pred_tokens, label_tokens = pred_seq.split(' '), label_seq.split(' ')
+    len_pred, len_label = len(pred_tokens), len(label_tokens)
+    if k > min(len_pred, len_label): # 如果k超出了pred_seq和label_seq的其中之一的长度, 限定k
+        k = min(len_pred, len_label)
+    score = math.exp(min(0, 1 - len_label / len_pred))
+    for n in range(1, k + 1):
+        num_matches, label_subs = 0, collections.defaultdict(int)
+        for i in range(len_label - n + 1):
+            label_subs[' '.join(label_tokens[i: i + n])] += 1
+        for i in range(len_pred - n + 1):
+            if label_subs[' '.join(pred_tokens[i: i + n])] > 0:
+                num_matches += 1
+                label_subs[' '.join(pred_tokens[i: i + n])] -= 1
+        score *= math.pow(num_matches / (len_pred - n + 1), math.pow(0.5, n))
+    return score
+
+if __name__ == "__main__":
+    print(bleu("he\'s calm .", 'il est calme .', 5))
