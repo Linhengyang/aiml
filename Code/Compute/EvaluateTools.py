@@ -69,7 +69,7 @@ class epochEvaluator(object):
         raise NotImplementedError
 
 def bleu(pred_seq, label_seq, k):
-    """计算BLEU.
+    """计算BLEU. 可以处理pred_seq为空字符串的情况
     inputs:
         1. pred_seq和label_seq: 输入前需要lower/替换非正常空格为单空格/文字和,.?!之间需要有单空格
         2. k: 用于匹配的n-gram的最大长度, k <= min(len(pred_seq), len(label_seq))
