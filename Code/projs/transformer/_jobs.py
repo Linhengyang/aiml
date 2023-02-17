@@ -34,15 +34,16 @@ def train_job():
     trainer.set_data_iter(trainset, validset, testset)## set the data iters
     trainer.set_optimizer(lr=0.0005)## set the optimizer
     trainer.set_grad_clipping(grad_clip_val=1.0)## set the grad clipper
-    trainer.set_epoch_eval(transformerEpochEvaluator(num_metrics=2))## set the epoch evaluator
-    trainer.set_log_file('train_logs.txt')## set the log file
+    trainer.set_epoch_eval(transformerEpochEvaluator('train_logs.txt', visualizer=True))## set the epoch evaluator
+    # start
     trainer.log_topology('lazy_topo.txt')## print the lazy topology
     check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
     if check_flag:
         trainer.log_topology('def_topo.txt')## print the defined topology
-        trainer.init_params()
+        trainer.init_params()## init params
     # fit
     trainer.fit()
+    # save
     trainer.save_model('transformer_test.params')
 
 def infer_job():
@@ -68,5 +69,6 @@ def infer_job():
     # predict
     src_sentence = 'i\'m home .'
     print(translator.predict(src_sentence, net, src_vocab, tgt_vocab, num_steps=num_steps))
+    # evaluate
     print('bleu score: ', translator.evaluate())
     print('pred score: ', translator.pred_scores)
