@@ -21,6 +21,7 @@
     * Trainer
     * Evaluator
     * Predictor
+    * settings
 
 ## Work Note:
 
@@ -60,18 +61,13 @@ the online working space must contain following directories:
     │   │       └── TextPreprocess.py
     │   └── projs
     │       ├── mlp
-    │       └── transformer
-    │           ├── Dataset.py
-    │           ├── Evaluator.py
-    │           ├── Network.py
-    │           ├── Predictor.py
-    │           ├── Trainer.py
-    │           ├── note.txt
-    │           └── settings.py
+    │       ├── transformer
+    │       └── vit
     ├── Config
     │   ├── __init__.py
     │   └── params.py
     ├── README.md
+    ├── experiment.ipynb
     ├── main.py
     └── test.py
 ---
