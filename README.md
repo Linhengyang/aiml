@@ -2,6 +2,9 @@
 ## Execute Note:  
 * a `__init__.py` file shows that the package imports all from underlying modules.  
 * always run `python -B xxx.py` file under `autodl` directory in case of relative importing  
+* always check ideas in `experiment.ipynb`, test code chunk in `test.py`
+* after successful tests, wrap code chunk to `_jobs.py` under `Code/projs/xxxx`
+* invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
 
 ## Code Note:
 * Base:  
@@ -31,9 +34,12 @@ the online working space must contain following directories:
 * `autodl`: `git clone https://github.com/Linhengyang/autodl.git`
 ---
     model
+    ├── mlp
     ├── transformer
     logs
+    ├── mlp
     ├── transformer
+    autodl
     ├── Code
     │   ├── Base
     │   │   ├── MetaFrames
@@ -63,11 +69,7 @@ the online working space must contain following directories:
     │       ├── mlp
     │       ├── transformer
     │       └── vit
-    ├── Config
-    │   ├── __init__.py
-    │   └── params.py
     ├── README.md
     ├── experiment.ipynb
-    ├── main.py
-    └── test.py
+    └── main.py
 ---
