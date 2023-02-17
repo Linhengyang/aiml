@@ -24,7 +24,8 @@
     * Trainer
     * Evaluator
     * Predictor
-    * settings
+    * configs
+    * _jobs
 
 ## Work Note:
 
@@ -36,9 +37,11 @@ the online working space must contain following directories:
     model
     ├── mlp
     ├── transformer
+    ├── vit
     logs
     ├── mlp
     ├── transformer
+    ├── vit
     autodl
     ├── Code
     │   ├── Base

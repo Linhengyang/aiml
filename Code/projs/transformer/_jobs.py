@@ -8,9 +8,12 @@ from ...Loss.MaskedCELoss import MaskedSoftmaxCELoss
 from .Trainer import transformerTrainer
 from .Evaluator import transformerEpochEvaluator
 from .Predictor import sentenceTranslator
+import yaml
+configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+base_data_dir, seq2seq_dir = configs['base_data_dir'], configs['seq2seq_dir']
+eng2fra_train_fname,eng2fra_valid_fname, eng2fra_test_fname = configs['eng2fra_train_fname'], configs['eng2fra_valid_fname'], configs['eng2fra_test_fname']
+local_model_save_dir = configs['local_model_save_dir']
 
-from .settings import base_data_dir, seq2seq_dir, eng2fra_train_fname, eng2fra_valid_fname, eng2fra_test_fname
-from .settings import local_model_save_dir
 
 def train_job():
     # build datasets
