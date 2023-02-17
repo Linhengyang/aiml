@@ -93,13 +93,12 @@ class sentenceTranslator(easyPredictor):
         if search_mode == 'greedy':
             self.pred_fn = greedy_predict
             self.beam_size = None
-            self.alpha = alpha # alpha越大, 输出越偏好长序列
         elif search_mode == 'beam':
             self.pred_fn = beam_predict
             self.beam_size = beam_size
-            self.alpha = alpha # alpha越大, 输出越偏好长序列
         else:
             raise ValueError('search_mode should be either "greedy" or "beam"')
+        self.alpha = alpha # alpha越大, 输出越偏好长序列
         self.eval_fn = bleu
 
     def predict(self, src_sentence, net, src_vocab, tgt_vocab, num_steps):
