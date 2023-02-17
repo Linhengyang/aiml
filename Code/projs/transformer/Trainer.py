@@ -15,11 +15,6 @@ class transformerTrainer(easyTrainer):
         self.loss = loss
         self.num_epochs = num_epochs
         self.batch_size = batch_size
-    
-    def set_log_file(self, fname, logs_dir=online_log_dir):
-        self.log_file_path = os.path.join(logs_dir, proj_name, fname)
-        with open(self.log_file_path, 'w') as f:
-            print('train begin', file=f)
 
     def log_topology(self, fname, logs_dir=online_log_dir):
         '''file path: online_log_dir/transformer/XXX_topo.txt'''
@@ -100,9 +95,10 @@ class transformerTrainer(easyTrainer):
         torch.save(self.net.state_dict(), save_path)
 
     def fit(self):
-        assert hasattr(self, 'optimizer'), 'Optimizer is not defined'
-        assert hasattr(self, 'train_iter'), 'Data_iter is not defined'
-        assert os.path.exists(self.log_file_path), 'log file is not existed'
+        assert hasattr(self, 'device'), 'device is not specified'
+        assert hasattr(self, 'optimizer'), 'optimizer missing'
+        assert hasattr(self, 'train_iter'), 'data_iter missing'
+        assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
         self.net.train()
         for epoch in range(self.num_epochs):
             self.epoch_evaluator.epoch_judge(epoch, self.num_epochs)
@@ -119,5 +115,5 @@ class transformerTrainer(easyTrainer):
                 del net_inputs_batch, loss_inputs_batch, Y_hat, l
             with torch.no_grad():
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter)
-                self.epoch_evaluator.epoch_metric_cast(self.log_file_path, verbose=True)
+                self.epoch_evaluator.epoch_metric_cast(verbose=True)
         print('Fitting finished successfully')

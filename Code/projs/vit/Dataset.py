@@ -2,12 +2,15 @@ from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.TextPreprocess import Vocab
 from ...Utils.Common.SeqOperation import truncate_pad
 import torch
-class FashionMNISTDataset(torch.utils.data.Dataset):
+
+class seq2seqDataset(torch.utils.data.Dataset):
     def __init__(self):
-        raise NotImplementedError
+        super().__init__()
+        pass
     
     def __getitem__(self):
-        raise NotImplementedError
-
+        pass
+    
     def __len__(self):
-        raise NotImplementedError
+        pass
+

@@ -5,12 +5,8 @@ class easyTrainer(object):
         net, loss, num_epochs, batch_size
     单机单卡训练任务的trainer接口
     '''
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         super().__init__()
-    
-    def set_log_file(self, *args, **kwargs):
-        '''set the path of log txt file'''
-        raise NotImplementedError
 
     def log_topology(self, *args, **kwargs):
         '''log the topology of the network to topos directory'''
