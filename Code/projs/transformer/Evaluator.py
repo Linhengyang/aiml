@@ -1,6 +1,9 @@
 import os
 from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator
-from .settings import reveal_cnt_in_train, eval_cnt_in_train
+import yaml
+configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
+
 
 class transformerEpochEvaluator(epochEvaluator):
     reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集

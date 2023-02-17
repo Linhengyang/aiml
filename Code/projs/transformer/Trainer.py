@@ -3,7 +3,10 @@ import torch
 from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.Trainers import easyTrainer
-from .settings import online_log_dir, online_model_save_dir, proj_name
+import yaml
+configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
+
 
 class transformerTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
