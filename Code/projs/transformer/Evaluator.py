@@ -54,22 +54,20 @@ class transformerEpochEvaluator(epochEvaluator):
 
     def epoch_metric_cast(self, verbose=False):
         '''log file path: ../logs/transformer/xxxx.txt'''
-        loss_avg, eval_loss_avg = None, None
+        loss_avg, eval_loss_avg, reveal_log, eval_log = None, None, '', ''
         if self.reveal_flag:
             time_cost = self.timer.stop()
             loss_avg, speed = round(self.reveal_metric[0]/self.reveal_metric[1],3), round(self.reveal_metric[1]/time_cost)
-            log = ",\t".join(['epoch: '+str(self.epoch+1), 'train_loss(/token): '+str(loss_avg), 'speed(tokens/sec): '+str(speed),
-                              'remain_time(min): '+str(round(time_cost*(self.num_epochs-self.epoch-1)/60))])
+            reveal_log = ",\t".join(['epoch: '+str(self.epoch+1), 'train_loss(/token): '+str(loss_avg), 'speed(tokens/sec): '+str(speed),
+                                     'remain_time(min): '+str(round(time_cost*(self.num_epochs-self.epoch-1)/60))])
             with open(self.log_file, 'a+') as f:
-                f.write(log+'\n')
-            if verbose:
-                print(log)
+                f.write(reveal_log+'\n')
         if self.eval_flag:
             eval_loss_avg = round(self.eval_metric[0]/self.eval_metric[1],3)
-            log = f'epoch: {self.epoch+1}, eval_loss(/token): {eval_loss_avg}'
+            eval_log = f'epoch: {self.epoch+1}, eval_loss(/token): {eval_loss_avg}'
             with open(self.log_file, 'a+') as f:
-                f.write(log+'\n')
-            if verbose:
-                print(log)
+                f.write(eval_log+'\n')
         if self.visual_flag:
             self.animator.add(self.epoch+1, (loss_avg, eval_loss_avg))
+        if verbose and (self.reveal_flag or self.eval_flag):
+            print(reveal_log + "\n" + eval_log)
