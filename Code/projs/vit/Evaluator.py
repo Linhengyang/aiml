@@ -13,7 +13,8 @@ class transformerEpochEvaluator(epochEvaluator):
     def __init__(self, log_fname, visualizer=None, scalar_names=['loss', ]):
         assert len(scalar_names) >= 1, 'train loss is at least for evaluating train epochs'
         super().__init__()
-        pass
+        self.num_scalars = len(scalar_names)
+        self.legends = ['train_loss', 'val_loss']
 
     def epoch_judge(self, epoch, num_epochs):
         if epoch == 0: # first epoch, create log file and init visual
