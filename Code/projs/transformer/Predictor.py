@@ -52,7 +52,7 @@ def mask_before_eos(pred_tokens_matrix, eos):
     return token_mask, prob_mask
 
 def beam_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, beam_size):
-    net.train()
+    net.train() #in beam predict, need to predict on beam_size seqs simultaneously, so train mode is used
     with torch.no_grad():
         src_enc_seqs, src_valid_lens = net.decoder.init_state(net.encoder(*enc_inputs))# (1, num_steps, d_dim), (1, )
         enc_info = (src_enc_seqs.repeat(beam_size, 1, 1), src_valid_lens.repeat(beam_size))
