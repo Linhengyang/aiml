@@ -110,5 +110,5 @@ class vitTrainer(easyTrainer):
                     self.epoch_evaluator.batch_record(X, y, Y_hat, l)
             with torch.no_grad():
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter, num_batches=10)
-                self.epoch_evaluator.epoch_metric_cast(verbose=True)
+                self.epoch_evaluator.epoch_metric_cast()
         print('Fitting finished successfully')

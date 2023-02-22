@@ -46,7 +46,7 @@ class vitEpochEvaluator(epochEvaluator):
                 l = loss(Y_hat, y)
                 self.eval_metric.add(l.sum(), accuracy(Y_hat, y), y.numel())
 
-    def epoch_metric_cast(self, verbose=False):
+    def epoch_metric_cast(self):
         '''log file path: ../logs/vit/xxxx.txt'''
         loss_avg, eval_loss_avg, acc_avg, eval_acc_avg, reveal_log, eval_log = None, None, None, None, '', ''
         if self.reveal_flag:
@@ -66,5 +66,5 @@ class vitEpochEvaluator(epochEvaluator):
         if self.visual_flag:
             # 线条的顺序要和legends一一对应. 目前只支持最多4条线
             self.animator.add(self.epoch+1, (loss_avg, eval_loss_avg, acc_avg, eval_acc_avg))
-        if verbose and (self.reveal_flag or self.eval_flag):
+        if (not self.visual_flag) and (self.reveal_flag or self.eval_flag):
             print(reveal_log + "\n" + eval_log)
