@@ -1,6 +1,5 @@
 import os
-from ...Utils.Common.Criterion import accuracy
-from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator
+from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator, accuracy
 from ...Compute.VisualizeTools import Animator
 import yaml
 configs = yaml.load(open('Code/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)
