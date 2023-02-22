@@ -97,7 +97,7 @@ class vitTrainer(easyTrainer):
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
         for epoch in range(self.num_epochs):
             self.net.train()
-            self.epoch_evaluator.epoch_judge(epoch, self.num_epochs)
+            self.epoch_evaluator.epoch_judge(epoch)
             for X, y in self.train_iter:
                 self.optimizer.zero_grad()
                 Y_hat = self.net(X)

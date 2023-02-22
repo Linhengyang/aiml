@@ -9,25 +9,23 @@ online_log_dir, proj_name = configs['online_log_dir'], configs['proj_name']
 class vitEpochEvaluator(epochEvaluator):
     reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集
     eval_cnts = eval_cnt_in_train # 评价当前model, 需要validate data或infer.避免次数太多
-    def __init__(self, log_fname, visualizer=None, scalar_names=['loss', 'accuracy']):
+    def __init__(self, num_epochs, log_fname, visualizer=None, scalar_names=['loss', 'accuracy']):
+        assert num_epochs >= max(self.reveal_cnts, self.eval_cnts), 'num_epochs must be larger than reveal cnts & eval cnts'
         assert len(scalar_names) >= 1, 'train loss is at least for evaluating train epochs'
         super().__init__()
-        self.num_scalars, self.log_fname = len(scalar_names), log_fname
+        self.num_epochs, self.num_scalars = num_epochs, len(scalar_names)
+        self.log_file = os.path.join(online_log_dir, proj_name, log_fname)
+        with open(self.log_file, 'w') as f:
+            print('train begin', file=f)
         self.legends = ['train_loss', 'val_loss', 'train_acc', 'val_acc']
         self.visual_flag =  visualizer
+        if self.visual_flag:
+            self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
 
-    def epoch_judge(self, epoch, num_epochs):
-        assert num_epochs >= max(self.reveal_cnts, self.eval_cnts), 'num_epochs must be larger than reveal cnts & eval cnts'
-        if epoch == 0: # first epoch, create log file and init visual
-            self.log_file = os.path.join(online_log_dir, proj_name, self.log_fname)
-            with open(self.log_file, 'w') as f:
-                print('train begin', file=f)
-            if self.visual_flag:
-                self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
-        self.reveal_flag = (self.reveal_cnts != 0) and ( (epoch+1) % (num_epochs // self.reveal_cnts) == 0 or epoch == 0 )
-        self.eval_flag = (self.eval_cnts != 0) and ( (epoch+1) % (num_epochs // self.eval_cnts) == 0 or epoch == 0 )
+    def epoch_judge(self, epoch):
+        self.reveal_flag = (self.reveal_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.reveal_cnts) == 0 or epoch == 0 )
+        self.eval_flag = (self.eval_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.eval_cnts) == 0 or epoch == 0 )
         if self.reveal_flag or self.eval_flag:
-            self.num_epochs = num_epochs
             self.epoch = epoch
             self.timer = Timer()
             self.reveal_metric = Accumulator(2*self.num_scalars) if self.reveal_flag else None
@@ -62,7 +60,7 @@ class vitEpochEvaluator(epochEvaluator):
         if self.eval_flag:
             eval_loss_avg = round(self.eval_metric[0]/self.eval_metric[2],3)
             eval_acc_avg = round(self.eval_metric[1]/self.eval_metric[2],3)
-            eval_log = f'epoch: {self.epoch+1},\teval_loss(/img):\t{eval_loss_avg}, eval_acc:\t{eval_acc_avg}'
+            eval_log = ",\t".join(['epoch: '+str(self.epoch+1), 'eval_loss(/img): '+str(eval_loss_avg), 'eval_acc: '+str(eval_acc_avg)])
             with open(self.log_file, 'a+') as f:
                 f.write(eval_log+'\n')
         if self.visual_flag:
