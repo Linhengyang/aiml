@@ -101,7 +101,7 @@ class transformerTrainer(easyTrainer):
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
         for epoch in range(self.num_epochs):
             self.net.train()
-            self.epoch_evaluator.epoch_judge(epoch, self.num_epochs)
+            self.epoch_evaluator.epoch_judge(epoch)
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
                 self.optimizer.zero_grad()
                 Y_hat, _ = self.net(*net_inputs_batch)
@@ -112,8 +112,7 @@ class transformerTrainer(easyTrainer):
                 self.optimizer.step()
                 with torch.no_grad():
                     self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, Y_hat, l)
-                del net_inputs_batch, loss_inputs_batch, Y_hat, l
             with torch.no_grad():
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter)
-                self.epoch_evaluator.epoch_metric_cast(verbose=True)
+                self.epoch_evaluator.epoch_metric_cast()
         print('Fitting finished successfully')

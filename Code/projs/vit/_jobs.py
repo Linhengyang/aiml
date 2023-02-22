@@ -29,12 +29,12 @@ def train_job():
     # testset = FMNISTDatasetOnline(path, False, resize)
 
     # build dataset from local data
-    train_img_path = os.path.join([base_data_dir, fmnist_dir, fmnist_train_img_fname])
-    train_label_path = os.path.join([base_data_dir, fmnist_dir, fmnist_train_label_fname])
-    valid_img_path = os.path.join([base_data_dir, fmnist_dir, fmnist_valid_img_fname])
-    valid_label_path = os.path.join([base_data_dir, fmnist_dir, fmnist_valid_label_fname])
-    test_img_path = os.path.join([base_data_dir, fmnist_dir, fmnist_test_img_fname])
-    test_label_path = os.path.join([base_data_dir, fmnist_dir, fmnist_test_label_fname])
+    train_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_train_img_fname)
+    train_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_train_label_fname)
+    valid_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_img_fname)
+    valid_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_label_fname)
+    test_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_test_img_fname)
+    test_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_test_label_fname)
     trainset = FMNISTDatasetLocal(train_img_path, train_label_path)
     validset = FMNISTDatasetLocal(valid_img_path, valid_label_path)
     testset = FMNISTDatasetLocal(test_img_path, test_label_path)
