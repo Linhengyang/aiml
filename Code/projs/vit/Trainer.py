@@ -4,11 +4,11 @@ from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.Trainers import easyTrainer
 import yaml
-configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
 
 
-class transformerTrainer(easyTrainer):
+class vitTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
         super().__init__()
         self.net = net
@@ -17,7 +17,7 @@ class transformerTrainer(easyTrainer):
         self.batch_size = batch_size
 
     def log_topology(self, fname, logs_dir=online_log_dir):
-        '''file path: online_log_dir/transformer/XXX_topo.txt'''
+        '''file path: online_log_dir/vit/XXX_topo.txt'''
         with open(os.path.join(logs_dir, proj_name, fname), 'w') as f:
             print(self.net, file=f)
     
@@ -34,13 +34,10 @@ class transformerTrainer(easyTrainer):
         ''' 输入train_set(必须), valid_set(可选), test_set(可选, 用于resolve网络), 依次得到train_iter, valid_iter, test_iter'''
         assert hasattr(self, 'device'), "Device not set. Please set trainer's device before setting data_iters"
         def transfer(x):
-            result = []
-            for x_ in default_collate(x):
-                res_ = tuple()
-                for t in x_:
-                    res_ += (t.to(self.device),)
-                result.append(res_)
-            return tuple(result)
+            result = tuple()
+            for t in default_collate(x):
+                result += (t.to(self.device), )
+            return result
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=transfer)
         if valid_set:
             self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False, collate_fn=transfer)
@@ -55,12 +52,11 @@ class transformerTrainer(easyTrainer):
         if need_resolve:
             assert hasattr(self, 'test_iter'), 'Please input test_set when deploying .set_data_iter()'
             self.net.train()
-            for net_inputs_batch, loss_inputs_batch in self.test_iter:
+            for X, y in self.test_iter:
                 break
             try:
-                Y_hat, _ = self.net(*net_inputs_batch)
-                l = self.loss(Y_hat, *loss_inputs_batch).sum()
-                del Y_hat, l
+                Y_hat = self.net(X)
+                l = self.loss(Y_hat, y).sum()
                 print('Net resolved & logged. Net & Loss checked. Ready to fit')
                 return True
             except:
@@ -99,20 +95,19 @@ class transformerTrainer(easyTrainer):
         assert hasattr(self, 'optimizer'), 'optimizer missing'
         assert hasattr(self, 'train_iter'), 'data_iter missing'
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
-        self.net.train()
         for epoch in range(self.num_epochs):
+            self.net.train()
             self.epoch_evaluator.epoch_judge(epoch, self.num_epochs)
-            for net_inputs_batch, loss_inputs_batch in self.train_iter:
+            for X, y in self.train_iter:
                 self.optimizer.zero_grad()
-                Y_hat, _ = self.net(*net_inputs_batch)
-                l = self.loss(Y_hat, *loss_inputs_batch)
+                Y_hat = self.net(X)
+                l = self.loss(Y_hat, y)
                 l.sum().backward()
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
                 self.optimizer.step()
                 with torch.no_grad():
-                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, Y_hat, l)
-                del net_inputs_batch, loss_inputs_batch, Y_hat, l
+                    self.epoch_evaluator.batch_record(X, y, Y_hat, l)
             with torch.no_grad():
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter)
                 self.epoch_evaluator.epoch_metric_cast(verbose=True)
