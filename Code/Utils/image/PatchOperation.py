@@ -16,10 +16,7 @@ def minpad_to_divide(img_batch, patch_size, mode='constant', value=0):
         输出的img_batch在尺寸上被pad调整, 可以被patch_size完美patch化
     '''
     # img_batch shape:(batch_size, n_channels, h, w)
-    if not torch.is_tensor(img_batch):
-        img_batch = torch.tensor(img_batch)
-    if img_batch.dim() != 4:
-        raise ValueError('input image batch should be in shape (batch_size, num_channels, h, w)')
+    assert torch.is_tensor(img_batch) and img_batch.dim() == 4, 'input image batch should be tensor in shape (batch_size, num_channels, h, w)'
     h, w = img_batch.shape[2:]
     k_h, k_w = patch_size
     pad_num_h, pad_num_w = 0 if h % k_h == 0 else k_h - h % k_h, 0 if w % k_w == 0 else k_w - w % k_w
@@ -29,8 +26,12 @@ def minpad_to_divide(img_batch, patch_size, mode='constant', value=0):
     pad_num_r = pad_num_w - pad_num_l
     return nn.functional.pad(img_batch, pad=(pad_num_l, pad_num_r, pad_num_u, pad_num_d), mode=mode, value=value)
 
-def calc_patchifed_sizes(img_size, patch_size):
-    c, h, w = img_size
+def calc_patchifed_sizes(img_shape, patch_size):
+    '''
+    img_shape: (c, h, w), patch_size: (p_h, p_w)
+    计算完美patch化后, patch个数和每个patch_flatten长度
+    '''
+    c, h, w = img_shape
     k_h, k_w = patch_size
     pad_num_h, pad_num_w = 0 if h % k_h == 0 else k_h - h % k_h, 0 if w % k_w == 0 else k_w - w % k_w
     num_patches = int( (h+pad_num_h)*(w+pad_num_w)/(k_h * k_w) )
