@@ -7,6 +7,7 @@ from .Dataset import FMNISTDatasetOnline
 from .Network import ViTEncoder
 from .Trainer import vitTrainer
 from .Evaluator import vitEpochEvaluator
+from .Predictor import fmnistClassifier
 import yaml
 configs = yaml.load(open('Code/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 local_model_save_dir = configs['local_model_save_dir']
@@ -42,4 +43,23 @@ def train_job():
     trainer.save_model('vit_test.params')
 
 def infer_job():
-    pass
+    device = torch.device('cpu')
+    # obtain pred batch
+    path = '../../data'
+    resize = (28, 28)
+    validset = FMNISTDatasetOnline(path, False, resize)
+    for img_batch, labels in validset:
+        break
+    # load model
+    num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 512, 0.3, 0.4, 512
+    img_shape, patch_size = (1, 28, 28), (7, 7)
+    net = ViTEncoder(img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens)
+    trained_net_path = os.path.join(local_model_save_dir, 'vit', 'vit_v1.params')
+    net.load_state_dict(torch.load(trained_net_path, map_location=device))
+    # init predictor
+    classifier = fmnistClassifier(device)
+    # predict
+    print(classifier.predict(img_batch, labels, net))
+    # evaluate
+    print('accuracy: ', classifier.evaluate())
+    print('pred scores: ', classifier.pred_scores)
