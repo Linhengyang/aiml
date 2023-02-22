@@ -16,7 +16,7 @@ local_model_save_dir = configs['local_model_save_dir']
 def train_job():
     # build datasets
     path = '../../data'
-    resize = (28, 28)
+    resize = (96, 96)
     trainset = FMNISTDatasetOnline(path, True, resize)
     validset = FMNISTDatasetOnline(path, False, resize)
     testset = FMNISTDatasetOnline(path, False, resize)
@@ -29,7 +29,7 @@ def train_job():
     trainer = vitTrainer(net=vit, loss=loss, num_epochs=10, batch_size=128)
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset, validset, testset)## set the data iters
-    trainer.set_optimizer(lr=0.1)## set the optimizer
+    trainer.set_optimizer(lr=0.0005)## set the optimizer
     trainer.set_epoch_eval(vitEpochEvaluator('train_logs.txt', visualizer=True))## set the epoch evaluator
     # start
     trainer.log_topology('lazy_topo.txt')## print the vit topology

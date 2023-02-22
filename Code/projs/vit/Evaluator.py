@@ -62,7 +62,7 @@ class vitEpochEvaluator(epochEvaluator):
         if self.eval_flag:
             eval_loss_avg = round(self.eval_metric[0]/self.eval_metric[2],3)
             eval_acc_avg = round(self.eval_metric[1]/self.eval_metric[2],3)
-            eval_log = f'epoch: {self.epoch+1},\teval_loss(/img):\t{eval_loss_avg}, eval_acc:\t{eval_acc_avg}'
+            eval_log = f'epoch: {self.epoch+1},\teval_loss(/img): {eval_loss_avg},\teval_acc: {eval_acc_avg}'
             with open(self.log_file, 'a+') as f:
                 f.write(eval_log+'\n')
         if self.visual_flag:
