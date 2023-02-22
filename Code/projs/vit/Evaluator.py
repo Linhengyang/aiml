@@ -38,11 +38,11 @@ class vitEpochEvaluator(epochEvaluator):
             # batch loss(sum of loss of sample), batch num correct preds, batch num_imgs(sum of y pf sample)
             self.reveal_metric.add(l.sum(), accuracy(Y_hat, y), y.numel())
     
-    def evaluate_model(self, net, loss, valid_iter, num_examples=None):
+    def evaluate_model(self, net, loss, valid_iter, num_batches=None):
         if self.eval_flag:
             net.eval()
             for i, (X, y) in enumerate(valid_iter):
-                if num_examples and i >= num_examples:
+                if num_batches and i >= num_batches:
                     break
                 Y_hat = net(X)
                 l = loss(Y_hat, y)
