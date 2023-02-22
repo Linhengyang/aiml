@@ -21,15 +21,15 @@ def train_job():
     validset = FMNISTDatasetOnline(path, False, resize)
     testset = FMNISTDatasetOnline(path, False, resize)
     # design net & loss
-    num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 512, 0.3, 0.4, 512
-    img_shape, patch_size = (1, 28, 28), (7, 7)
+    num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 8, 512, 0.1, 0.1, 1024
+    img_shape, patch_size = (1, 96, 96), (16, 16)
     vit = ViTEncoder(img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens)
     loss = nn.CrossEntropyLoss(reduction='none')
     # init trainer
     trainer = vitTrainer(net=vit, loss=loss, num_epochs=10, batch_size=128)
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset, validset, testset)## set the data iters
-    trainer.set_optimizer(lr=0.0005)## set the optimizer
+    trainer.set_optimizer(lr=0.1)## set the optimizer
     trainer.set_epoch_eval(vitEpochEvaluator('train_logs.txt', visualizer=True))## set the epoch evaluator
     # start
     trainer.log_topology('lazy_topo.txt')## print the vit topology
