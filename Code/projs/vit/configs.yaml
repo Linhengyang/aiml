@@ -16,6 +16,13 @@ proj_name: 'vit'
 
 # 读入的数据存储位置
 base_data_dir: '../../data'
+fmnist_dir: 'FashionMNIST/raw'
+fmnist_train_img_fname: 'train-images-idx3-ubyte'
+fmnist_train_label_fname: 'train-labels-idx1-ubyte'
+fmnist_valid_img_fname: 't10k-images-idx3-ubyte'
+fmnist_valid_label_fname: 't10k-labels-idx1-ubyte'
+fmnist_test_img_fname: 't10k-images-idx3-ubyte'
+fmnist_test_label_fname: 't10k-labels-idx1-ubyte'
 
 # 读入的模型存储位置
 local_model_save_dir: '../../model'
