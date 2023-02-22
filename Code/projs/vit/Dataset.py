@@ -71,13 +71,13 @@ def decode_idx1_ubyte(file):
 class FMNISTDatasetLocal(torch.utils.data.Dataset):
     def __init__(self, idx3fpath, idx1fpath):
         super().__init__()
-        self._imgTensor = decode_idx3_ubyte(idx3fpath) #shape: (numImgs, 1, numRows, numCols)
-        self._labelTensor = decode_idx1_ubyte(idx1fpath) #shape: (numImgs, )
-        self._img_shape = self._imgTensor[0].shape[1:]
+        self._imgTensor = decode_idx3_ubyte(idx3fpath).type(torch.float32) #shape: (numImgs, 1, numRows, numCols)
+        self._labelTensor = decode_idx1_ubyte(idx1fpath).type(torch.int64) #shape: (numImgs, )
+        self._img_shape = self._imgTensor.shape[1:]
         assert self._imgTensor.size(0) == self._labelTensor.size(0), 'sample size mismatch'
     
     def __getitem__(self, index):
-        return tuple(self._imgTensor[index], self._labelTensor[index])
+        return (self._imgTensor[index], self._labelTensor[index])
 
     def __len__(self):
         return self._imgTensor.size(0)
