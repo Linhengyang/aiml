@@ -26,5 +26,5 @@ class ViTEncoder(Encoder):
         X = self.pos_embedding(X) #(batch_size, seq_len=num_patches+1, num_hiddens)
         for blk in self.blks:
             X = blk(X)
-        return self.head(X[:, 0, :])
+        return self.head(X[:, 0, :]) #输出(batch_size, num_classes)
 
