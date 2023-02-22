@@ -2,11 +2,9 @@ import torch
 from torch import nn
 import math
 from ...Compute.PredictTools import easyPredictor
-from ...Compute.EvaluateTools import bleu
-from .Dataset import build_tensorDataset
-from ...Utils.Text.TextPreprocess import preprocess_space
+from ...Compute.EvaluateTools import accuracy
 
-class sentenceTranslator(easyPredictor):
+class fmnistClassifier(easyPredictor):
     def __init__(self):
         raise NotImplementedError
     def predict(self):

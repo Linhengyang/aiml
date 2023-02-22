@@ -72,7 +72,7 @@ class AdditiveAttention(nn.Module):
         # Q_batch_tilda shape(batch_size, m, h), K_batch_tilda shape(batch_size, n, h)
         Q_batch_tilda, K_batch_tilda = self.W_q(Q_batch), self.W_k(K_batch)
         # S_batch shape是(batch_size, m, n, h)
-        S_batch = Q_batch_tilda.unsqueeze(2).repeat(1, 1, n, 1) + K_batch_tilda.unsqueeze(1).repeat(1, m, 1, 1)
+        S_batch = Q_batch_tilda.unsqueeze(2).expand(-1, -1, n, -1) + K_batch_tilda.unsqueeze(1).expand(-1, m, -1, -1)
         Scores = self.W_v(torch.tanh(S_batch)).squeeze(-1) # shape是(batch_size, m, n, 1) --> # shape是(batch_size, m, n)
         self.attention_weights = masked_softmax(Scores, valid_lens) # shape是(batch_size, m, n)
         return torch.bmm(self.dropout(self.attention_weights), V_batch) # 返回的shape是(batch_size, m, v)

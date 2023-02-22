@@ -99,8 +99,8 @@ class transformerTrainer(easyTrainer):
         assert hasattr(self, 'optimizer'), 'optimizer missing'
         assert hasattr(self, 'train_iter'), 'data_iter missing'
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
-        self.net.train()
         for epoch in range(self.num_epochs):
+            self.net.train()
             self.epoch_evaluator.epoch_judge(epoch, self.num_epochs)
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
                 self.optimizer.zero_grad()

@@ -52,7 +52,8 @@ the online working space must contain following directories:
     │   │   │   ├── AttentionPools.py
     │   │   │   └── PositionalEncodings.py
     │   │   └── SubModules
-    │   │       └── AddLNorm.py
+    │   │       ├── AddLNorm.py
+    │   │       └── Patchify.py
     │   ├── Compute
     │   │   ├── EvaluateTools.py
     │   │   ├── PredictTools.py
@@ -61,18 +62,22 @@ the online working space must contain following directories:
     │   ├── Loss
     │   │   └── MaskedCELoss.py
     │   ├── Modules
-    │   │   └── _transformer.py
+    │   │   ├── _transformer.py
+    │   │   └── _vit.py
     │   ├── Utils
     │   │   ├── Common
     │   │   │   ├── DataAssemble.py
     │   │   │   └── SeqOperation.py
-    │   │   └── Text
-    │   │       └── TextPreprocess.py
+    │   │   ├── Text
+    │   │   │   └── TextPreprocess.py
+    │   │   └── image
+    │   │       └── PatchOperation.py
     │   └── projs
     │       ├── mlp
     │       ├── transformer
     │       └── vit
     ├── README.md
     ├── experiment.ipynb
-    └── main.py
+    ├── main.py
+    └── test.py
 ---
