@@ -60,7 +60,7 @@ def infer_job():
     transenc = TransformerEncoder(vocab_size=len(trainset.src_vocab), **test_args)
     transdec = TransformerDecoder(vocab_size=len(trainset.tgt_vocab), **test_args)
     net = Transformer(transenc, transdec)
-    trained_net_path = os.path.join(local_model_save_dir, 'transformer', 'transformer_v1.params')
+    trained_net_path = os.path.join(local_model_save_dir, 'transformer', 'transformer_v2.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
     search_mode = 'beam'
