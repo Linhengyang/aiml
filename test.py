@@ -2,7 +2,7 @@ import os
 import warnings
 import torch
 warnings.filterwarnings("ignore")
-from Code.projs.vit._jobs import train_job, infer_job
+from Code.projs.transformer._jobs import train_job, infer_job
 
 if __name__ == "__main__":
     '''

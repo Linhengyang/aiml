@@ -106,12 +106,13 @@ class sentenceTranslator(easyPredictor):
         self.src_sentence = preprocess_space(src_sentence, need_lower=True, separate_puncs=',.!?')
         enc_inputs = str_to_enc_inputs(self.src_sentence, src_vocab, num_steps, self.device)
         net.to(self.device)
-        self.tgt_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, enc_inputs, self.device, self.alpha, self.beam_size)
-        return self.tgt_sentence
+        self.pred_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, enc_inputs, self.device, self.alpha, self.beam_size)
+        return self.pred_sentence
 
-    def evaluate(self):
-        assert hasattr(self, 'tgt_sentence'), 'pred target sentence not found'
-        return self.eval_fn(self.tgt_sentence, self.src_sentence, self.bleu_k)
+    def evaluate(self, tgt_sentence):
+        assert hasattr(self, 'pred_sentence'), 'pred target sentence not found'
+        self.tgt_sentence = preprocess_space(tgt_sentence, need_lower=True, separate_puncs=',.!?')
+        return self.eval_fn(self.pred_sentence, self.tgt_sentence, self.bleu_k)
 
     @property
     def pred_scores(self):

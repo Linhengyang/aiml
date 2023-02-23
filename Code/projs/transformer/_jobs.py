@@ -66,10 +66,10 @@ def infer_job():
     search_mode = 'beam'
     if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用train mode网络
         search_mode = 'greedy'
-    translator = sentenceTranslator(search_mode=search_mode, device=device)
+    translator = sentenceTranslator(search_mode=search_mode, device=device, alpha=5) #加大对长句的奖励
     # predict
     src_sentence = 'i\'m home .'
     print(translator.predict(src_sentence, net, src_vocab, tgt_vocab, num_steps=num_steps))
     # evaluate
-    print('bleu score: ', translator.evaluate())
+    print('bleu score: ', translator.evaluate('je suis chez moi .'))
     print('pred score: ', translator.pred_scores)
