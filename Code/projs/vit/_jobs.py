@@ -64,14 +64,20 @@ def train_job():
 
 def infer_job():
     device = torch.device('cpu')
-    # obtain pred batch
-    path = '../../data'
-    resize = (28, 28)
-    validset = FMNISTDatasetOnline(path, False, resize)
-    for img_batch, labels in validset:
+    # obtain pred batch from online
+    # path = '../../data'
+    # resize = (28, 28)
+    # validset = FMNISTDatasetOnline(path, False, resize)
+
+    # obtain pred batch from local
+    valid_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_img_fname)
+    valid_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_label_fname)
+    validset = FMNISTDatasetLocal(valid_img_path, valid_label_path)
+    valid_iter = torch.utils.data.DataLoader(validset, 10, True)
+    for img_batch, labels in valid_iter:
         break
     # load model
-    num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 512, 0.3, 0.4, 512
+    num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 64, 0.1, 0.1, 128
     img_shape, patch_size = (1, 28, 28), (7, 7)
     net = ViTEncoder(img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens)
     trained_net_path = os.path.join(local_model_save_dir, 'vit', 'vit_v1.params')
@@ -79,7 +85,8 @@ def infer_job():
     # init predictor
     classifier = fmnistClassifier(device)
     # predict
-    print(classifier.predict(img_batch, labels, net))
+    print('truth: ', labels)
+    print('preds: ', classifier.predict(img_batch, labels, net))
     # evaluate
     print('accuracy: ', classifier.evaluate())
     print('pred scores: ', classifier.pred_scores)
