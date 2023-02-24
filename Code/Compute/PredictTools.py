@@ -10,3 +10,7 @@ class easyPredictor(object):
     
     def evaluate(self, *args, **kwargs):
         raise NotImplementedError
+    
+    @property
+    def pred_scores(self):
+        pass
