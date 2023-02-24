@@ -1,3 +1,6 @@
+这个project是经典狭义的transformer pytorch版实现. ( "Attention is all your need" Vaswani et al., 2017 )
+目的是 「翻译」, "translate", 是sequence to sequence 学习中的一种.
+
 sequence to sequence 学习，即翻译 translate，是一项生成式的任务，详细地说，它是：在source序列已知的情况下，从<bos>开始，逐个生成target序列
 所以translate learning(seq2seq learning)，在infer时一定是recursive的, 所以训练时必须要auto-regressive. 
 这里要先明确infer的过程: 输入一个token, 其他所需的信息在state中输入, infer过程输出下一位置token. 
