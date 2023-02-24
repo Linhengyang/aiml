@@ -13,6 +13,7 @@ def tensor_batch_pred(img_batch, net):
 
 class fmnistClassifier(easyPredictor):
     def __init__(self, device=None):
+        super().__init__()
         if device is not None and torch.cuda.is_available():
             self.device = device
         else:

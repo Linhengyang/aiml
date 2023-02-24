@@ -86,6 +86,7 @@ def beam_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, beam_size
 
 class sentenceTranslator(easyPredictor):
     def __init__(self, search_mode='greedy', bleu_k=2, device=None, beam_size=3, alpha=0.75):
+        super().__init__()
         if device is not None and torch.cuda.is_available():
             self.device = device
         else:
