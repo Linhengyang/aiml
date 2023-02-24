@@ -13,5 +13,5 @@ def tensors2batch_iter(data_tensors, batch_size, is_train=True):
     explains:
         组装features和labels等, 给出minibatch data loader
     """
-    dataset = data.TensorDataset(*data_tensors)
-    return data.DataLoader(dataset, batch_size, shuffle=is_train)
+    dataset = data.TensorDataset(*data_tensors) # 将长度相同的tensors组装成tensorDataset, 取i操作[i]直接返回tuple of 各tensors取i操作[i]的结果
+    return data.DataLoader(dataset, batch_size, shuffle=is_train) # 返回minibatch的loader, 每个循环返回batch_size个tuple of 各tensors取i操作的结果
