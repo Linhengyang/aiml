@@ -73,7 +73,7 @@ the online working space must contain following directories:
     │   │   └── image
     │   │       └── PatchOperation.py
     │   └── projs
-    │       ├── mlp
+    │       ├── _mlp
     │       ├── transformer
     │       └── vit
     ├── README.md

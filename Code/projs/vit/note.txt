@@ -1,1 +1,11 @@
-Vision in Transformer
+这个project是经典Vision in Transformer(ViT) pytorch版实现.
+目的是 「图片分类」, "classify"
+
+ViT在工程上没什么好说的, 将图片patch化之后, 将每个patch摊平,并linear project到num_hiddens维度, 形成(batch_size, num_tokens, num_hiddens)序列. (patch_embedding)
+随后添加头部cls_token, 作为整个序列的embedding, 用作分类输出. 在self-att和mlp前向过程中, cls_token会逐渐集成整个序列的综合embedding tensor. (position embedding)
+
+patch_embedding有一种更方便的实现方法, 即使用nn.Conv2D算子直接实现. 对比两种方法:
+    方法1: 每个patch是(num_c, p_h, p_w), flatten之后是(num_c * p_h * p_w), 用一个 (num_c * p_h * p_w, num_hiddens)的 W 统一映射. shape变化为:
+    (batch_size, num_c, h, w) --> (batch_size, num_patches, num_c, p_h, p_w) --> (batch_size, num_patches, num_c*p_h*p_w) --> (batch_size, num_patches, num_hiddens) 
+    方法2: 用一个(p_h, p_w)的Conv2D kernel, stride分别是(p_h, p_w), 输入通道数是num_c, 输出通道数量是num_hiddens, 那么参数总量和W是一样的, 且也是线性投射. shape变化为:
+    (batch_size, num_c, h, w) --> (batch_size, num_hiddens, h//p_h, w//p_w) --> (batch_size, num_hiddens, num_patches) --> (batch_size, num_patches, num_hiddens)

@@ -60,16 +60,16 @@ def infer_job():
     transenc = TransformerEncoder(vocab_size=len(trainset.src_vocab), **test_args)
     transdec = TransformerDecoder(vocab_size=len(trainset.tgt_vocab), **test_args)
     net = Transformer(transenc, transdec)
-    trained_net_path = os.path.join(local_model_save_dir, 'transformer', 'transformer_v1.params')
+    trained_net_path = os.path.join(local_model_save_dir, 'transformer', 'transformer_v2.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
     search_mode = 'beam'
     if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用train mode网络
         search_mode = 'greedy'
-    translator = sentenceTranslator(search_mode=search_mode, device=device)
+    translator = sentenceTranslator(search_mode=search_mode, device=device, alpha=5) #加大对长句的奖励
     # predict
     src_sentence = 'i\'m home .'
     print(translator.predict(src_sentence, net, src_vocab, tgt_vocab, num_steps=num_steps))
     # evaluate
-    print('bleu score: ', translator.evaluate())
+    print('bleu score: ', translator.evaluate('je suis chez moi .'))
     print('pred score: ', translator.pred_scores)

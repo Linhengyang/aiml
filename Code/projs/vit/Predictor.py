@@ -5,12 +5,15 @@ from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import accuracy
 
 def tensor_batch_pred(img_batch, net):
-    Y_hat = net(img_batch)
-    pred_result = nn.Softmax(dim=1)(Y_hat).max(dim=1)
+    net.eval()
+    with torch.no_grad():
+        Y_hat = net(img_batch)
+        pred_result = nn.Softmax(dim=1)(Y_hat).max(dim=1)
     return pred_result.indices, pred_result.values #shape都是(batch_size,)
 
 class fmnistClassifier(easyPredictor):
     def __init__(self, device=None):
+        super().__init__()
         if device is not None and torch.cuda.is_available():
             self.device = device
         else:
@@ -26,7 +29,7 @@ class fmnistClassifier(easyPredictor):
 
     def evaluate(self):
         assert hasattr(self, 'preds'), 'pred result not found'
-        return self.eval_fn(self.preds, self.truth)
+        return self.eval_fn(self.preds, self.truth)/self.truth.size(0)
 
     @property
     def pred_scores(self):

@@ -37,7 +37,7 @@ def decode_idx3_ubyte(file):
     # 读取格式: 大端
     fmt_header = '>iiii'
     magic_num, numImgs, numRows, numCols = struct.unpack_from(fmt_header, bin_data, offset)
-    print(magic_num, numImgs, numRows, numCols)
+    print('reading file ', file, ' with magic ', magic_num, ' image number ', numImgs)
     # 解析图片数据
     # 偏置掉头文件信息
     offset = struct.calcsize(fmt_header)
@@ -59,7 +59,7 @@ def decode_idx1_ubyte(file):
     # 读取格式: 大端
     fmt_header = '>ii'
     magic_num, numImgs = struct.unpack_from(fmt_header, bin_data, offset)
-    print(magic_num, numImgs)
+    print('reading file ', file, ' with magic ', magic_num, ' image number ', numImgs)
     # 解析图片数据
     # 偏置掉头文件信息
     offset = struct.calcsize(fmt_header)

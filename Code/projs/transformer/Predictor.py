@@ -18,18 +18,19 @@ def str_to_enc_inputs(src_sentence, src_vocab, num_steps, device):
 
 def greedy_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, *args):
     net.eval()
-    enc_info = net.decoder.init_state(net.encoder(*enc_inputs))
-    dec_X = torch.tensor( [tgt_vocab['<bos>'],], dtype=torch.int64, device=device).unsqueeze(0)
-    output_idxs, infer_recorder, pred_score = [], {}, 0
-    for i in range(num_steps):
-        Y, infer_recorder = net.decoder(dec_X, enc_info, infer_recorder)
-        assert infer_recorder['0'].size(1) == i+1, 'infer_recorder set wrong. please check infer code'
-        pred_idx = Y.argmax(dim=-1).item()
-        if pred_idx == tgt_vocab['<eos>']:
-            break
-        output_idxs.append(pred_idx)
-        pred_score += torch.log( nn.Softmax(dim=-1)(Y).max(dim=-1).values ).item()
-    long_award = math.pow(len(output_idxs), -alpha) if len(output_idxs) > 0 else 1
+    with torch.no_grad():
+        enc_info = net.decoder.init_state(net.encoder(*enc_inputs))
+        dec_X = torch.tensor( [tgt_vocab['<bos>'],], dtype=torch.int64, device=device).unsqueeze(0)
+        output_idxs, infer_recorder, pred_score = [], {}, 0
+        for i in range(num_steps):
+            Y, infer_recorder = net.decoder(dec_X, enc_info, infer_recorder)
+            assert infer_recorder['0'].size(1) == i+1, 'infer_recorder set wrong. please check infer code'
+            pred_idx = Y.argmax(dim=-1).item()
+            if pred_idx == tgt_vocab['<eos>']:
+                break
+            output_idxs.append(pred_idx)
+            pred_score += torch.log( nn.Softmax(dim=-1)(Y).max(dim=-1).values ).item()
+        long_award = math.pow(len(output_idxs), -alpha) if len(output_idxs) > 0 else 1
     return ' '.join(tgt_vocab.to_tokens(output_idxs)), pred_score * long_award
 
 def beam_search(net, k_pred_token_mat, k_cond_prob_mat, enc_info, beam_size, vocab_size):
@@ -85,6 +86,7 @@ def beam_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, beam_size
 
 class sentenceTranslator(easyPredictor):
     def __init__(self, search_mode='greedy', bleu_k=2, device=None, beam_size=3, alpha=0.75):
+        super().__init__()
         if device is not None and torch.cuda.is_available():
             self.device = device
         else:
@@ -105,12 +107,13 @@ class sentenceTranslator(easyPredictor):
         self.src_sentence = preprocess_space(src_sentence, need_lower=True, separate_puncs=',.!?')
         enc_inputs = str_to_enc_inputs(self.src_sentence, src_vocab, num_steps, self.device)
         net.to(self.device)
-        self.tgt_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, enc_inputs, self.device, self.alpha, self.beam_size)
-        return self.tgt_sentence
+        self.pred_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, enc_inputs, self.device, self.alpha, self.beam_size)
+        return self.pred_sentence
 
-    def evaluate(self):
-        assert hasattr(self, 'tgt_sentence'), 'pred target sentence not found'
-        return self.eval_fn(self.tgt_sentence, self.src_sentence, self.bleu_k)
+    def evaluate(self, tgt_sentence):
+        assert hasattr(self, 'pred_sentence'), 'pred target sentence not found'
+        self.tgt_sentence = preprocess_space(tgt_sentence, need_lower=True, separate_puncs=',.!?')
+        return self.eval_fn(self.pred_sentence, self.tgt_sentence, self.bleu_k)
 
     @property
     def pred_scores(self):
