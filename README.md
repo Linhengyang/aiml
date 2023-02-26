@@ -60,6 +60,7 @@ the online working space must contain following directories:
     │   │   ├── Trainers.py
     │   │   └── VisualizeTools.py
     │   ├── Loss
+    │   │   ├── L2PenaltyMSELoss.py
     │   │   └── MaskedCELoss.py
     │   ├── Modules
     │   │   ├── _transformer.py
