@@ -16,7 +16,7 @@ base_data_dir = configs['base_data_dir']
 movielens_dir = configs['movielens_dir']
 data_fname = configs['data_fname']
 
-def train_job():
+def mf_train_job():
     # build dataset from local data
     data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
     trainset = MovieLensRatingDataset(data_path, True, 'random')
@@ -45,7 +45,7 @@ def train_job():
     # save
     trainer.save_model('matrix_factorization_k10_v1.params')
 
-def infer_job():
+def mf_infer_job():
     device = torch.device('cpu')
     data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
     validset = MovieLensRatingDataset(data_path, False, 'random', seed=0)
