@@ -30,9 +30,9 @@ class MovieLensDataset(torch.utils.data.Dataset):
             self._split_data = data[mask]
         else:
             self._split_data = data[~mask]
-        self.user_tensor = torch.tensor(self._split_data.user_id.to_list())
-        self.item_tensor = torch.tensor(self._split_data.item_id.to_list())
-        self.score_tensor = torch.tensor(self._split_data.rating.to_list())
+        self.user_tensor = torch.tensor(self._split_data.user_id.to_list(), dtype=torch.int64)
+        self.item_tensor = torch.tensor(self._split_data.item_id.to_list(), dtype=torch.int64)
+        self.score_tensor = torch.tensor(self._split_data.rating.to_list(), dtype=torch.float32)
     
     def __getitem__(self, index):
         return (self.user_tensor[index], self.item_tensor[index], self.score_tensor[index])
