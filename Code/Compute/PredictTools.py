@@ -1,6 +1,6 @@
 class easyPredictor(object):
     def __init__(self, *args, **kwargs):
-        raise NotImplementedError
+        super().__init__()
 
     def set_device(self, *args, **kwargs):
         raise NotImplementedError
