@@ -9,7 +9,7 @@ def newest_mask(df):
     df['newest_mask'] =  df['timestamp'] != df['timestamp'].max()
     return df
 
-class MovieLensDataset(torch.utils.data.Dataset):
+class MovieLensRatingDataset(torch.utils.data.Dataset):
     def __init__(self, path, is_train, split_method='time-aware', test_ratio = 0.1, seed=1026):
         super().__init__()
         names = ['user_id', 'item_id', 'rating', 'timestamp']
