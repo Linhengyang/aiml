@@ -3,7 +3,7 @@ import torch
 import math
 
 def interaction_weights(U, I, users_idx, items_idx):
-    weights = torch.zeros(U, I)
+    weights = torch.zeros(U, I, device=users_idx.device)
     weights[users_idx, items_idx] = 1
     return weights
 
