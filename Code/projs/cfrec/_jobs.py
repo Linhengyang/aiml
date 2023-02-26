@@ -8,6 +8,7 @@ from .Network import MatrixFactorization
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
 from .Trainer import mfTrainer
 from .Evaluator import mfEpochEvaluator
+from .Predictor import MovieRatingPredictor
 import yaml
 configs = yaml.load(open('Code/projs/cfrec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 local_model_save_dir = configs['local_model_save_dir']
@@ -43,5 +44,25 @@ def train_job():
     trainer.fit()
     # save
     trainer.save_model('matrix_factorization_k10_v1.params')
+
 def infer_job():
-    pass
+    device = torch.device('cpu')
+    data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
+    validset = MovieLensRatingDataset(data_path, False, 'random', seed=0)
+    valid_iter = torch.utils.data.DataLoader(validset, 10, True)
+    for users, items, scores in valid_iter:
+        break
+    # load model
+    num_users = validset.num_users
+    num_items = validset.num_items
+    num_factors = 5
+    net = MatrixFactorization(num_factors, num_users, num_items)
+    trained_net_path = os.path.join(local_model_save_dir, 'cfrec', 'matrix_factorization_k5_v1.params')
+    net.load_state_dict(torch.load(trained_net_path, map_location=device))
+    # init predictor
+    rater = MovieRatingPredictor(device)
+    # predict
+    print('truth ratings: ', scores)
+    print('pred ratings: ', rater.predict(users, items, net))
+    # evaluate
+    print('rmse: ', rater.evaluate(scores))

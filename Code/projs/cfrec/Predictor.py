@@ -3,16 +3,37 @@ from torch import nn
 import math
 from ...Compute.PredictTools import easyPredictor
 
-class projPredictor(easyPredictor):
+def users_items_rating_pred(users, items, net):
+    '''
+    users: (batch_size,)int64
+    items: (batch_size,)int64
+    '''
+    net.eval()
+    with torch.no_grad():
+        S_hat, _, _, _, _ = net(users, items)
+        pred_ratings = S_hat[users, items]
+    return pred_ratings
+
+def rmse(pred_ratings, truth_ratings):
+    assert pred_ratings.shape == truth_ratings.shape, 'preds and truth shape mismatch'
+    return math.sqrt( torch.sum((pred_ratings - truth_ratings).pow(2)) / pred_ratings.numel() )
+
+class MovieRatingPredictor(easyPredictor):
     def __init__(self, device=None):
-        pass
+        super().__init__()
+        if device is not None and torch.cuda.is_available():
+            self.device = device
+        else:
+            self.device = torch.device('cpu')
+        self.pred_fn = users_items_rating_pred
+        self.eval_fn = rmse
 
-    def predict(self):
-        pass
+    def predict(self, users, items, net):
+        net.to(self.device)
+        self.preds = self.pred_fn(users.to(self.device), items.to(self.device), net)
+        return self.preds
 
-    def evaluate(self):
-        pass
-
-    @property
-    def pred_scores(self):
-        pass
+    def evaluate(self, ratings):
+        assert hasattr(self, 'preds'), 'pred result not found'
+        self.truth = ratings.to(self.device)
+        return self.eval_fn(self.preds, self.truth)
