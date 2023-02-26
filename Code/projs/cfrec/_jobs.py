@@ -3,7 +3,7 @@ import warnings
 warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
-from .Dataset import MovieLensDataset
+from .Dataset import MovieLensRatingDataset
 from .Network import MatrixFactorization
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
 from .Trainer import mfTrainer
@@ -18,17 +18,17 @@ data_fname = configs['data_fname']
 def train_job():
     # build dataset from local data
     data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
-    trainset = MovieLensDataset(data_path, True, 'random')
-    validset = MovieLensDataset(data_path, False, 'random')
-    testset = MovieLensDataset(data_path, False, 'random')
+    trainset = MovieLensRatingDataset(data_path, True, 'random')
+    validset = MovieLensRatingDataset(data_path, False, 'random')
+    testset = MovieLensRatingDataset(data_path, False, 'random')
     # design net & loss
     num_users = trainset.num_users
     num_items = trainset.num_items
     num_factors = 5
     net = MatrixFactorization(num_factors, num_users, num_items)
-    loss = L2PenaltyMSELoss(1e-5)
+    loss = L2PenaltyMSELoss(0.1)
     # init trainer for num_epochs & batch_size & learning rate
-    num_epochs, batch_size, lr = 100, 128, 0.00005
+    num_epochs, batch_size, lr = 200, 128, 0.00005
     trainer = mfTrainer(net, loss, num_epochs, batch_size)
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset, validset, testset)## set the data iters
