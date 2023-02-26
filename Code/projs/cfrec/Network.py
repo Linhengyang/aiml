@@ -25,12 +25,12 @@ class MatrixFactorization(nn.Module):
         self.U = num_users
         self.I = num_items
         self.K = num_factors
-        self.user_factor_mat = nn.Parameter(torch.ones(num_users, num_factors))
-        self.item_factor_mat = nn.Parameter(torch.ones(num_items, num_factors))
-        self.user_bias = nn.Parameter(torch.ones(num_users, 1))
-        self.item_bias = nn.Parameter(torch.ones(num_items, ))
+        self.user_factor_mat = nn.Parameter(torch.randn(num_users, num_factors))
+        self.item_factor_mat = nn.Parameter(torch.randn(num_items, num_factors))
+        self.user_bias = nn.Parameter(torch.zeros(num_users, 1))
+        self.item_bias = nn.Parameter(torch.zeros(num_items, ))
     def forward(self, users_idx, items_idx):
-        # shapes: (batch_size,)int64, (batch_size,)int64, (batch_size,)float32
+        # shapes: (batch_size,)int64, (batch_size,)int64
         interaction_w = interaction_weights(self.U, self.I, users_idx, items_idx) # (U, I)
         user_factor_w = factor_bias_weights(self.user_factor_mat, users_idx)
         item_factor_w = factor_bias_weights(self.item_factor_mat, items_idx)
