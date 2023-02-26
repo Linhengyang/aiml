@@ -46,4 +46,5 @@ class MatrixFactorization(nn.Module):
         return (S_hat * interaction_w,
                 self.user_factor_mat * user_factor_w, self.user_bias * user_bias_w,
                 self.item_factor_mat * item_factor_w, self.item_bias * item_bias_w)
-        
+    def __str__(self):
+        return "user_factor_matrix: {}; item_factor_matrix: {}".format(self.user_factor_mat.shape, self.item_factor_mat.shape)
