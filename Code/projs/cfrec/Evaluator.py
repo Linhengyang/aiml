@@ -47,7 +47,7 @@ class mfEpochEvaluator(epochEvaluator):
                 if num_batches and i >= num_batches:
                     break
                 S_hat, P, bu, Q, bi = net(users, items)
-                S = torch.zeros(net.U, net.I, device=net.device)
+                S = torch.zeros(net.U, net.I, device=users.device)
                 S[users, items] = scores
                 l = loss(S_hat, S, P, Q, bu, bi)
                 mse = torch.sum((S_hat - S).pow(2))
