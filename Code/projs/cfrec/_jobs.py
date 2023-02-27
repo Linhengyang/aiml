@@ -43,7 +43,7 @@ def mf_train_job():
     # fit
     trainer.fit()
     # save
-    trainer.save_model('matrix_factorization_k10_v1.params')
+    trainer.save_model('matrix_factorization_k5_v1.params')
 
 def mf_infer_job():
     device = torch.device('cpu')
