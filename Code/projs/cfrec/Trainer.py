@@ -55,10 +55,17 @@ class mfTrainer(easyTrainer):
             for users, items, scores in self.test_iter:
                 break
             try:
-                S_hat, P, bu, Q, bi = self.net(users, items)
-                S = torch.zeros(self.net.U, self.net.I, device=self.device)
-                S[users, items] = scores
-                l = self.loss(S_hat, S, P, Q, bu, bi)
+                net_output = self.net(users, items)
+                if len(net_output) == 1: # only hat scores returned
+                    S_hat = net_output[0]
+                    weight_params = [param for param_name, param in self.net.named_parameters() if param_name.endswith('weight')]
+                    S = scores
+                else:
+                    S_hat = net_output[0]
+                    weight_params = net_output[1:]
+                    S = torch.zeros(self.net.U, self.net.I, device=self.device)
+                    S[users, items] = scores
+                l = self.loss(S_hat, S, *weight_params)
                 print('Net resolved & logged. Net & Loss checked. Ready to fit')
                 return True
             except:
@@ -102,10 +109,18 @@ class mfTrainer(easyTrainer):
             self.epoch_evaluator.epoch_judge(epoch)
             for users, items, scores in self.train_iter:
                 self.optimizer.zero_grad()
-                S_hat, P, bu, Q, bi = self.net(users, items)
-                S = torch.zeros(self.net.U, self.net.I, device=self.device)
-                S[users, items] = scores
-                l = self.loss(S_hat, S, P, Q, bu, bi)
+                net_output = self.net(users, items)
+                assert isinstance(net_output, tuple), 'net output must be captured in a tuple'
+                if len(net_output) == 1: # only hat scores returned
+                    S_hat = net_output[0]
+                    weight_params = [param for param_name, param in self.net.named_parameters() if param_name.endswith('weight')]
+                    S = scores
+                else: # hat scores returned, and weight params for penalty returned
+                    S_hat = net_output[0]
+                    weight_params = net_output[1:]
+                    S = torch.zeros(self.net.U, self.net.I, device=self.device)
+                    S[users, items] = scores
+                l = self.loss(S_hat, S, *weight_params)
                 l.backward()
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)

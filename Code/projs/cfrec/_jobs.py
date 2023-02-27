@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
 from .Dataset import MovieLensRatingDataset
-from .Network import MatrixFactorization
+from .Network import explicitCF
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
 from .Trainer import mfTrainer
 from .Evaluator import mfEpochEvaluator
@@ -16,7 +16,7 @@ base_data_dir = configs['base_data_dir']
 movielens_dir = configs['movielens_dir']
 data_fname = configs['data_fname']
 
-def train_job():
+def mf_train_job():
     # build dataset from local data
     data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
     trainset = MovieLensRatingDataset(data_path, True, 'random')
@@ -26,7 +26,7 @@ def train_job():
     num_users = trainset.num_users
     num_items = trainset.num_items
     num_factors = 5
-    net = MatrixFactorization(num_factors, num_users, num_items)
+    net = explicitCF(num_factors, num_users, num_items)
     loss = L2PenaltyMSELoss(0.1)
     # init trainer for num_epochs & batch_size & learning rate
     num_epochs, batch_size, lr = 200, 128, 0.00005
@@ -43,9 +43,9 @@ def train_job():
     # fit
     trainer.fit()
     # save
-    trainer.save_model('matrix_factorization_k10_v1.params')
+    trainer.save_model('matrix_factorization_k5_v1.params')
 
-def infer_job():
+def mf_infer_job():
     device = torch.device('cpu')
     data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
     validset = MovieLensRatingDataset(data_path, False, 'random', seed=0)
@@ -56,7 +56,7 @@ def infer_job():
     num_users = validset.num_users
     num_items = validset.num_items
     num_factors = 5
-    net = MatrixFactorization(num_factors, num_users, num_items)
+    net = explicitCF(num_factors, num_users, num_items)
     trained_net_path = os.path.join(local_model_save_dir, 'cfrec', 'matrix_factorization_k5_v1.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
