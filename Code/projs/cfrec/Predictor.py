@@ -10,8 +10,11 @@ def users_items_rating_pred(users, items, net):
     '''
     net.eval()
     with torch.no_grad():
-        S_hat, _, _, _, _ = net(users, items)
-        pred_ratings = S_hat[users, items]
+        net_outputs = net(users, items)
+        if len(net_outputs) == 1:
+            pred_ratings = net_outputs[0]
+        else:
+            pred_ratings = net_outputs[0][users, items]
     return pred_ratings
 
 def rmse(pred_ratings, truth_ratings):
