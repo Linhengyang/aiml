@@ -22,6 +22,20 @@ def factor_bias_weights(tensor, index):
 class MaskedMatrixFactorization(nn.Module):
     '''
     Matrix Factorization with Mask, only observed users & items's latent factors will be updated through every batch
+
+    agrs:
+        num_factos, num_users, num_items
+
+    inputs:
+        user_idx: (batch_size,)int64 tensor
+        item_idx: (batch_size,)int64 tensor
+    
+    outputs:
+        S_hat: masked hat ratings, (num_users, num_items)
+        P: masked user-factor weight, (num_users, num_factors)
+        bu: masked user-bias bias, (num_users, 1)
+        Q: masked item-factor weight, (num_items, num_factors)
+        bi: masked item-bias bias, (num_items, )
     '''
     def __init__(self, num_factors, num_users, num_items):
         super().__init__()
@@ -52,9 +66,32 @@ class MaskedMatrixFactorization(nn.Module):
     def __str__(self):
         return "user_factor_matrix: {}; item_factor_matrix: {}".format(self.user_factor_weight.shape, self.item_factor_weight.shape)
 
-class MatrixFactorization(nn.Module):
-    def __init__(self):
-        pass
+class UnMaskMatrixFactorization(nn.Module):
+    '''
+    Matrix Factorization without Mask, all users & items's latent factors will be updated through every observed batch
 
-    def forward(self):
-        pass
+    agrs:
+        num_factos, num_users, num_items
+
+    inputs:
+        user_idx: (batch_size,)int64 tensor
+        item_idx: (batch_size,)int64 tensor
+    
+    outputs:
+        scores_hat: (batch_size, )float32 tensor
+    '''
+    def __init__(self, num_factors, num_users, num_items):
+        super().__init__()
+        self.user_factor_weight = nn.Embedding(num_users, num_factors)
+        self.item_factor_weight = nn.Embedding(num_items, num_factors)
+        self.user_bias = nn.Embedding(num_users, 1)
+        self.item_bias = nn.Embedding(num_items, 1)
+
+    def forward(self, users_idx, items_idx):
+        # shapes: (batch_size,)int64, (batch_size,)int64
+        P_u = self.user_factor_weight(users_idx)
+        Q_i = self.item_factor_weight(items_idx)
+        b_u = self.user_bias(users_idx)
+        b_i = self.item_bias(items_idx)
+        # return ( (batch_size,), )
+        return ( ((P_u * Q_i).sum(dim=1, keepdim=True) + b_u + b_i).flatten(), )
