@@ -63,6 +63,7 @@ the online working space must contain following directories:
     │   │   ├── L2PenaltyMSELoss.py
     │   │   └── MaskedCELoss.py
     │   ├── Modules
+    │   │   ├── _cfrec.py
     │   │   ├── _transformer.py
     │   │   └── _vit.py
     │   ├── Utils
@@ -75,6 +76,7 @@ the online working space must contain following directories:
     │   │       └── PatchOperation.py
     │   └── projs
     │       ├── _mlp
+    │       ├── cfrec
     │       ├── transformer
     │       └── vit
     ├── README.md
