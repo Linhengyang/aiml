@@ -57,8 +57,12 @@ class MovieLensRatingDataset(torch.utils.data.Dataset):
     
     @property
     def interactions_itembased(self):
+        self._interactions_itembased = torch.zeros(self._num_items, self._num_users, dtype=torch.float32)
+        self._interactions_itembased[self.item_tensor, self.user_tensor] = self.score_tensor
         return self._interactions_itembased
 
     @property
     def interactions_userbased(self):
+        self._interactions_userbased = torch.zeros(self._num_users, self._num_items, dtype=torch.float32)
+        self._interactions_userbased[self.user_tensor, self.item_tensor] = self.score_tensor
         return self._interactions_userbased
