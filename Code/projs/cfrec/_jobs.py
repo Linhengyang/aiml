@@ -56,7 +56,7 @@ def mf_infer_job():
     num_users = validset.num_users
     num_items = validset.num_items
     num_factors = 5
-    net = MatrixFactorization(num_factors, num_users, num_items)
+    net = explicitCF(num_factors, num_users, num_items)
     trained_net_path = os.path.join(local_model_save_dir, 'cfrec', 'matrix_factorization_k5_v1.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
