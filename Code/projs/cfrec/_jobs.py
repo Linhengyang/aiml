@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
 from .Dataset import MovieLensRatingDataset
-from .Network import MatrixFactorization
+from .Network import explicitCF
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
 from .Trainer import mfTrainer
 from .Evaluator import mfEpochEvaluator
@@ -26,7 +26,7 @@ def mf_train_job():
     num_users = trainset.num_users
     num_items = trainset.num_items
     num_factors = 5
-    net = MatrixFactorization(num_factors, num_users, num_items)
+    net = explicitCF(num_factors, num_users, num_items)
     loss = L2PenaltyMSELoss(0.1)
     # init trainer for num_epochs & batch_size & learning rate
     num_epochs, batch_size, lr = 200, 128, 0.00005
