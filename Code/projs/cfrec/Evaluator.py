@@ -46,11 +46,15 @@ class mfEpochEvaluator(epochEvaluator):
             for i, (users, items, scores) in enumerate(valid_iter):
                 if num_batches and i >= num_batches:
                     break
-                S_hat, P, bu, Q, bi = net(users, items)
-                S = torch.zeros(net.U, net.I, device=users.device)
-                S[users, items] = scores
-                l = loss(S_hat, S, P, Q, bu, bi)
-                mse = torch.sum((S_hat - S).pow(2))
+                net_output = net(users, items)
+                if len(net_output) == 1:
+                    S_hat = net_output[0]
+                    weight_params = [param for param_name, param in net.named_parameters() if param_name.endswith('weight')]
+                else:
+                    S_hat = net_output[0][users, items]
+                    weight_params = net_output[1:]
+                l = loss(S_hat, scores, *weight_params)
+                mse = torch.sum((S_hat - scores).pow(2))
                 self.eval_metric.add(l, mse, len(scores))
 
     def epoch_metric_cast(self):
