@@ -33,6 +33,9 @@ class MovieLensRatingDataset(torch.utils.data.Dataset):
         self.user_tensor = torch.tensor(self._split_data.user_id.to_list(), dtype=torch.int64)
         self.item_tensor = torch.tensor(self._split_data.item_id.to_list(), dtype=torch.int64)
         self.score_tensor = torch.tensor(self._split_data.rating.to_list(), dtype=torch.float32)
+        self._interactions_itembased = torch.zeros(self._num_items, self._num_users, dtype=torch.float32)
+        self._interactions_itembased[self.item_tensor, self.user_tensor] = self.score_tensor
+        self._interactions_userbased = self._interactions_itembased.transpose(1, 0)
     
     def __getitem__(self, index):
         return (self.user_tensor[index], self.item_tensor[index], self.score_tensor[index])
@@ -51,3 +54,11 @@ class MovieLensRatingDataset(torch.utils.data.Dataset):
     @property
     def dataframe(self):
         return self._split_data
+    
+    @property
+    def interactions_itembased(self):
+        return self._interactions_itembased
+
+    @property
+    def interactions_userbased(self):
+        return self._interactions_userbased
