@@ -103,7 +103,7 @@ def autorec_train_job():
 def autorec_infer_job():
     device = torch.device('cpu')
     data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
-    test_dataset = MovieLensRatingDataset(data_path, False, 'random')._interactions_itembased
+    test_dataset = MovieLensRatingDataset(data_path, False, 'random')
     testset = test_dataset.interactions_itembased
     # design net & loss
     num_users = test_dataset.num_users
@@ -112,8 +112,10 @@ def autorec_infer_job():
     net = ItemBasedAutoRec(num_factors, num_users)
     trained_net_path = os.path.join(local_model_save_dir, 'recsys', 'itembased_autorec_k5_v1.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
-    pred_score_matrix = net(testset)
-    for users, items, scores in torch.utils.data.DataLoader(test_dataset):
+    net.eval()
+    with torch.no_grad():
+        pred_score_matrix = net(testset)
+    for users, items, scores in torch.utils.data.DataLoader(test_dataset, batch_size=10, shuffle=False):
         break
     pred_scores = pred_score_matrix[users, items]
     print('truth scores: ', scores)
