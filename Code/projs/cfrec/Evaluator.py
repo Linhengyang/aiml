@@ -96,5 +96,5 @@ class autorecEpochEvaluator(mfEpochEvaluator):
                 S_hat = net(input_batch_matrix)
                 weight_params = [param for param_name, param in net.named_parameters() if param_name.endswith('weight')]
                 l = loss(S_hat, input_batch_matrix, *weight_params)
-                mse = torch.sum((S_hat - input_batch_matrix).pow(2))
+                mse = torch.sum((S_hat*torch.sign(input_batch_matrix) - input_batch_matrix).pow(2))
                 self.eval_metric.add(l, mse, torch.sign(input_batch_matrix).sum().item())
