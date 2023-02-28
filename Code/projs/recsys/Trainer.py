@@ -141,10 +141,10 @@ class autorecTrainer(mfTrainer):
         assert hasattr(self, 'device'), "Device not set. Please set trainer's device before setting data_iters"
         train_set = train_set.to(self.device)
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True)
-        if valid_set:
+        if valid_set is not None:
             valid_set = valid_set.to(self.device)
             self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False)
-        if test_set:
+        if test_set is not None:
             test_set = test_set.to(self.device)
             self.test_iter = torch.utils.data.DataLoader(test_set, self.batch_size, False)
     
