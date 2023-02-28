@@ -4,7 +4,7 @@ import math
 from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator
 from ...Compute.VisualizeTools import Animator
 import yaml
-configs = yaml.load(open('Code/projs/cfrec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/recsys/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
 online_log_dir, proj_name = configs['online_log_dir'], configs['proj_name']
 
@@ -58,7 +58,7 @@ class mfEpochEvaluator(epochEvaluator):
                 self.eval_metric.add(l, mse, len(scores))
 
     def epoch_metric_cast(self):
-        '''log file path: ../logs/cfrec/xxxx.txt'''
+        '''log file path: ../logs/recsys/xxxx.txt'''
         loss, eval_loss, rmse, eval_rmse, l2_pen = None, None, None, None, None
         reveal_log, eval_log = '', ''
         if self.reveal_flag:

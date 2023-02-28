@@ -4,7 +4,7 @@ from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.Trainers import easyTrainer
 import yaml
-configs = yaml.load(open('Code/projs/cfrec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/recsys/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
 
 
@@ -17,7 +17,7 @@ class mfTrainer(easyTrainer):
         self.batch_size = batch_size
 
     def log_topology(self, fname, logs_dir=online_log_dir):
-        '''file path: online_log_dir/cfrec/XXX_topo.txt'''
+        '''file path: online_log_dir/recsys/XXX_topo.txt'''
         with open(os.path.join(logs_dir, proj_name, fname), 'w') as f:
             print(self.net, file=f)
     

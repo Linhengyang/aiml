@@ -11,7 +11,7 @@ from .Trainer import mfTrainer, autorecTrainer
 from .Evaluator import mfEpochEvaluator, autorecEpochEvaluator
 from .Predictor import MovieRatingMFPredictor
 import yaml
-configs = yaml.load(open('Code/projs/cfrec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/recsys/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 local_model_save_dir = configs['local_model_save_dir']
 base_data_dir = configs['base_data_dir']
 movielens_dir = configs['movielens_dir']
@@ -58,7 +58,7 @@ def mf_infer_job():
     num_items = validset.num_items
     num_factors = 5
     net = MatrixFactorization(num_factors, num_users, num_items)
-    trained_net_path = os.path.join(local_model_save_dir, 'cfrec', 'matrix_factorization_k5_v1.params')
+    trained_net_path = os.path.join(local_model_save_dir, 'recsys', 'matrix_factorization_k5_v1.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
     rater = MovieRatingMFPredictor(device)
@@ -89,7 +89,7 @@ def autorec_train_job():
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset, validset, testset)## set the data iters
     trainer.set_optimizer(lr)## set the optimizer
-    trainer.set_epoch_eval(autorecEpochEvaluator(num_epochs, 'itembased_autorec_train_logs.txt', visualizer=True))## set the epoch evaluator
+    trainer.set_epoch_eval(autorecEpochEvaluator(num_epochs, 'itembased_autorec_train_logs.txt', visualizer=False))## set the epoch evaluator
     # start
     check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
     if check_flag:
@@ -110,7 +110,7 @@ def autorec_infer_job():
     num_items = test_dataset.num_items
     num_factors = 5
     net = ItemBasedAutoRec(num_factors, num_users)
-    trained_net_path = os.path.join(local_model_save_dir, 'cfrec', 'itembased_autorec_k5_v1.params')
+    trained_net_path = os.path.join(local_model_save_dir, 'recsys', 'itembased_autorec_k5_v1.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     pred_score_matrix = net(testset)
     for users, items, scores in torch.utils.data.DataLoader(test_dataset):
