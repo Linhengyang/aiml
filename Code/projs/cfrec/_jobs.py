@@ -2,6 +2,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
+import math
 import torch.nn as nn
 from .Dataset import MovieLensRatingDataset
 from .Network import explicitCF, ItemBasedAutoRec
@@ -70,12 +71,15 @@ def mf_infer_job():
 def autorec_train_job():
     # build dataset from local data
     data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
-    trainset = MovieLensRatingDataset(data_path, True, 'random')._interactions_itembased
-    validset = MovieLensRatingDataset(data_path, False, 'random')._interactions_itembased
-    testset = MovieLensRatingDataset(data_path, False, 'random')._interactions_itembased
+    train_dataset = MovieLensRatingDataset(data_path, True, 'random')
+    trainset = train_dataset.interactions_itembased
+    valid_dataset = MovieLensRatingDataset(data_path, False, 'random')
+    validset = valid_dataset.interactions_itembased
+    test_dataset = MovieLensRatingDataset(data_path, False, 'random')
+    testset = test_dataset.interactions_itembased
     # design net & loss
-    num_users = trainset.num_users
-    num_items = trainset.num_items
+    num_users = train_dataset.num_users
+    num_items = train_dataset.num_items
     num_factors = 5
     net = ItemBasedAutoRec(num_factors, num_users)
     loss = L2PenaltyMSELoss(0.1)
@@ -95,3 +99,23 @@ def autorec_train_job():
     trainer.fit()
     # save
     trainer.save_model('itembased_autorec_k5_v1.params')
+
+def autorec_infer_job():
+    device = torch.device('cpu')
+    data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
+    test_dataset = MovieLensRatingDataset(data_path, False, 'random')._interactions_itembased
+    testset = test_dataset.interactions_itembased
+    # design net & loss
+    num_users = test_dataset.num_users
+    num_items = test_dataset.num_items
+    num_factors = 5
+    net = ItemBasedAutoRec(num_factors, num_users)
+    trained_net_path = os.path.join(local_model_save_dir, 'cfrec', 'itembased_autorec_k5_v1.params')
+    net.load_state_dict(torch.load(trained_net_path, map_location=device))
+    pred_score_matrix = net(testset)
+    for users, items, scores in torch.utils.data.DataLoader(test_dataset):
+        break
+    pred_scores = pred_score_matrix[users, items]
+    print('truth scores: ', scores)
+    print('pred scores: ', pred_scores)
+    print('rmse: ', math.sqrt(torch.sum( (pred_scores - scores).pow(2) )))
