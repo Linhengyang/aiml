@@ -4,10 +4,10 @@ warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
 from .Dataset import MovieLensRatingDataset
-from .Network import explicitCF
+from .Network import explicitCF, ItemBasedAutoRec
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
-from .Trainer import mfTrainer
-from .Evaluator import mfEpochEvaluator
+from .Trainer import mfTrainer, autorecTrainer
+from .Evaluator import mfEpochEvaluator, autorecEpochEvaluator
 from .Predictor import MovieRatingPredictor
 import yaml
 configs = yaml.load(open('Code/projs/cfrec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
@@ -66,3 +66,32 @@ def mf_infer_job():
     print('pred ratings: ', rater.predict(users, items, net))
     # evaluate
     print('rmse: ', rater.evaluate(scores))
+
+def autorec_train_job():
+    # build dataset from local data
+    data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
+    trainset = MovieLensRatingDataset(data_path, True, 'random')._interactions_itembased
+    validset = MovieLensRatingDataset(data_path, False, 'random')._interactions_itembased
+    testset = MovieLensRatingDataset(data_path, False, 'random')._interactions_itembased
+    # design net & loss
+    num_users = trainset.num_users
+    num_items = trainset.num_items
+    num_factors = 5
+    net = ItemBasedAutoRec(num_factors, num_users)
+    loss = L2PenaltyMSELoss(0.1)
+    # init trainer for num_epochs & batch_size & learning rate
+    num_epochs, batch_size, lr = 200, 128, 0.00005
+    trainer = autorecTrainer(net, loss, num_epochs, batch_size)
+    trainer.set_device(torch.device('cuda'))## set the device
+    trainer.set_data_iter(trainset, validset, testset)## set the data iters
+    trainer.set_optimizer(lr)## set the optimizer
+    trainer.set_epoch_eval(autorecEpochEvaluator(num_epochs, 'itembased_autorec_train_logs.txt', visualizer=True))## set the epoch evaluator
+    # start
+    check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
+    if check_flag:
+        trainer.log_topology('itembased_autorec.txt')## print the defined topology
+        trainer.init_params()## init params
+    # fit
+    trainer.fit()
+    # save
+    trainer.save_model('itembased_autorec_k5_v1.params')
