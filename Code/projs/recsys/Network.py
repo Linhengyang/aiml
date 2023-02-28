@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 import math
-from ...Modules._cfrec import MaskedMatrixFactorization, UnMaskMatrixFactorization
+from ...Modules._recsys import MaskedMatrixFactorization, UnMaskMatrixFactorization
 
 class MatrixFactorization(nn.Module):
     def __init__(self, num_factors, num_users, num_items):
