@@ -8,4 +8,4 @@ if __name__ == "__main__":
     '''
     test code in this test.py file. After successful tests, code will be moved to _jobs.py under proj_name
     '''
-    autorec_train_job()
+    autorec_infer_job()
