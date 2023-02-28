@@ -1,2 +1,0 @@
-这个project是协同过滤collaborative filtering推荐算法的 pytorch版实现, 包括 matrix factorization/AutoRec/NeuralCF/SeqAwareRecsys等算法
-目的是 「基于用户行为的推荐」, "interaction", based on explicit显性/implicit隐形 interactions. 显性行为有打分、点赞、不喜欢等, 隐形行为有点击、曝光不点击等

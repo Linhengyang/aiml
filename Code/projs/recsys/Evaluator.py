@@ -4,7 +4,7 @@ import math
 from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator
 from ...Compute.VisualizeTools import Animator
 import yaml
-configs = yaml.load(open('Code/projs/cfrec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/recsys/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
 online_log_dir, proj_name = configs['online_log_dir'], configs['proj_name']
 
@@ -58,7 +58,7 @@ class mfEpochEvaluator(epochEvaluator):
                 self.eval_metric.add(l, mse, len(scores))
 
     def epoch_metric_cast(self):
-        '''log file path: ../logs/cfrec/xxxx.txt'''
+        '''log file path: ../logs/recsys/xxxx.txt'''
         loss, eval_loss, rmse, eval_rmse, l2_pen = None, None, None, None, None
         reveal_log, eval_log = '', ''
         if self.reveal_flag:
@@ -82,3 +82,19 @@ class mfEpochEvaluator(epochEvaluator):
             self.animator.add(self.epoch+1, (loss, eval_loss, rmse, eval_rmse))
         if (not self.visual_flag) and (self.reveal_flag or self.eval_flag):
             print(reveal_log + "\n" + eval_log)
+
+class autorecEpochEvaluator(mfEpochEvaluator):
+    def __init__(self, num_epochs, log_fname, visualizer=None, scalar_names=['loss', 'rmse']):
+        super().__init__(num_epochs, log_fname, visualizer, scalar_names)
+    
+    def evaluate_model(self, net, loss, valid_iter, num_batches=None):
+        if self.eval_flag:
+            net.eval()
+            for i, input_batch_matrix in enumerate(valid_iter):
+                if num_batches and i >= num_batches:
+                    break
+                S_hat = net(input_batch_matrix)
+                weight_params = [param for param_name, param in net.named_parameters() if param_name.endswith('weight')]
+                l = loss(S_hat, input_batch_matrix, *weight_params)
+                mse = torch.sum((S_hat*torch.sign(input_batch_matrix) - input_batch_matrix).pow(2))
+                self.eval_metric.add(l, mse, torch.sign(input_batch_matrix).sum().item())
