@@ -5,11 +5,11 @@ import torch
 import math
 import torch.nn as nn
 from .Dataset import MovieLensRatingDataset
-from .Network import explicitCF, ItemBasedAutoRec
+from .Network import MatrixFactorization, ItemBasedAutoRec
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
 from .Trainer import mfTrainer, autorecTrainer
 from .Evaluator import mfEpochEvaluator, autorecEpochEvaluator
-from .Predictor import MovieRatingPredictor
+from .Predictor import MovieRatingMFPredictor
 import yaml
 configs = yaml.load(open('Code/projs/cfrec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 local_model_save_dir = configs['local_model_save_dir']
@@ -27,7 +27,7 @@ def mf_train_job():
     num_users = trainset.num_users
     num_items = trainset.num_items
     num_factors = 5
-    net = explicitCF(num_factors, num_users, num_items)
+    net = MatrixFactorization(num_factors, num_users, num_items)
     loss = L2PenaltyMSELoss(0.1)
     # init trainer for num_epochs & batch_size & learning rate
     num_epochs, batch_size, lr = 200, 128, 0.00005
@@ -57,11 +57,11 @@ def mf_infer_job():
     num_users = validset.num_users
     num_items = validset.num_items
     num_factors = 5
-    net = explicitCF(num_factors, num_users, num_items)
+    net = MatrixFactorization(num_factors, num_users, num_items)
     trained_net_path = os.path.join(local_model_save_dir, 'cfrec', 'matrix_factorization_k5_v1.params')
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
-    rater = MovieRatingPredictor(device)
+    rater = MovieRatingMFPredictor(device)
     # predict
     print('truth ratings: ', scores)
     print('pred ratings: ', rater.predict(users, items, net))

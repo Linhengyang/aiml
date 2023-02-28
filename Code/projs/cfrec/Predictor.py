@@ -21,7 +21,7 @@ def rmse(pred_ratings, truth_ratings):
     assert pred_ratings.shape == truth_ratings.shape, 'preds and truth shape mismatch'
     return math.sqrt( torch.sum((pred_ratings - truth_ratings).pow(2)) / pred_ratings.numel() )
 
-class MovieRatingPredictor(easyPredictor):
+class MovieRatingMFPredictor(easyPredictor):
     def __init__(self, device=None):
         super().__init__()
         if device is not None and torch.cuda.is_available():
