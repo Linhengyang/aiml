@@ -82,3 +82,19 @@ class mfEpochEvaluator(epochEvaluator):
             self.animator.add(self.epoch+1, (loss, eval_loss, rmse, eval_rmse))
         if (not self.visual_flag) and (self.reveal_flag or self.eval_flag):
             print(reveal_log + "\n" + eval_log)
+
+class autorecEpochEvaluator(mfEpochEvaluator):
+    def __init__(self, num_epochs, log_fname, visualizer=None, scalar_names=['loss', 'rmse']):
+        super().__init__(num_epochs, log_fname, visualizer, scalar_names)
+    
+    def evaluate_model(self, net, loss, valid_iter, num_batches=None):
+        if self.eval_flag:
+            net.eval()
+            for i, input_batch_matrix in enumerate(valid_iter):
+                if num_batches and i >= num_batches:
+                    break
+                S_hat = net(input_batch_matrix)
+                weight_params = [param for param_name, param in net.named_parameters() if param_name.endswith('weight')]
+                l = loss(S_hat, input_batch_matrix, *weight_params)
+                mse = torch.sum((S_hat - input_batch_matrix).pow(2))
+                self.eval_metric.add(l, mse, torch.sign(input_batch_matrix).sum().item())
