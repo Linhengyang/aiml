@@ -53,6 +53,7 @@ the online working space must contain following directories:
     │   │   │   └── PositionalEncodings.py
     │   │   └── SubModules
     │   │       ├── AddLNorm.py
+    │   │       ├── MultiFeatEmbedding.py
     │   │       └── Patchify.py
     │   ├── Compute
     │   │   ├── EvaluateTools.py
@@ -63,12 +64,13 @@ the online working space must contain following directories:
     │   │   ├── L2PenaltyMSELoss.py
     │   │   └── MaskedCELoss.py
     │   ├── Modules
-    │   │   ├── _cfrec.py
+    │   │   ├── _recsys.py
     │   │   ├── _transformer.py
     │   │   └── _vit.py
     │   ├── Utils
     │   │   ├── Common
     │   │   │   ├── DataAssemble.py
+    │   │   │   ├── DataTransform.py
     │   │   │   └── SeqOperation.py
     │   │   ├── Text
     │   │   │   └── TextPreprocess.py
@@ -76,7 +78,7 @@ the online working space must contain following directories:
     │   │       └── PatchOperation.py
     │   └── projs
     │       ├── _mlp
-    │       ├── cfrec
+    │       ├── recsys
     │       ├── transformer
     │       └── vit
     ├── README.md

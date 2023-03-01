@@ -1,4 +1,5 @@
-这个project是协同过滤推荐「collaborative filtering recommender(cfrec)」算法的 pytorch版实现, 包括 matrix factorization/AutoRec/NeuralMF/SeqAwareRecsys
+一. 协同过滤 Collaborative Filtering
+这个部分是协同过滤推荐「collaborative filtering recommender(cfrec)」算法的 pytorch版实现, 包括 matrix factorization/AutoRec/NeuralMF/SeqAwareRecsys
 目的是 「基于用户行为的推荐」, 行为即"interaction", based on explicit显性/implicit隐形 interactions. 显性action有打分、点赞、不喜欢等, 隐性action有点击、曝光不点击等
 
 协同过滤collaborative filtering的本质, 是为了构建「user-item interaction matrix」, 即用户-物品交互矩阵.
@@ -9,12 +10,6 @@ interaction matrix中 0代表「完全未知」元, 即「i,j」元是0, 代表�
 一般用rmse去构造「值」的损失
 1. Matrix Factorizationn
 本质是用户id特征, embedd为k维的latent vector; 物品id特征, embedd为k维的latent vector; 最后用两个latent vector的内积作为interaction的预测
-
-理解embed:
-users_tensor: (batch_size, ) ---embed---> (batch_size, k)
-理解方式1: 查表, 即 (num_users, k)的全表, indexing users_tensor里的id值, 得到（batch_size, k)的子表
-理解方式2: 线性映射, 即 users_tensor(batch_size,) ---onehot---> (batch_size, num_users) ---linear transfer W---> (batch_size, k)
-其中方式2的线性映射表W, 就是方式1中的全表
 
 2. AutoRec(ItemBased or UserBased)
 本质是一个自编码器(完成恒等映射的MLP). 用已知的interaction元素作为label, 更新MLP中的参数.
@@ -29,3 +24,40 @@ users_tensor: (batch_size, ) ---embed---> (batch_size, k)
 对于隐性implicit interactions, 一般认为: 数值本身无意义, 但数值之间的序有意义, 并且0代表0而不是Null
 interaction matrix中 0代表「不足以做出行为」元, 即「i,j」元是0, 代表用户i对物品j没有做出行为.
 用相对距离去构造「序」的损失
+
+
+
+
+
+
+
+
+
+
+onehot和embedding的数据预处理
+在onehot和embed使用前, 都要对categorical data作 level-index 映射,
+比如在vocab中, 对tokens按使用频次高低映射到0至vocab_size-1的index值;在user_id中, 对原user_id减1, 映射到0至u_size-1的index值
+
+理解one-hot: nn.functional.one_hot(level_index, num_levels)
+level-index值 ----> length为 num_levels的vector, 其中level-index值的位置填1, 其余位置都是0
+
+理解embed:
+单个categorical特征, 以user_id即users_tensor为例:
+    users_tensor: (batch_size, ) ---embed---> (batch_size, k)
+    理解方式1: 查表, 即 (user_size, k)的全表, indexing users_tensor里的index值, 得到（batch_size, k)的子表
+    理解方式2: 线性映射, 即 users_tensor(batch_size,) ---onehot---> (batch_size, user_size) ---linear transfer W---> (batch_size, k)
+    其中方式2的线性映射表W, 就是方式1中的全表
+多个categorical特征, 以user_id/item_id/device_id/context_id为例:
+    (batch_size, 4(分别是uid, itemid, deviceid, contextid))
+    与token embedding不同, token index是同一个特征, one-hot后特征维度是唯一的, 即vocab_size. 而多个categorical特征, 各自one-hot后特征维度是不同的.
+    单个sample: (uid, iid, did, cid), one-hot后维度分别是(u_size, i_size, d_size, c_size)
+    可以分别embed成 Eu, Ei, Ed, Ec 维度的dense vector, 那么该样本由length=4的1-D categorical vector变成length=Eu+Ei+Ed+Ec的1-D dense vector
+    那么这样需要4个embedding, 分别是nn.embedding(u_size, Eu), nn.embedding(i_size, Ei), nn.embedding(d_size, Ed), nn.embedding(c_size, Ec), 然后拼接起来,
+    最后的结果shape是: (batch_size, Eu+Ei+Ed+Ec)
+
+    也可以统一embed成k维度的dense vector, 那么该样本由length=4的1-D level-index vector变成shape=(4, k)的2-D dense tensor, 可以继续摊平变成length=4*k的1-D dense vector
+    这样只需要一个embedding, 是nn.embedding(u_size+i_size+d_size+c_size, k).
+    理解方式: 1-D level-index vector [0001, 001, 01, 1] --onehot_concat--> [0,1,0,...,0,  0,1,0,...,0,  0,1,0,..,0,  0,1]这样一个sparse tensor(只在各特征相应位置是1)
+    --linear transfer W或查表--> shape为(4, k)的dense tensor --flatten--> length为(4*k, )的dense vector 
+    (这样理解下来, 其实就是让Eu=Ei=Ed=Ec=k, 分别embed后concat.)
+    onehot_concat不能由nn.functional.one_hot函数实现, 因为这个函数只能实现单个categorical特征的onehot变换.参见Code.Utils.Common.onehot_for_multi_labels
