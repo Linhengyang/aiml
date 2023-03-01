@@ -53,6 +53,7 @@ the online working space must contain following directories:
     │   │   │   └── PositionalEncodings.py
     │   │   └── SubModules
     │   │       ├── AddLNorm.py
+    │   │       ├── MultiFeatEmbedding.py
     │   │       └── Patchify.py
     │   ├── Compute
     │   │   ├── EvaluateTools.py
@@ -69,6 +70,7 @@ the online working space must contain following directories:
     │   ├── Utils
     │   │   ├── Common
     │   │   │   ├── DataAssemble.py
+    │   │   │   ├── DataTransform.py
     │   │   │   └── SeqOperation.py
     │   │   ├── Text
     │   │   │   └── TextPreprocess.py
