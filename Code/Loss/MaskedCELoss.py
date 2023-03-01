@@ -20,8 +20,8 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
         Loss tensor wight shape (batch_size,)
         Only losses from valid area are summed for every sample.
     '''
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def forward(self, pred, label, valid_len):
         '''
