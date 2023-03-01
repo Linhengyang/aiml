@@ -1,6 +1,7 @@
 from torch.utils import data
+from torch import Tensor
 
-def tensors2batch_iter(data_tensors, batch_size, is_train=True):
+def tensors2batch_iter(data_tensors: Tensor, batch_size: int, is_train=True):
     """
     inputs: data_tensors, batch_size, is_train(optional)
         data_tensors: container, consisted of multiple tensors(torch.tensor) with same length, e.g (features, labels, indices,...). 
