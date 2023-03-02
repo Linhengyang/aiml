@@ -44,9 +44,36 @@ level-index值 ----> length为 num_levels的vector, 其中level-index值的位�
 理解embed:
 单个categorical特征, 以user_id即users_tensor为例:
     users_tensor: (batch_size, ) ---embed---> (batch_size, k)
-    理解方式1: 查表, 即 (user_size, k)的全表, indexing users_tensor里的index值, 得到（batch_size, k)的子表
+    理解方式1: 查表, 即 (user_size, k)的全表, indexing users_tensor里的index值, 得到（batch_size, k）的子表
     理解方式2: 线性映射, 即 users_tensor(batch_size,) ---onehot---> (batch_size, user_size) ---linear transfer W---> (batch_size, k)
     其中方式2的线性映射表W, 就是方式1中的全表
+
+embed是否必须是降维？
+降维embed:
+「大类别中的类别单值」--->「低维dense向量」, 中间如果经过「高维onehot向量」,即为理解方式2
+    「大类别中的类别单值」 --embed--> 「低维dense向量」
+     scalar_value      --------->  [d1, d2, ..dk] dense vector
+
+    「大类别中的类别单值」--onehot--> 「高维onehot 0-1向量」             -----linear----> 「低维dense向量」
+     scalar_value     ---------->  [0, 0, ..,1,...0] onehot vector  -------------->  [d1, d2, ..dk] dense vector
+
+升维embed:
+「小类别中的类别单值」  --onehot--> 「低维onehot 0-1向量」 -----linear----> 「高维dense向量」
+     0或1            ---------->    [0, 1]或[1, 0]    --------------->  [d1, d2, ..dk] dense vector
+
+高维onehot向量本身也可以看作「多个类别单值特征组成」. 将每个类别单值特征作升维embed, 也是可以的. Factorization Machine中若按照embedding理解, 即会出现这种情况.
+    「大类别中的类别单值」 --onehot--> 「高维onehot 0-1向量」(N维) , 视作N个类别单值特征 --各自embed--> N个k维dense向量
+
+所以在文献中, 对 类别数量为value_size的「大类别中的类别单值」, 有两种embedding且一直在混着用.
+    一种多见于对user_id/token_id等value_size超巨大的类别单值特征, 一般是降维embed, 结果是1个k维dense vector
+    
+    另一种多见于需要特征交叉的模型, 比如 prov_id, value_size不算大, 那么一般是先onehot成value_size个类别单值特征, 然后升维embed, 结果是value_size个k维dense vector 
+    结合特征交叉, 比如prov_id和age_id, value_size分别为prov_size和age_size. 那么一般是:
+    1 分别onehot成prov_size维和age_size维的onehot vectors, 
+    2 特征交叉, 笛卡尔乘积出一个 prov_size*age_size 维度的onehot vector, 可以看作是新特征 prov-age_id 的onehot表示,
+    3 对当前 prov_size+age_size+prov_size*age_size 个类别单值特征作升维embed, 结果是这么多个k维dense vector
+
+
 多个categorical特征, 以user_id/item_id/device_id/context_id为例:
     (batch_size, 4(分别是uid, itemid, deviceid, contextid))
     与token embedding不同, token index是同一个特征, one-hot后特征维度是唯一的, 即vocab_size. 而多个categorical特征, 各自one-hot后特征维度是不同的.
