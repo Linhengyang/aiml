@@ -16,7 +16,12 @@ eval_cnt_in_train: 6 # 训练过程中模型衡量次数. valid loss/valid accur
 # 读入的数据存储位置
 base_data_dir: '../../data'
 movielens_dir: 'MovieLens/ml-100k'
-data_fname: 'u.data'
+movielens_fname: 'u.data'
+
+d2lctr_dir: 'CTR'
+d2lctr_train_fname: 'train.csv'
+d2lctr_valid_fname: 'test.csv'
+d2lctr_test_fname: 'test.csv'
 
 # 读入的模型存储位置
 local_model_save_dir: '../../model'
