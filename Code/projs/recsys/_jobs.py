@@ -5,7 +5,7 @@ import torch
 import math
 import torch.nn as nn
 from .Dataset import MovieLensRatingDataset, d2lCTRDataset
-from .Network import MatrixFactorization, ItemBasedAutoRec, FactorizationMachine
+from .Network import MatrixFactorization, ItemBasedAutoRec, FactorizationMachine, deepFM
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
 from .Trainer import mfTrainer, autorecTrainer, fmTrainer
 from .Evaluator import mfEpochEvaluator, autorecEpochEvaluator, fmEpochEvaluator
@@ -20,6 +20,32 @@ d2lctr_dir = configs["d2lctr_dir"]
 d2lctr_train_fname = configs['d2lctr_train_fname']
 d2lctr_valid_fname = configs['d2lctr_valid_fname']
 d2lctr_test_fname = configs['d2lctr_test_fname']
+
+def deepfm_train_job():
+    # build dataset from local data
+    trainset = d2lCTRDataset( os.path.join(base_data_dir, d2lctr_dir, d2lctr_train_fname) )
+    validset = d2lCTRDataset( os.path.join(base_data_dir, d2lctr_dir, d2lctr_valid_fname) )
+    testset = d2lCTRDataset( os.path.join(base_data_dir, d2lctr_dir, d2lctr_test_fname) )
+    # design net & loss
+    num_factor = 10
+    net = deepFM(trainset.num_classes, num_factor, [128, 64, 16])
+    loss = nn.BCELoss()
+    # init trainer for num_epochs & batch_size & learning rate
+    num_epochs, batch_size, lr = 100, 2048, 0.00015
+    trainer = fmTrainer(net, loss, num_epochs, batch_size)
+    trainer.set_device(torch.device('cuda'))## set the device
+    trainer.set_data_iter(trainset, validset, testset)## set the data iters
+    trainer.set_optimizer(lr)## set the optimizer
+    trainer.set_epoch_eval(fmEpochEvaluator(num_epochs, 'deepfm_train_logs.txt', visualizer=False))## set the epoch evaluator
+    # start
+    check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
+    if check_flag:
+        trainer.log_topology('deepFM.txt')## print the defined topology
+        trainer.init_params()## init params
+    # fit
+    trainer.fit()
+    # save
+    trainer.save_model('deepFM_k10_v1.params')
 
 def fm_train_job():
     # build dataset from local data
