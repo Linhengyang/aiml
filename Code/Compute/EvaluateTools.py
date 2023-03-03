@@ -2,6 +2,8 @@ import time
 import numpy as np
 import collections
 import math
+import torch
+from torch import Tensor
 
 class Timer:  #@save
     """Record multiple running times."""
@@ -90,13 +92,81 @@ def bleu(pred_seq, label_seq, k):
         score *= math.pow(num_matches / (len_pred - n + 1), math.pow(0.5, n))
     return score
 
-def accuracy(y_hat, y):
+def accuracy(y_hat: Tensor, y: Tensor):
     """
     计算预测正确的数量, 类似nn.CrossEntropyLoss
     y_hat: (batch_size, num_classes, positions(optional)), elements是logit或softmax后的Cond Prob
     y: (batch_size, positions(optional)), elements是label(非one-hot), dtype是torch.int64
+    输出整个batch中预测正确的个体数量(不是样本数量), 相当于CELoss reduction='sum'
     """
     if len(y_hat.shape) > 1 and y_hat.shape[1] > 1:
         y_hat = y_hat.argmax(dim=1)
     cmp = y_hat.type(y.dtype) == y
     return float(cmp.type(y.dtype).sum())
+
+def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
+    """
+    计算二值预测中正确的数量, 类似nn.BCELoss(Binary Cross Entropy Loss)
+    y_hat: (batch_size, positions(optional)), elements是logit或softmax后的Cond Prob
+    y: (batch_size, positions(optional)), elements是0或1, dtype是torch.int64
+    threshold: 预测为1的阈值
+    输出整个batch中预测正确的个体数量(不是样本数量), 相当于BCELoss reduction='sum'
+    """
+    cmp = (y_hat > threshold).type(y.dtype) == y
+    return float(cmp.type(y.dtype).sum())
+
+# 二分类问题的四种预测结果
+# True Positive: 正确地判别成1, 即Truth为1的元素, 预测为1
+# False Negative: 错误地判别成0, 即Truth为1的元素, 预测为0
+# True Negative: 正确地判别成0, 即Truth为0的元素, 预测为0
+# False Positive: 错误地判别成1, 即Truth为0的元素, 预测为1
+
+def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
+    '''
+    y_hat & y shape: (*), same shape
+    '''
+    truth_p_mask = torch.sign(y).type(torch.bool)
+    TP = binary_accuracy(y_hat[truth_p_mask], y[truth_p_mask], threshold)
+    FN = binary_accuracy(y_hat[truth_p_mask], 1-y[truth_p_mask], threshold)
+    TN = binary_accuracy(y_hat[~truth_p_mask], y[~truth_p_mask], threshold)
+    FP = binary_accuracy(y_hat[~truth_p_mask], 1-y[~truth_p_mask], threshold)
+    assert TP + FN == y[truth_p_mask].numel()
+    assert TN + FP == y[~truth_p_mask].numel()
+    return {'TP':TP, 'FN':FN, 'TN':TN, 'FP':FP}
+
+def binary_classify_eval_rates(y_hat: Tensor, y: Tensor, threshold=0.5):
+    '''
+    y_hat & y shape: (*), same shape
+    '''
+    confuse_mat = confuse_mat(y_hat, y, threshold)
+    TP, FN, TN, FP = confuse_mat['TP'], confuse_mat['FN'], confuse_mat['TN'], confuse_mat['FP']
+    acc_rt, precision, recall = (TP+TN)/(TP+FN+TN+FP), TP/(TP+FP), TP/(TP+FN)
+    FPR = FP/(FP+TN)
+    return {'acc_rt':acc_rt, 'precision':precision, 'recall':recall, 'TPR':recall, 'FPR':FPR}
+
+# ROC曲线: 给定一个二分类器和阈值, 作用在样本V中, 关注预测为Positive的样本, 可得到TPR和FPR
+# TPR = TP/(TP+FN), 所有真实为P的样本中, 预测为P的比例, 就是recall
+# FPR = FP/(FP+TN), 所有真实为N的样本中, 预测为P的比例
+# 以FPR为横坐标, TPR为纵坐标, plot点. 显然TPR接近1越好, FPR越接近0越好, 所以点在左上角(0, 1)最好
+# 针对一个二分类器, 滑动阈值从0到1.
+# 当阈值为0时, 所有样本预测为1, 此时FN=TN=0, TPR=FPR=1, 点在(1, 1)
+# 当阈值为1时, 所有样本预测为0, 此时TP=FP=0, TPR=FPR=0, 点在(0, 0)
+# 当阈值从1到0时, 由于标准放低, 更多样本被预测为1, FN和TN都会减小或持平(二者之和会减小), 所以TPR和FPR都会变大或持平
+def roc_curve(net, sample):
+    raise NotImplementedError
+
+# AUC指标: ROC曲线下面的面积, 代表「随机给定一对正负样本, 存在一个阈值可用在该分类器上将二者分开」的概率, 即「随机给定一对正负样本, 二者的预测序正确」的概率
+def auc(preds :Tensor, labels: Tensor) -> tuple:
+    '''
+    preds & labels shape: (batch_size, )
+    '''
+    pos_preds = preds[ torch.sign(labels).type(torch.bool) ] # 正样本的preds, shape(num_pos, )
+    neg_preds = preds[ ~torch.sign(labels).type(torch.bool) ] # 负样本的preds, shape(num_neg, )
+    cmp_cnt = pos_preds.shape[0] * neg_preds.shape[0]
+    if cmp_cnt > 0:
+        correct_cnt = ( pos_preds.unsqueeze(0) > neg_preds.unsqueeze(1) ).sum().item()
+        auc = correct_cnt/cmp_cnt
+    else: # 如果可比正负对数为0, 则跳过本次比较
+        correct_cnt = 0
+        auc = 0
+    return (auc, correct_cnt, cmp_cnt)
