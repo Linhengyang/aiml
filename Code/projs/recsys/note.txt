@@ -31,7 +31,10 @@ interaction matrix中 0代表「不足以做出行为」元, 即「i,j」元是0
 
 
 
-
+特征交叉
+比如prov_id和age_id, value_size分别为prov_size和age_size. 那么一般是:
+1 分别onehot成prov_size维和age_size维的onehot vectors, 
+2 特征交叉, 笛卡尔乘积出一个 prov_size*age_size 维度的onehot vector, 可以看作是新特征 prov-age_id 的onehot表示,
 
 
 onehot和embedding的数据预处理
@@ -48,30 +51,13 @@ level-index值 ----> length为 num_levels的vector, 其中level-index值的位�
     理解方式2: 线性映射, 即 users_tensor(batch_size,) ---onehot---> (batch_size, user_size) ---linear transfer W---> (batch_size, k)
     其中方式2的线性映射表W, 就是方式1中的全表
 
-embed是否必须是降维？
-降维embed:
+即:
 「大类别中的类别单值」--->「低维dense向量」, 中间如果经过「高维onehot向量」,即为理解方式2
     「大类别中的类别单值」 --embed--> 「低维dense向量」
      scalar_value      --------->  [d1, d2, ..dk] dense vector
 
     「大类别中的类别单值」--onehot--> 「高维onehot 0-1向量」             -----linear----> 「低维dense向量」
      scalar_value     ---------->  [0, 0, ..,1,...0] onehot vector  -------------->  [d1, d2, ..dk] dense vector
-
-升维embed:
-「小类别中的类别单值」  --onehot--> 「低维onehot 0-1向量」 -----linear----> 「高维dense向量」
-     0或1            ---------->    [0, 1]或[1, 0]    --------------->  [d1, d2, ..dk] dense vector
-
-高维onehot向量本身也可以看作「多个类别单值特征组成」. 将每个类别单值特征作升维embed, 也是可以的. Factorization Machine中若按照embedding理解, 即会出现这种情况.
-    「大类别中的类别单值」 --onehot--> 「高维onehot 0-1向量」(N维) , 视作N个类别单值特征 --各自embed--> N个k维dense向量
-
-所以在文献中, 对 类别数量为value_size的「大类别中的类别单值」, 有两种embedding且一直在混着用.
-    一种多见于对user_id/token_id等value_size超巨大的类别单值特征, 一般是降维embed, 结果是1个k维dense vector
-    
-    另一种多见于需要特征交叉的模型, 比如 prov_id, value_size不算大, 那么一般是先onehot成value_size个类别单值特征, 然后升维embed, 结果是value_size个k维dense vector 
-    结合特征交叉, 比如prov_id和age_id, value_size分别为prov_size和age_size. 那么一般是:
-    1 分别onehot成prov_size维和age_size维的onehot vectors, 
-    2 特征交叉, 笛卡尔乘积出一个 prov_size*age_size 维度的onehot vector, 可以看作是新特征 prov-age_id 的onehot表示,
-    3 对当前 prov_size+age_size+prov_size*age_size 个类别单值特征作升维embed, 结果是这么多个k维dense vector
 
 
 多个categorical特征, 以user_id/item_id/device_id/context_id为例:
@@ -88,3 +74,20 @@ embed是否必须是降维？
     --linear transfer W或查表--> shape为(4, k)的dense tensor --flatten--> length为(4*k, )的dense vector 
     (这样理解下来, 其实就是让Eu=Ei=Ed=Ec=k, 分别embed后concat.)
     onehot_concat不能由nn.functional.one_hot函数实现, 因为这个函数只能实现单个categorical特征的onehot变换.参见Code.Utils.Common.onehot_for_multi_labels
+
+总结:
+1. 有一张统一的embedding权重表weights.
+    对于「单个categorical特征」, 这张weights表的统一性是天然的, 形状是(value_size, k)
+    对于「多个不同categorical特征」, weights表的统一性并不天然. 什么叫统一? 对每个特征的每个value值, 有唯一的k维向量值对应. 
+    幸运的是, 经过offset操作, 这张统一的weights表也可以得到, 形状是(value_size_feat1+...+value_size_featN, k)
+2. onehot操作(并concat) + onehot向量乘以权重表weights操作 ---> embedd操作
+    对于「单个categorical特征」, onehot操作后, 得到shape为(value_size, )的独热行向量, 
+    然后右乘weights表, 得到embeddings结果, shape为(k, )
+    
+    对于「N个同一categorical特征」, onehot操作后, 得到shape为(N, value_size)的独热行向量们, 
+    然后右乘weights表, 得到embeddings结果, shape为(N, k)
+
+    对于「M个不同categorical特征」, 各自onehot操作并concat后, 得到shape为(value_size_feat1+...+value_size_featM, )的稀疏行向量,
+    然后右乘weights表, 得到embeddings结果, shape为(M, k). 考虑属于同一样本, 可以选择摊平为(M*k, )的结果
+
+由此可见, 只有在onehot操作后, embedding操作和右乘weights矩阵是一回事, 因为独热行向量x 右乘 embedding weights等于embdding结果.
