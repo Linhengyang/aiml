@@ -48,4 +48,3 @@ class MultiCategFeatEmbedding(nn.Module):
             return embed_.flatten(start_dim=-2) # shape: (*, num_features*num_factor)
         else:
             return embed_
-        nn.Embedding
