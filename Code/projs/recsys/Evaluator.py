@@ -103,10 +103,13 @@ class fmEpochEvaluator(mfEpochEvaluator):
     def __init__(self, num_epochs, log_fname, visualizer=None, scalar_names=['loss', 'auc', 'accuracy']):
         assert num_epochs >= max(self.reveal_cnts, self.eval_cnts), 'num_epochs must be larger than reveal cnts & eval cnts'
         assert len(scalar_names) >= 1, 'train loss is at least for evaluating train epochs'
-        super().__init__(num_epochs, log_fname, visualizer, scalar_names)
+        self.num_epochs, self.num_scalars = num_epochs, len(scalar_names)
+        self.log_file = os.path.join(online_log_dir, proj_name, log_fname)
+        with open(self.log_file, 'w') as f:
+            print('train begin', file=f)
         self.legends = ['train_loss', 'val_loss', 'train_acc', 'val_acc']
-        # if self.visual_flag:
-        #     self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
+        if self.visual_flag:
+            self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
 
     def batch_record(self, y_hat, label, l):
         # shapes都是(batch_size, )
