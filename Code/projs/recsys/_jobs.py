@@ -4,22 +4,52 @@ warnings.filterwarnings("ignore")
 import torch
 import math
 import torch.nn as nn
-from .Dataset import MovieLensRatingDataset
-from .Network import MatrixFactorization, ItemBasedAutoRec
+from .Dataset import MovieLensRatingDataset, d2lCTRDataset
+from .Network import MatrixFactorization, ItemBasedAutoRec, FactorizationMachine
 from ...Loss.L2PenaltyMSELoss import L2PenaltyMSELoss
-from .Trainer import mfTrainer, autorecTrainer
-from .Evaluator import mfEpochEvaluator, autorecEpochEvaluator
+from .Trainer import mfTrainer, autorecTrainer, fmTrainer
+from .Evaluator import mfEpochEvaluator, autorecEpochEvaluator, fmEpochEvaluator
 from .Predictor import MovieRatingMFPredictor
 import yaml
 configs = yaml.load(open('Code/projs/recsys/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 local_model_save_dir = configs['local_model_save_dir']
 base_data_dir = configs['base_data_dir']
 movielens_dir = configs['movielens_dir']
-data_fname = configs['data_fname']
+movielens_fname = configs['movielens_fname']
+d2lctr_dir = configs["d2lctr_dir"]
+d2lctr_train_fname = configs['d2lctr_train_fname']
+d2lctr_valid_fname = configs['d2lctr_valid_fname']
+d2lctr_test_fname = configs['d2lctr_test_fname']
+
+def fm_train_job():
+    # build dataset from local data
+    trainset = d2lCTRDataset( os.path.join(base_data_dir, d2lctr_dir, d2lctr_train_fname) )
+    validset = d2lCTRDataset( os.path.join(base_data_dir, d2lctr_dir, d2lctr_valid_fname) )
+    testset = d2lCTRDataset( os.path.join(base_data_dir, d2lctr_dir, d2lctr_test_fname) )
+    # design net & loss
+    num_factor = 20
+    net = FactorizationMachine(trainset.num_classes, num_factor)
+    loss = nn.BCELoss()
+    # init trainer for num_epochs & batch_size & learning rate
+    num_epochs, batch_size, lr = 100, 1024, 0.0005
+    trainer = fmTrainer(net, loss, num_epochs, batch_size)
+    trainer.set_device(torch.device('cuda'))## set the device
+    trainer.set_data_iter(trainset, validset, testset)## set the data iters
+    trainer.set_optimizer(lr)## set the optimizer
+    trainer.set_epoch_eval(fmEpochEvaluator(num_epochs, 'fm_train_logs.txt', visualizer=True))## set the epoch evaluator
+    # start
+    check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
+    if check_flag:
+        trainer.log_topology('factorization_machine.txt')## print the defined topology
+        trainer.init_params()## init params
+    # fit
+    trainer.fit()
+    # save
+    trainer.save_model('factorization_machine_k5_v1.params')
 
 def mf_train_job():
     # build dataset from local data
-    data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
+    data_path = os.path.join(base_data_dir, movielens_dir, movielens_fname)
     trainset = MovieLensRatingDataset(data_path, True, 'random')
     validset = MovieLensRatingDataset(data_path, False, 'random')
     testset = MovieLensRatingDataset(data_path, False, 'random')
@@ -48,7 +78,7 @@ def mf_train_job():
 
 def mf_infer_job():
     device = torch.device('cpu')
-    data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
+    data_path = os.path.join(base_data_dir, movielens_dir, movielens_fname)
     validset = MovieLensRatingDataset(data_path, False, 'random', seed=0)
     valid_iter = torch.utils.data.DataLoader(validset, 10, True)
     for users, items, scores in valid_iter:
@@ -70,7 +100,7 @@ def mf_infer_job():
 
 def autorec_train_job():
     # build dataset from local data
-    data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
+    data_path = os.path.join(base_data_dir, movielens_dir, movielens_fname)
     train_dataset = MovieLensRatingDataset(data_path, True, 'random')
     trainset = train_dataset.interactions_itembased
     valid_dataset = MovieLensRatingDataset(data_path, False, 'random')
@@ -102,7 +132,7 @@ def autorec_train_job():
 
 def autorec_infer_job():
     device = torch.device('cpu')
-    data_path = os.path.join(base_data_dir, movielens_dir, data_fname)
+    data_path = os.path.join(base_data_dir, movielens_dir, movielens_fname)
     test_dataset = MovieLensRatingDataset(data_path, False, 'random')
     testset = test_dataset.interactions_itembased
     # design net & loss

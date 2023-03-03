@@ -98,3 +98,54 @@ class autorecEpochEvaluator(mfEpochEvaluator):
                 l = loss(S_hat, input_batch_matrix, *weight_params)
                 mse = torch.sum((S_hat*torch.sign(input_batch_matrix) - input_batch_matrix).pow(2))
                 self.eval_metric.add(l, mse, torch.sign(input_batch_matrix).sum().item())
+
+class fmEpochEvaluator(mfEpochEvaluator):
+    def __init__(self, num_epochs, log_fname, visualizer=None, scalar_names=['loss', 'auc', 'accuracy']):
+        assert num_epochs >= max(self.reveal_cnts, self.eval_cnts), 'num_epochs must be larger than reveal cnts & eval cnts'
+        assert len(scalar_names) >= 1, 'train loss is at least for evaluating train epochs'
+        super().__init__(num_epochs, log_fname, visualizer, scalar_names)
+        self.legends = ['train_loss', 'val_loss', 'train_acc', 'val_acc']
+        # if self.visual_flag:
+        #     self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
+
+    def batch_record(self, y_hat, label, l):
+        # shapes都是(batch_size, )
+        if self.reveal_flag:
+            preds = (y_hat > 0.5).type(label.dtype)
+            self.reveal_metric.add(l.sum(), (preds == label).sum().item(), label.numel())
+    
+    def evaluate_model(self, net, loss, valid_iter, num_batches=None):
+        if self.eval_flag:
+            net.eval()
+            for i, (features, label) in enumerate(valid_iter):
+                if num_batches and i >= num_batches:
+                    break
+                y_hat = net(features)
+                preds = (y_hat > 0.5).type(label.dtype)
+                l = loss(y_hat, label)
+                self.eval_metric.add(l.sum(), (preds == label).sum().item(), label.numel())
+
+    def epoch_metric_cast(self):
+        '''log file path: ../logs/recsys/xxxx.txt'''
+        loss, eval_loss, acc, eval_acc = None, None, None, None
+        reveal_log, eval_log = '', ''
+        if self.reveal_flag:
+            time_cost = self.timer.stop()
+            loss = round(self.reveal_metric[0]/self.reveal_metric[2], 3)
+            acc = round(math.sqrt(self.reveal_metric[1] / self.reveal_metric[2]),3)
+            speed = round(self.reveal_metric[2]/time_cost)
+            reveal_log = ",\t".join(['epoch: '+str(self.epoch+1), 'loss/row: '+str(loss), 'acc: '+str(acc),
+                                     'speed(row/sec): '+str(speed), 'remain_time(min): '+str(round(time_cost*(self.num_epochs-self.epoch-1)/60))])
+            with open(self.log_file, 'a+') as f:
+                f.write(reveal_log+'\n')
+        if self.eval_flag:
+            eval_loss = round(self.eval_metric[0]/self.eval_metric[2], 3)
+            eval_acc = round(math.sqrt(self.eval_metric[1] / self.eval_metric[2]), 3)
+            eval_log = ",\t".join(['epoch: '+str(self.epoch+1), 'val_loss/row: '+str(eval_loss), 'val_acc: '+str(eval_acc)])
+            with open(self.log_file, 'a+') as f:
+                f.write(eval_log+'\n')
+        if self.visual_flag:
+            # 线条的顺序要和legends一一对应. 目前只支持最多4条线
+            self.animator.add(self.epoch+1, (loss, eval_loss, acc, eval_acc))
+        if (not self.visual_flag) and (self.reveal_flag or self.eval_flag):
+            print(reveal_log + "\n" + eval_log)

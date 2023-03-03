@@ -31,7 +31,10 @@ interaction matrix中 0代表「不足以做出行为」元, 即「i,j」元是0
 
 
 
-
+特征交叉
+比如prov_id和age_id, value_size分别为prov_size和age_size. 那么一般是:
+1 分别onehot成prov_size维和age_size维的onehot vectors, 
+2 特征交叉, 笛卡尔乘积出一个 prov_size*age_size 维度的onehot vector, 可以看作是新特征 prov-age_id 的onehot表示,
 
 
 onehot和embedding的数据预处理
@@ -44,9 +47,19 @@ level-index值 ----> length为 num_levels的vector, 其中level-index值的位�
 理解embed:
 单个categorical特征, 以user_id即users_tensor为例:
     users_tensor: (batch_size, ) ---embed---> (batch_size, k)
-    理解方式1: 查表, 即 (user_size, k)的全表, indexing users_tensor里的index值, 得到（batch_size, k)的子表
+    理解方式1: 查表, 即 (user_size, k)的全表, indexing users_tensor里的index值, 得到（batch_size, k）的子表
     理解方式2: 线性映射, 即 users_tensor(batch_size,) ---onehot---> (batch_size, user_size) ---linear transfer W---> (batch_size, k)
     其中方式2的线性映射表W, 就是方式1中的全表
+
+即:
+「大类别中的类别单值」--->「低维dense向量」, 中间如果经过「高维onehot向量」,即为理解方式2
+    「大类别中的类别单值」 --embed--> 「低维dense向量」
+     scalar_value      --------->  [d1, d2, ..dk] dense vector
+
+    「大类别中的类别单值」--onehot--> 「高维onehot 0-1向量」             -----linear----> 「低维dense向量」
+     scalar_value     ---------->  [0, 0, ..,1,...0] onehot vector  -------------->  [d1, d2, ..dk] dense vector
+
+
 多个categorical特征, 以user_id/item_id/device_id/context_id为例:
     (batch_size, 4(分别是uid, itemid, deviceid, contextid))
     与token embedding不同, token index是同一个特征, one-hot后特征维度是唯一的, 即vocab_size. 而多个categorical特征, 各自one-hot后特征维度是不同的.
@@ -61,3 +74,20 @@ level-index值 ----> length为 num_levels的vector, 其中level-index值的位�
     --linear transfer W或查表--> shape为(4, k)的dense tensor --flatten--> length为(4*k, )的dense vector 
     (这样理解下来, 其实就是让Eu=Ei=Ed=Ec=k, 分别embed后concat.)
     onehot_concat不能由nn.functional.one_hot函数实现, 因为这个函数只能实现单个categorical特征的onehot变换.参见Code.Utils.Common.onehot_for_multi_labels
+
+总结:
+1. 有一张统一的embedding权重表weights.
+    对于「单个categorical特征」, 这张weights表的统一性是天然的, 形状是(value_size, k)
+    对于「多个不同categorical特征」, weights表的统一性并不天然. 什么叫统一? 对每个特征的每个value值, 有唯一的k维向量值对应. 
+    幸运的是, 经过offset操作, 这张统一的weights表也可以得到, 形状是(value_size_feat1+...+value_size_featN, k)
+2. onehot操作(并concat) + onehot向量乘以权重表weights操作 ---> embedd操作
+    对于「单个categorical特征」, onehot操作后, 得到shape为(value_size, )的独热行向量, 
+    然后右乘weights表, 得到embeddings结果, shape为(k, )
+    
+    对于「N个同一categorical特征」, onehot操作后, 得到shape为(N, value_size)的独热行向量们, 
+    然后右乘weights表, 得到embeddings结果, shape为(N, k)
+
+    对于「M个不同categorical特征」, 各自onehot操作并concat后, 得到shape为(value_size_feat1+...+value_size_featM, )的稀疏行向量,
+    然后右乘weights表, 得到embeddings结果, shape为(M, k). 考虑属于同一样本, 可以选择摊平为(M*k, )的结果
+
+由此可见, 只有在onehot操作后, embedding操作和右乘weights矩阵是一回事, 因为独热行向量x 右乘 embedding weights等于embdding结果.

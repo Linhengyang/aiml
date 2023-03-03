@@ -1,6 +1,7 @@
 import torch
 import pandas as pd
 import numpy as np
+from ...Utils.Common.DataTransform import CategDataParser
 
 def id2index(idx):
     return int(idx) - 1
@@ -66,3 +67,21 @@ class MovieLensRatingDataset(torch.utils.data.Dataset):
         self._interactions_userbased = torch.zeros(self._num_users, self._num_items, dtype=torch.float32)
         self._interactions_userbased[self.user_tensor, self.item_tensor] = self.score_tensor
         return self._interactions_userbased
+
+class d2lCTRDataset(torch.utils.data.Dataset):
+    def __init__(self, data_path):
+        parser = CategDataParser(data_path, num_cols=[1, 34], set_label_mappers={1:{'0':0, '1':1}})
+        dataset = torch.tensor(parser.mapped_data, dtype=torch.int64) # (sample_size, 35)
+        self.label = dataset[:, 0].type(torch.float32) # (sample_size, )
+        self.features = dataset[:, 1:] # (sample_size, 34)
+        self._num_classes = torch.tensor(parser.feat_dims, dtype=torch.int64) # (34,)
+    
+    def __len__(self):
+        return self.label.shape[0]
+    
+    def __getitem__(self, index):
+        return (self.features[index], self.label[index])
+    
+    @property
+    def num_classes(self):
+        return self._num_classes

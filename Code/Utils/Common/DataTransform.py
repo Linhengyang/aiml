@@ -141,27 +141,45 @@ class CategDataParser:
 
     @property
     def label_mapper(self):
-        return self._label_mapper
+        if self.LABEL_FIRST:
+            return self._label_mapper
+        else:
+            return self._feat_mapper
     
     @property
     def feat_mapper(self):
-        return self._feat_mapper
+        if self.LABEL_FIRST:
+            return self._feat_mapper
+        else:
+            return self._label_mapper
     
     @property
     def label_defaults(self):
-        return self._label_defaults
+        if self.LABEL_FIRST:
+            return self._label_defaults
+        else:
+            return self._feat_defaults
     
     @property
     def feat_defaults(self):
-        return self._feat_defaults
+        if self.LABEL_FIRST:
+            return self._feat_defaults
+        else:
+            return self._label_defaults
     
     @property
     def label_dims(self):
-        return self._label_dims
+        if self.LABEL_FIRST:
+            return self._label_dims
+        else:
+            return self._feat_dims
     
     @property
     def feat_dims(self):
-        return self._feat_dims
+        if self.LABEL_FIRST:
+            return self._feat_dims
+        else:
+            return self._label_dims
     
     @property
     def raw_data(self):
