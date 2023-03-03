@@ -55,3 +55,35 @@ class FactorizationMachine(nn.Module):
         sum_of_square = (embedd_.pow(2)).sum(dim=1) # shape (batch_size, num_factor)
         quadratic = 0.5 * (square_of_sum - sum_of_square).sum(dim=1) # (batch_size, num_factor) -> (batch_size,)
         return self.sigmoid(bias + linear + quadratic)
+
+class deepFM(nn.Module):
+    '''
+    FM & MLP share common embeddings
+    '''
+    def __init__(self, num_classes, num_factor, mlp_hidden_dims: list, dropout=0.1):
+        super().__init__()
+        self.num_classes = num_classes
+        self.quadratic_embedding = MultiCategFeatEmbedding(num_classes, num_factor, False)
+        self.linear_embedding = MultiCategFeatEmbedding(num_classes, 1, False)
+        self.global_bias = nn.Parameter(torch.zeros(1))
+        mlp_input_dim = len(num_classes) * num_factor # mlp input dim
+        self.mlp = nn.Sequential()
+        for out_dim in mlp_hidden_dims:
+            self.mlp.append(nn.Linear(mlp_input_dim, out_dim))
+            self.mlp.append(nn.ReLU())
+            self.mlp.append(nn.Dropout(dropout))
+            mlp_input_dim = out_dim
+        self.mlp.append(nn.Linear(out_dim, 1)) # mlp output dim = 1
+        self.sigmoid = nn.Sigmoid()
+    
+    def forward(self, input):
+        # input shape: (batch_size, num_features)
+        bias = self.global_bias.expand(input.shape[0])# (batch_size,)
+        linear = self.linear_embedding(input).squeeze(2).sum(dim=1) # (batch_size, num_features, 1) -> (bs, num_features) -> (bs,)
+        embdd_ = self.quadratic_embedding(input) # (batch_size, num_features, num_factors)
+        square_of_sum = embdd_.sum(dim=1).pow(2) # (batch_size, num_factors)
+        sum_of_square = embdd_.pow(2).sum(dim=1) # (batch_size, num_factors)
+        quadra = 0.5*(square_of_sum-sum_of_square).sum(dim=1) # (batch_size, )
+        y_fm = bias + linear + quadra #(batch_size,)
+        y_mlp = self.mlp(embdd_.flatten(start_dim=1)).squeeze(1) # (batch_size, num_features*num_factors) -> (bs, 1) -> (bs,)
+        return self.sigmoid(y_fm + y_mlp) # (bs, )
