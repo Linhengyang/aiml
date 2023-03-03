@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 import math
 from ...Modules._recsys import MaskedMatrixFactorization, UnMaskMatrixFactorization
-from ...Base.SubModules.MultiFeatEmbedding import MultiCategFeatEmbedding
+from ...Base.RootLayers.MultiCategFeatEmbedding import MultiCategFeatEmbedding
 
 class MatrixFactorization(nn.Module):
     def __init__(self, num_factors, num_users, num_items):
@@ -40,19 +40,18 @@ class FactorizationMachine(nn.Module):
         '''
         super().__init__()
         self.num_classes = num_classes
-        input_dim = int(sum(num_classes))
-        self.embedding = MultiCategFeatEmbedding(input_dim, num_factor)
-        self.fc = MultiCategFeatEmbedding(input_dim, 1)
+        self.quadratic_embedding = MultiCategFeatEmbedding(num_classes, num_factor, False)
+        self.linear_embedding = MultiCategFeatEmbedding(num_classes, 1, False)
         self.global_bias = nn.Parameter(torch.zeros(1))
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, input):
+        # input = offset_multifeatures(input, self.num_classes)
         # input shape: (batch_size, num_features). each feature has its own value_size stored in num_classes
         bias = self.global_bias.expand(input.shape[0]) # (1,) -> (batch_size, )
-        linear = self.fc(input, self.num_classes).sum(dim=1) #  shape (batch_size, num_features) -> (batch_size,)
-        embedd_ = self.embedding(input, self.num_classes, False) # shape (batch_size, num_features, num_factor)
-        input_ = input.unsqueeze(2) # (batch_size, num_features, 1)
-        square_of_sum = (embedd_ * input_).sum(dim=1).pow(2) # (batch_size, num_features, num_factor) -> (batch_size, num_factor)
-        sum_of_square = (embedd_.pow(2) * input_.pow(2)).sum(dim=1) # (batch_size, num_features, num_factor) -> (batch_size, num_factor)
+        linear = self.linear_embedding(input).squeeze(2).sum(dim=1) #  shape (batch_size, num_features, 1) -> (batch_size,)
+        embedd_ = self.quadratic_embedding(input) # shape (batch_size, num_features, num_factor)
+        square_of_sum = embedd_.sum(dim=1).pow(2) # shape (batch_size, num_factor)
+        sum_of_square = (embedd_.pow(2)).sum(dim=1) # shape (batch_size, num_factor)
         quadratic = 0.5 * (square_of_sum - sum_of_square).sum(dim=1) # (batch_size, num_factor) -> (batch_size,)
-        return bias + linear + quadratic
+        return self.sigmoid(bias + linear + quadratic)
