@@ -68,12 +68,12 @@ class deepFM(nn.Module):
         self.global_bias = nn.Parameter(torch.zeros(1))
         mlp_input_dim = len(num_classes) * num_factor # mlp input dim
         self.mlp = nn.Sequential()
-        for out_dim in mlp_hidden_dims:
-            self.mlp.append(nn.Linear(mlp_input_dim, out_dim))
-            self.mlp.append(nn.ReLU())
-            self.mlp.append(nn.Dropout(dropout))
+        for i, out_dim in enumerate(mlp_hidden_dims):
+            self.mlp.add_module(f'block{i}_linear', nn.Linear(mlp_input_dim, out_dim))
+            self.mlp.add_module(f'block{i}_act', nn.ReLU())
+            self.mlp.add_module(f'block{i}_drp',nn.Dropout(dropout))
             mlp_input_dim = out_dim
-        self.mlp.append(nn.Linear(out_dim, 1)) # mlp output dim = 1
+        self.mlp.add_module('head', nn.Linear(out_dim, 1)) # mlp output dim = 1
         self.sigmoid = nn.Sigmoid()
     
     def forward(self, input):
