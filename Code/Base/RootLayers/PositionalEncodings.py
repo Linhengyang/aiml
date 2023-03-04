@@ -61,10 +61,11 @@ class LearnAbsPosEnc(nn.Module):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
         # create the PosEncodes parameters with the same shape as input X's each sample
-        self.P = nn.Parameter(torch.randn(1, seq_len, num_hiddens))
+        # self.P = nn.Parameter(torch.randn(1, seq_len, num_hiddens))
+        self.register_parameter('PosEnc', nn.Parameter(torch.randn(1, seq_len, num_hiddens)))
 
     def forward(self, X):
-        assert X.shape[-1] == self.P.shape[-1], "input's feature dim not equal to num_hiddens arg of LearnPosEnc"
-        assert X.shape[1] == self.P.shape[1], "input's sequence length not equal to seq_len arg of LearnPosEnc"
-        X = X + self.P
+        assert X.shape[-1] == self.PosEnc.shape[-1], "input's feature dim not equal to num_hiddens arg of LearnPosEnc"
+        assert X.shape[1] == self.PosEnc.shape[1], "input's sequence length not equal to seq_len arg of LearnPosEnc"
+        X = X + self.PosEnc
         return self.dropout(X)
