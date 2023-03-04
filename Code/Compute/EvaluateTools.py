@@ -124,6 +124,7 @@ def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
 def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
     '''
     y_hat & y shape: (*), same shape
+    y should be 0-1 tensor
     '''
     truth_p_mask = torch.sign(y).type(torch.bool)
     TP = binary_accuracy(y_hat[truth_p_mask], y[truth_p_mask], threshold)
@@ -137,6 +138,7 @@ def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
 def binary_classify_eval_rates(y_hat: Tensor, y: Tensor, threshold=0.5):
     '''
     y_hat & y shape: (*), same shape
+    y should be 0-1 tensor
     '''
     confuse_mat = confuse_mat(y_hat, y, threshold)
     TP, FN, TN, FP = confuse_mat['TP'], confuse_mat['FN'], confuse_mat['TN'], confuse_mat['FP']
@@ -159,6 +161,7 @@ def roc_curve(net, sample):
 def auc(preds :Tensor, labels: Tensor) -> tuple:
     '''
     preds & labels shape: (batch_size, )
+    labels are 0-1 tensor
     '''
     pos_preds = preds[ torch.sign(labels).type(torch.bool) ] # 正样本的preds, shape(num_pos, )
     neg_preds = preds[ ~torch.sign(labels).type(torch.bool) ] # 负样本的preds, shape(num_neg, )

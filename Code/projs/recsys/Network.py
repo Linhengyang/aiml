@@ -39,14 +39,12 @@ class FactorizationMachine(nn.Module):
         sample: tensor (feat1_value, feat2_value, ..., featN_value)
         '''
         super().__init__()
-        self.num_classes = num_classes
         self.quadratic_embedding = MultiCategFeatEmbedding(num_classes, num_factor, False)
         self.linear_embedding = MultiCategFeatEmbedding(num_classes, 1, False)
-        self.global_bias = nn.Parameter(torch.zeros(1))
+        self.register_parameter('global_bias', nn.Parameter(torch.zeros(1)))
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, input):
-        # input = offset_multifeatures(input, self.num_classes)
         # input shape: (batch_size, num_features). each feature has its own value_size stored in num_classes
         bias = self.global_bias.expand(input.shape[0]) # (1,) -> (batch_size, )
         linear = self.linear_embedding(input).squeeze(2).sum(dim=1) #  shape (batch_size, num_features, 1) -> (batch_size,)
@@ -62,10 +60,9 @@ class deepFM(nn.Module):
     '''
     def __init__(self, num_classes, num_factor, mlp_hidden_dims: list, dropout=0.1):
         super().__init__()
-        self.num_classes = num_classes
         self.quadratic_embedding = MultiCategFeatEmbedding(num_classes, num_factor, False)
         self.linear_embedding = MultiCategFeatEmbedding(num_classes, 1, False)
-        self.global_bias = nn.Parameter(torch.zeros(1))
+        self.register_parameter('global_bias', nn.Parameter(torch.zeros(1)))
         mlp_input_dim = len(num_classes) * num_factor # mlp input dim
         self.mlp = nn.Sequential()
         for i, out_dim in enumerate(mlp_hidden_dims):

@@ -10,7 +10,7 @@ class ViTEncoder(Encoder):
         super().__init__()
         self.patchify = Patchify(img_shape, patch_size)
         self.dense1 = nn.Linear(self.patchify.patch_flatlen, num_hiddens)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, num_hiddens))
+        self.register_parameter('cls_token', nn.Parameter(torch.zeros(1, 1, num_hiddens)))
         self.pos_embedding = LearnAbsPosEnc(self.patchify.num_patches+1, num_hiddens, emb_dropout)
         self.blks = nn.Sequential()
         for i in range(num_blks):

@@ -5,25 +5,61 @@
 协同过滤collaborative filtering的本质, 是为了构建「user-item interaction matrix」, 即用户-物品交互矩阵.
 矩阵的元素可以是显性行为, 比如打分/是否点赞/是否喜欢等;也可以是隐性行为, 比如是否点击/是否浏览等.
 
-对于显性explicit interactions, 一般认为: 数值本身有意义, 并且0代表Null而不是0分
-interaction matrix中 0代表「完全未知」元, 即「i,j」元是0, 代表用户i对物品j的显性行为未知, 用户i还没有碰到物品j. 目标是预测这些未知元.
+对于显性explicit interactions, 一般认为: 数值本身有意义, 并且0代表Null而不是0分(从而在训练时从来不关注0元素)
+interaction matrix中 0代表「完全未知」元, 即「i,j」元是0, 代表用户i对物品j的显性行为未知, 可能是反面行为, 也可能是尚未接触到.
+目标是预测这些未知元, 但是在模型训练的时候, 这些0元素的信息是没有被用到模型和loss里的, 模型和loss只关注非0位置的值
 一般用rmse去构造「值」的损失
-1. Matrix Factorizationn
+
+例子1. Matrix Factorizationn
 本质是用户id特征, embedd为k维的latent vector; 物品id特征, embedd为k维的latent vector; 最后用两个latent vector的内积作为interaction的预测
 
-2. AutoRec(ItemBased or UserBased)
+例子2. AutoRec(ItemBased or UserBased)
 本质是一个自编码器(完成恒等映射的MLP). 用已知的interaction元素作为label, 更新MLP中的参数.
 最后将原已有的interaction矩阵作为输入, 输出同形状矩阵, 其在原interaction矩阵为0的位置的填充, 即是预测
 简而言之: 完成已知interaction元素到自身的恒等映射MLP, 那么这个MLP作用在0元素上, 预计得到该位置的score(感觉不是很有道理).
 
-3. NeuralMF
-
-
-
 
 对于隐性implicit interactions, 一般认为: 数值本身无意义, 但数值之间的序有意义, 并且0代表0而不是Null
-interaction matrix中 0代表「不足以做出行为」元, 即「i,j」元是0, 代表用户i对物品j没有做出行为.
-用相对距离去构造「序」的损失
+interaction matrix中 0代表「不足以做出行为」元, 即「i,j」元是0, 代表用户i对物品j没有做出行为(至于是不是负向行为, 看具体定义)
+用相对距离去构造「序」的损失: 最大化 正向行为和负向行为之间的相对距离. 负向行为由负采样定义(未点击/未浏览等算负向)
+    当前一般关注pairwise的排序, 即两个item之间的序.
+    N(N>2)个物品之间的排序可以转化成两两之间的序, 但由于计算复杂度过高, 一般作pointwise的模型, 然后直接看sigmoid preds的序, 不会通过专门构造listwise序的损失来训练模型
+
+例子1. NeuralMF
+Generalized MatrixFactorization + MLP
+具体来说, users_idx和items_idx分别作两个映射, MF latent factor映射, 和MLP embedding表示映射, 步骤如下:
+    1. latent factor: user_idx和item_idx分别表示为 k维latent factor, 作Hadamard乘积后, 得到Generalized MF部分(如果对这部分求和, 即是MF)
+    2. embedding representation: user_idx和item_idx分别表示为 l维embeddings, concat拼接后灌入MLP, 输出得到MLP部分(如果对这部分作到0-1区间的变换, 即是MLP binary-classify)
+    3. concat拼接 Generalized MF部分和MLP部分, 灌入MLP和激活函数, 得到 y_hat_of_user_id_item_id, 即该user user_idx和item_idx之间的interaction(显性/隐性)的预测
+
+
+
+二. 基于富特征的个性化推荐 feature-rich recommender system
+这个部分是个性化推荐「feature-rich recommender」算法的 pytorch版实现, 包括 factorization machine/deepFM
+目的是 「基于特征的推荐」
+数据集的构建一般是tabular dataset, 每一行是一次用户行为记录, 包含 features & labels. 
+labels比较简单, 是否曝光/是否点击/是否购买/购买金额等等
+features比较复杂, 按照特征的来源分类, 包括
+    1. 用户特征: 用户自身的属性和行为数据统计, 包括user id/行为数据统计/用户画像. 通过user id join
+    2. 产品特征: 产品自身的属性和统计信息, 包括item id/价格/ctr cvr. 通过item id join
+    3. 环境特征: labels行为发生时的context特征, 包括时间/场景/文案信息. 通过labels清洗
+    4. 匹配特征: 用户和产品/用户和环境/产品和环境之间的交互信息, 一般是字典形式. 比如「用户-产品」, 即u2i特征, 一般是key是items_id, value是这个user和key item id的交互次数
+按照特征的属性分类, 包括
+    1. categorical特征: 值是离散的
+        使用前要做:
+            1. level-index映射处理
+            2. 特征交叉(可选)
+            3. 进模型时必须要二值化处理(即onehot成value_size个dummy variable feature, 此时原categorical特征被称为一个field)
+        进模型后一般第一步就是embedding(二值化后就是乘以embedding weight的意思), 整体看, 一个scalar值(比如user_id=0001)变成了k维的vector进入模型
+    2. 数值特征: 值是实数, 使用时要等categorical特征做完二值化处理之后, 再concat上去.
+    3. 字典不定特征(一般是为了匹配特征): 值是字典, 不定, 使用时要定义好HitByKey算子.
+    比如某user id 0001的u2i特征: {'itemID001':0, 'itemID002':3}, 那么在user id=0001, item id=001的行, 这个特征进模型时值是0; 在user id = 0001, item id=002的行, 这个特征进模型时值是3
+
+参考文章: https://tech.meituan.com/2016/03/03/deep-understanding-of-ffm-principles-and-practices.html
+
+例子1: factorization machine
+
+例子2: deepFM
 
 
 
@@ -31,7 +67,9 @@ interaction matrix中 0代表「不足以做出行为」元, 即「i,j」元是0
 
 
 
-特征交叉
+Feature Engineer: 
+
+categorical特征的特征交叉:
 比如prov_id和age_id, value_size分别为prov_size和age_size. 那么一般是:
 1 分别onehot成prov_size维和age_size维的onehot vectors, 
 2 特征交叉, 笛卡尔乘积出一个 prov_size*age_size 维度的onehot vector, 可以看作是新特征 prov-age_id 的onehot表示,
