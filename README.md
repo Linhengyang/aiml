@@ -50,10 +50,10 @@ the online working space must contain following directories:
     │   │   │   └── __init__.py
     │   │   ├── RootLayers
     │   │   │   ├── AttentionPools.py
+    │   │       ├── MultiCategFeatEmbedding.py
     │   │   │   └── PositionalEncodings.py
     │   │   └── SubModules
     │   │       ├── AddLNorm.py
-    │   │       ├── MultiFeatEmbedding.py
     │   │       └── Patchify.py
     │   ├── Compute
     │   │   ├── EvaluateTools.py
@@ -61,6 +61,7 @@ the online working space must contain following directories:
     │   │   ├── Trainers.py
     │   │   └── VisualizeTools.py
     │   ├── Loss
+    │   │   ├── BPRankingLoss.py
     │   │   ├── L2PenaltyMSELoss.py
     │   │   └── MaskedCELoss.py
     │   ├── Modules
