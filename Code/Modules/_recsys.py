@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import math
+from ..Base.RootLayers.MultiCategFeatEmbedding import MultiCategFeatEmbedding
 
 def interaction_weights(U, I, users_idx, items_idx):
     weights = torch.zeros(U, I, device=users_idx.device)
@@ -95,3 +96,26 @@ class UnMaskMatrixFactorization(nn.Module):
         b_i = self.item_bias(items_idx)
         # return ( (batch_size,), )
         return ( ((P_u * Q_i).sum(dim=1, keepdim=True) + b_u + b_i).flatten(), )
+    
+class QuadraticFactorizationMachine(nn.Module):
+    def __init__(self, num_classes, num_factor):
+        '''
+        num_classes: tensor (value_size_of_feat1, value_size_of_feat2, ..., value_size_of_featN)
+        sample: tensor (feat1_value, feat2_value, ..., featN_value)
+        '''
+        super().__init__()
+        self.num_classes = num_classes
+        self.quadratic_embedding = MultiCategFeatEmbedding(num_classes, num_factor, False)
+        self.linear_embedding = MultiCategFeatEmbedding(num_classes, 1, False)
+        self.global_bias = nn.Parameter(torch.zeros(1))
+
+    def forward(self, input):
+        # input = offset_multifeatures(input, self.num_classes)
+        # input shape: (batch_size, num_features). each feature has its own value_size stored in num_classes
+        bias = self.global_bias.expand(input.shape[0]) # (1,) -> (batch_size, )
+        linear = self.linear_embedding(input).squeeze(2).sum(dim=1) #  shape (batch_size, num_features, 1) -> (batch_size,)
+        embedd_ = self.quadratic_embedding(input) # shape (batch_size, num_features, num_factor)
+        square_of_sum = embedd_.sum(dim=1).pow(2) # shape (batch_size, num_factor)
+        sum_of_square = (embedd_.pow(2)).sum(dim=1) # shape (batch_size, num_factor)
+        quadratic = 0.5 * (square_of_sum - sum_of_square).sum(dim=1) # (batch_size, num_factor) -> (batch_size,)
+        return quadratic, linear, bias
