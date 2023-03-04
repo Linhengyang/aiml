@@ -1,5 +1,5 @@
 一. 协同过滤 Collaborative Filtering
-这个部分是协同过滤推荐「collaborative filtering recommender(cfrec)」算法的 pytorch版实现, 包括 matrix factorization/AutoRec/NeuralMF/SeqAwareRecsys
+这个部分是协同过滤推荐「collaborative filtering recommender(cfrec)」算法的 pytorch版实现, 包括 matrix factorization/AutoRec/SeqAwareRecsys
 目的是 「基于用户行为的推荐」, 行为即"interaction", based on explicit显性/implicit隐形 interactions. 显性action有打分、点赞、不喜欢等, 隐性action有点击、曝光不点击等
 
 协同过滤collaborative filtering的本质, 是为了构建「user-item interaction matrix」, 即用户-物品交互矩阵.
@@ -31,6 +31,12 @@ Generalized MatrixFactorization + MLP
     1. latent factor: user_idx和item_idx分别表示为 k维latent factor, 作Hadamard乘积后, 得到Generalized MF部分(如果对这部分求和, 即是MF)
     2. embedding representation: user_idx和item_idx分别表示为 l维embeddings, concat拼接后灌入MLP, 输出得到MLP部分(如果对这部分作到0-1区间的变换, 即是MLP binary-classify)
     3. concat拼接 Generalized MF部分和MLP部分, 灌入MLP和激活函数, 得到 y_hat_of_user_id_item_id, 即该user user_idx和item_idx之间的interaction(显性/隐性)的预测
+本proj中跳过NeuralMF
+
+例子2. SeqAwareRecsys
+Sequence-Aware Recommender Systems
+〈待完成〉
+
 
 
 
@@ -58,8 +64,13 @@ features比较复杂, 按照特征的来源分类, 包括
 参考文章: https://tech.meituan.com/2016/03/03/deep-understanding-of-ffm-principles-and-practices.html
 
 例子1: factorization machine
+本质是用特征交叉参与"线性解释用户行为", 即(user, item, label)这一record中, 用 linear combination of (user & item features) + global_bias之外,
+还有 quatratic term of (user & item features). 该二次项是 两两features的 embeddings representation的内积之和.
+通过数学的办法, 可以将factorization machine这个模型的计算复杂度下降为线性的.
 
 例子2: deepFM
+类似wide&deep, 在features作factorization machine的操作之后, features的 embeddings representation除了去计算FM term, 还要作为MLP部分的输入,
+进过DNN和FC层后, 得到MLP term. FM term + MLP term, sigmoid之后得到 hat_label
 
 
 
