@@ -41,7 +41,7 @@ class MultiCategFeatEmbedding(nn.Module):
     '''
     def __init__(self, num_classes: Tensor, num_factor: int, flatten: bool, *args, **kwargs):
         super().__init__()
-        self.num_classes = num_classes
+        self.register_buffer('num_classes', num_classes)
         self.flatten = flatten
         self.embedding = nn.Embedding(int(num_classes.sum()), num_factor, *args, **kwargs)
     
