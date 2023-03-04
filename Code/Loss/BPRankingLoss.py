@@ -33,7 +33,7 @@ class BPRankingLoss(nn.Module):
                 )
             )
         _loss = -torch.log(torch.sigmoid(target*(input1-input2)))
-        if self.weight:
+        if self.weight is not None:
             _loss = torch.mul(self.weight, _loss)
         if self.reduction == 'none':
             return _loss
