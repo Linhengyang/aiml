@@ -43,10 +43,10 @@ class MaskedMatrixFactorization(nn.Module):
         self.U = num_users
         self.I = num_items
         self.K = num_factors
-        self.user_factor_weight = nn.Parameter(torch.randn(num_users, num_factors))
-        self.item_factor_weight = nn.Parameter(torch.randn(num_items, num_factors))
-        self.user_bias = nn.Parameter(torch.zeros(num_users, 1))
-        self.item_bias = nn.Parameter(torch.zeros(num_items, ))
+        self.register_parameter('user_factor_weight', nn.Parameter(torch.randn(num_users, num_factors)))
+        self.register_parameter('item_factor_weight', nn.Parameter(torch.randn(num_items, num_factors)))
+        self.register_parameter('user_bias', nn.Parameter(torch.zeros(num_users, 1)))
+        self.register_parameter('item_bias', nn.Parameter(torch.zeros(num_items, )))
     def forward(self, users_idx, items_idx):
         # shapes: (batch_size,)int64, (batch_size,)int64
         interaction_w = interaction_weights(self.U, self.I, users_idx, items_idx) # (U, I)
@@ -104,13 +104,11 @@ class QuadraticFactorizationMachine(nn.Module):
         sample: tensor (feat1_value, feat2_value, ..., featN_value)
         '''
         super().__init__()
-        self.num_classes = num_classes
         self.quadratic_embedding = MultiCategFeatEmbedding(num_classes, num_factor, False)
         self.linear_embedding = MultiCategFeatEmbedding(num_classes, 1, False)
-        self.global_bias = nn.Parameter(torch.zeros(1))
+        self.register_parameter('global_bias', nn.Parameter(torch.zeros(1)))
 
     def forward(self, input):
-        # input = offset_multifeatures(input, self.num_classes)
         # input shape: (batch_size, num_features). each feature has its own value_size stored in num_classes
         bias = self.global_bias.expand(input.shape[0]) # (1,) -> (batch_size, )
         linear = self.linear_embedding(input).squeeze(2).sum(dim=1) #  shape (batch_size, num_features, 1) -> (batch_size,)
