@@ -8,7 +8,6 @@ def offset_multifeatures(input_tensor :Tensor, num_classes :Tensor):
     input_tensor: (*, num_categorical_features)
     num_classes: (num_categorical_features, )
     '''
-    num_classes = num_classes.to(input_tensor.device)
     assert num_classes.shape[0] == input_tensor.shape[-1], 'every feature must have its num_class'
     assert torch.all(input_tensor < num_classes), 'index number exceeds or be equal to num_classes. Index number must be smaller than corresponding num_class'
     offsets = torch.cat([torch.zeros(1, device=input_tensor.device), torch.cumsum(num_classes, dim=0)[:-1]], dim=0).type(num_classes.dtype)
