@@ -2,7 +2,7 @@ import os
 import torch
 from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
-from ...Compute.Trainers import easyTrainer
+from ...Compute.TrainTools import easyTrainer
 import yaml
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']

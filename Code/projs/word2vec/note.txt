@@ -1,0 +1,40 @@
+这个project是word Embedding(word2vec)各模型的pytorch版实现, 包括skip-gram/CBOW/Glove/SubwordEmbed, 训练方式包括负采样和层次softmax
+
+skip-gram模型
+每个word有两种身份, center word和context word, 从而每个word有两种factor表示: vector as context & vector as center
+
+1. 在一个sentence(word sequence)中, context word在给定center word的条件下, 条件概率是可建模(似然函数)的
+context word就是相对center word, 距离在预设定的距离m以内(即一个context window内)
+
+P(Word_o | Word_c) =
+        f(Word_o vector as context, Word_c vector as center) 分子
+    sum{ f(all Word vector of vocab as context, Word_c vector as center) } 分母
+
+2. 整个sentence从而可建模, 即: word sequence中每一个word轮流当center word, 考虑一个context window(左右各m个), 
+context window内部的word视作context word, 它们的条件概率乘积, 视作该center word的context window的建模(似然函数)
+所有word轮流当center word, 它们的context window的建模乘积, 视作该sentence的建模(似然函数)
+ 
+通过最大化语料库中的所有sentence的建模(似然函数), 即可更新每个word的vector as context & vector as center
+
+
+
+
+CBOW(continuous bag of words)模型
+每个word有两种身份, center word和context word, 从而每个word有两种factor表示: vector as context & vector as center
+
+1. 在一个sentence(word sequence)中, center word在给定context words的条件下, 条件概率是可建模(似然函数)的
+context word就是相对center word, 距离在预设定的距离m以内(即一个context window内)
+
+P(Word_c | Word_o1, Word_o2, ..., Word_o2m 共2m-1个context word) = 
+        f(Word_c vector as center, Word_o1到Word_o2m所有2m-1个context words的vectors as context average pool作为context vector) 分子
+    sum{ f(all Word vecotr of vocab as center, Word_o1到Word_o2m所有2m-1个context words的vectors as context average pool作为context vector) }分母
+
+2. 整个sentence从而可建模, 即: word sequence中每一个word轮流当center word, 考虑一个context window(左右各m个), 
+context window内部的word视作context word, 计算该center word在context window的条件概率, 视作该center word的建模(似然函数)
+所有word轮流当center word, 它们的建模乘积, 视作该sentence的建模(似然函数)
+
+通过最大化语料库中的所有sentence的建模(似然函数), 即可更新每个word的vector as context & vector as center
+
+
+训练结束之后, 无论是skip-gram还是CBOW, 每个word都出现了两种身份下的embedding表示. 那么选哪个作为word的表示呢?
+答: 选择word在建模时,作为条件的表示, 即在skip-gram模型中, 选择其center word身份下的vector as embeding; 在CBOW模型中, 选择其context word身份下的vector as embeddibg
