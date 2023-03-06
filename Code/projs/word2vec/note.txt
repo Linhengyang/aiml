@@ -17,6 +17,7 @@ context window内部的word视作context word, 它们的条件概率乘积, 视�
 通过最大化语料库中的所有sentence的建模(似然函数), 即可更新每个word的vector as context & vector as center
 等价于: 最小化 - log( Prob( <context_word_vector, center_word_vector> ) ).
 里面的 Prob( <context_word_vector, center_word_vector> ) 是softmax操作得到, logits是all_context_word_vectors和center_word_vector的内积
+像一个自编码器(autoencoder)
 
 
 
@@ -37,7 +38,7 @@ context window内部的word视作context word, 计算该center word在context wi
 通过最大化语料库中的所有sentence的建模(似然函数), 即可更新每个word的vector as context & vector as center
 等价于: 最小化 - log( Prob( <center_word_vector, context_words_pool> ) ).
 里面的 Prob( <center_word_vector, context_words_pool> ) 是softmax操作得到, logits是all_center_word_vectors和context_words_pool的内积
-
+像一个自编码器(autoencoder)
 
 
 训练结束之后, 无论是skip-gram还是CBOW, 每个word都出现了两种身份下的embedding表示. 那么选哪个作为word的表示呢?
