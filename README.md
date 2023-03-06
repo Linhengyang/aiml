@@ -58,7 +58,8 @@ the online working space must contain following directories:
     │   ├── Compute
     │   │   ├── EvaluateTools.py
     │   │   ├── PredictTools.py
-    │   │   ├── Trainers.py
+    │   │   ├── SamplingTools.py
+    │   │   ├── TrainTools.py
     │   │   └── VisualizeTools.py
     │   ├── Loss
     │   │   ├── BPRankingLoss.py
@@ -81,7 +82,8 @@ the online working space must contain following directories:
     │       ├── _mlp
     │       ├── recsys
     │       ├── transformer
-    │       └── vit
+    │       ├── vit
+    │       └── word2vec
     ├── README.md
     ├── experiment.ipynb
     ├── main.py
