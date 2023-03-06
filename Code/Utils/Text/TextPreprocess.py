@@ -49,8 +49,9 @@ class Vocab:
             if freq < min_freq: # 如果该token出现的频次小于阈值, 则视该token为<unk>, 即已经建立好双射了. 后续的也不需要再建立映射, 跳出循环
                 break
             else:
-                self.idx_to_token.append(token) # 添加该token到self.idx_to_token
-                self.token_to_idx[token] = len(self.idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
+                if token not in ['<unk>'] + reserved_tokens: # <unk>和保留token已经在idx_to_token和token_to_idx中建立好双射关系了
+                    self.idx_to_token.append(token) # 添加该token到self.idx_to_token
+                    self.token_to_idx[token] = len(self.idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
     
     def __len__(self):
         '''提供len()函数接口, 返回该vocab中总共有多少个distinct token'''
