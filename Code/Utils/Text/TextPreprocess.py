@@ -2,10 +2,10 @@ import collections
 import random
 import math
 
-def count_corpus(tokens):
+def count_corpus(sentences):
     '''
-    inputs: tokens
-        tokens can be 1D list or 2D list
+    inputs: sentences
+        sentences can be 1D list or 2D list
 
     returns: A dictionary, denoted as D
         keys are tokens(words, chars) and values are frequencies
@@ -13,9 +13,9 @@ def count_corpus(tokens):
     explains:
         Count token frequencies 
     '''
-    if len(tokens) == 0 or isinstance(tokens[0], list):
-        tokens = [token for line in tokens for token in line]
-    return collections.Counter(tokens)
+    if len(sentences) == 0 or isinstance(sentences[0], list):
+        sentences = [token for line in sentences for token in line]
+    return collections.Counter(sentences)
 
 class Vocab:
     '''
@@ -122,7 +122,7 @@ def subsample(sentences, vocab, thr=1e-4):
     # exclude <unk>
     sentences = [[token for token in line if vocab[token] != vocab.unk] for line in sentences]
     # count all tokens
-    counter = collections.Counter([token for line in sentences for token in line])
+    counter = count_corpus(sentences)
     num_all_tokens = sum(counter.values())
 
     def keep(token):
