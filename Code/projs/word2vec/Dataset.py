@@ -52,7 +52,7 @@ def build_skipgram_arrays(centers, contexts, negatives, pad_value):
     for center_word, context_words, negative_words in zip(centers, contexts, negatives):
         cur_contexts_negatives_words = context_words + negative_words # context words和negative words合并
         contexts_negatives.append( truncate_pad(cur_contexts_negatives_words, max_len, pad_value) ) # pad到最大长度
-        cur_mask = [1]*len(cur_contexts_negatives_words) # mask 1 为context words和negative words
+        cur_mask = [1]*len(cur_contexts_negatives_words) # mask 1 for context words和negative words
         masks.append( truncate_pad(cur_mask, max_len, 0) ) # 其他位置pad0
         cur_label = [1]*len(context_words) # mask 1 为context words
         labels.append( truncate_pad(cur_label, max_len, 0) ) # 其他位置pad0
@@ -75,7 +75,7 @@ def build_cbow_arrays(contexts, centers, negatives, pad_value):
         cur_center_negative_words = [center_word] + negative_words # center word和negative words合并
         center_negtives.append(cur_center_negative_words)
         pad_contexts.append( truncate_pad(context_words, max_len, pad_value) ) # pad到最大长度
-        cur_mask = [1]*len(context_words) + [0]*(max_len-len(context_words)) # mask 1 为context words, 其他位置0
+        cur_mask = [1]*len(context_words) + [0]*(max_len-len(context_words)) # mask 1 for context words, 其他位置0
         masks.append(cur_mask)
         cur_label = [1] + [0]*len(negative_words) # center word label 1, negative words label 0
         labels.append(cur_label)
@@ -97,16 +97,27 @@ class skipgramDataset(torch.utils.data.Dataset):
         negatives = negativeSampler.sample(contexts)
         centers_idx, contexts_idx, negatives_idx = vocab[centers], vocab[contexts], vocab[negatives]
         centers, ctx_neg_list, masks, labels = build_skipgram_arrays(centers_idx, contexts_idx, negatives_idx, 0)
-        self.centers = torch.tensor(centers)
-        self.ctxs_negs = torch.tensor(ctx_neg_list)
-        self.labels = torch.tensor(labels)
-        self.masks = torch.tensor(masks)
+        self.centers = torch.tensor(centers).unsqueeze(1) # shape: (batch_size, 1)
+        self.ctxs_negs = torch.tensor(ctx_neg_list) # shape: (batch_size, 2*(K+1)*mask_window_size)
+        self.labels = torch.tensor(labels) # shape: (batch_size, 2*(K+1)*mask_window_size)
+        self.masks = torch.tensor(masks) # shape: (batch_size, 2*(K+1)*mask_window_size)
+        self.vocab = vocab
+        self.counter = counter
     
     def __len__(self):
         return self.centers.shape[0]
     
     def __getitem__(self, index):
         return (self.centers[index], self.ctxs_negs[index], self.labels[index], self.masks[index])
+    
+    @property
+    def vocab(self):
+        return self.vocab
+    
+    @property
+    def counter(self):
+        return self.counter
+
 
 class cbowDataset(torch.utils.data.Dataset):
     def __init__(self, fpath):
@@ -124,13 +135,23 @@ class cbowDataset(torch.utils.data.Dataset):
         negatives = negativeSampler.sample(centers) # CBOW模型中, centers是目标vector, 对其负采样
         centers_idx, contexts_idx, negatives_idx = vocab[centers], vocab[contexts], vocab[negatives]
         pad_contexts, center_negtives, masks, labels = build_cbow_arrays(contexts_idx, centers_idx, negatives_idx, 0)
-        self.contexts = torch.tensor(pad_contexts)
-        self.center_negatives = torch.tensor(center_negtives)
-        self.labels = torch.tensor(labels)
-        self.masks = torch.tensor(masks)
+        self.contexts = torch.tensor(pad_contexts) # shape: (batch_size, 2*mask_window_size)
+        self.center_negatives = torch.tensor(center_negtives) # shape: (batch_size, K+1)
+        self.labels = torch.tensor(labels) # shape: (batch_size, K+1)
+        self.masks = torch.tensor(masks) # shape: (batch_size, K+1)
+        self.vocab = vocab
+        self.counter = counter
     
     def __len__(self):
         return self.contexts.shape[0]
     
     def __getitem__(self, index):
         return (self.contexts[index], self.center_negatives[index], self.labels[index], self.masks[index])
+    
+    @property
+    def vocab(self):
+        return self.vocab
+    
+    @property
+    def counter(self):
+        return self.counter
