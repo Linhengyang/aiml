@@ -117,7 +117,8 @@ def subsample(sentences, vocab, thr=1e-4):
     <unk>未知字符代表的是所有「超低频」字符, 所以不应该带在降采样之列. 在subsample过程中会将<unk>以0概率保留(即去除)
 
     return:
-        subsampled sentences(word tokens) & counter(count every token's frequency except <unk>)
+        subsampled sentences(word tokens) 
+        counter(count every token's frequency except <unk> before subsampling)
     '''
     # exclude <unk>
     sentences = [[token for token in line if vocab[token] != vocab.unk] for line in sentences]
