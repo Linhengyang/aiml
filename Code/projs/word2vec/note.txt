@@ -66,4 +66,4 @@ hierarchical softmax的本质是「化多分类为N次二分类」. 即:
     3. 上述所有的Prob(vector1, vector2)都用sigmoid(<vector1, vector2>)构拟
 
 可以看出, 在hierarchical softmax中, 我们放弃了对目标vector(context word vector for skip-gram/center word vector for CBOW)的表示, 转而去表示根节点.
-根节点数量 = 叶子节点数量 - 1, 所以不会造成存储空间的增长; 对于同一个条件vector而言, 用层次softmax找到所有叶子节点的概率之和还是等于1, 所以层次softmax生成的还是一个合法的多分类概率分布
+根节点数量 = 叶子节点数量 - 1, 所以不会造成存储空间的增长; 对于同一个条件vector, 用层次softmax找到所有目标目标(叶子节点)的概率之和还是等于1, 所以层次softmax生成的还是一个有效的多分类概率分布
