@@ -1,9 +1,11 @@
 import collections
+import random
+import math
 
-def count_corpus(tokens):
+def count_corpus(sentences):
     '''
-    inputs: tokens
-        tokens can be 1D list or 2D list
+    inputs: sentences
+        sentences can be 1D list or 2D list
 
     returns: A dictionary, denoted as D
         keys are tokens(words, chars) and values are frequencies
@@ -11,9 +13,9 @@ def count_corpus(tokens):
     explains:
         Count token frequencies 
     '''
-    if len(tokens) == 0 or isinstance(tokens[0], list):
-        tokens = [token for line in tokens for token in line]
-    return collections.Counter(tokens)
+    if len(sentences) == 0 or isinstance(sentences[0], list):
+        sentences = [token for line in sentences for token in line]
+    return collections.Counter(sentences)
 
 class Vocab:
     '''
@@ -49,8 +51,9 @@ class Vocab:
             if freq < min_freq: # 如果该token出现的频次小于阈值, 则视该token为<unk>, 即已经建立好双射了. 后续的也不需要再建立映射, 跳出循环
                 break
             else:
-                self.idx_to_token.append(token) # 添加该token到self.idx_to_token
-                self.token_to_idx[token] = len(self.idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
+                if token not in ['<unk>'] + reserved_tokens: # <unk>和保留token已经在idx_to_token和token_to_idx中建立好双射关系了
+                    self.idx_to_token.append(token) # 添加该token到self.idx_to_token
+                    self.token_to_idx[token] = len(self.idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
     
     def __len__(self):
         '''提供len()函数接口, 返回该vocab中总共有多少个distinct token'''
@@ -105,3 +108,25 @@ def preprocess_space(text, need_lower=True, separate_puncs=',.!?'):
     out = [ " " + char if i > 0 and no_space(char, text[i-1]) else char for i, char in enumerate(text)]
     return "".join(out)
 
+def subsample(sentences, vocab, thr=1e-4):
+    '''
+    sentences 是2D list of lists of text-tokens.
+    vocab是sentences的词汇字典
+    
+    subsample是降采样(下采样), 即对高频(频率高于thr)的token, 以 sqrt( thr /freq_rate(token) )的概率保留
+    <unk>未知字符代表的是所有「超低频」字符, 所以不应该带在降采样之列. 在subsample过程中会将<unk>以0概率保留(即去除)
+
+    return:
+        subsampled sentences(word tokens) 
+        counter(count every token's frequency except <unk> before subsampling)
+    '''
+    # exclude <unk>
+    sentences = [[token for token in line if vocab[token] != vocab.unk] for line in sentences]
+    # count all tokens
+    counter = count_corpus(sentences)
+    num_all_tokens = sum(counter.values())
+
+    def keep(token):
+        return random.uniform(0, 1) < math.sqrt(thr/ counter['token'] * num_all_tokens)
+
+    return [[token for token in line if keep(token)] for line in sentences], counter
