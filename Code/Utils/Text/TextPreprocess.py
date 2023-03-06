@@ -1,4 +1,6 @@
 import collections
+import random
+import math
 
 def count_corpus(tokens):
     '''
@@ -106,3 +108,24 @@ def preprocess_space(text, need_lower=True, separate_puncs=',.!?'):
     out = [ " " + char if i > 0 and no_space(char, text[i-1]) else char for i, char in enumerate(text)]
     return "".join(out)
 
+def subsample(sentences, vocab, thr=1e-4):
+    '''
+    sentences 是2D list of lists of text-tokens.
+    vocab是sentences的词汇字典
+    
+    subsample是降采样(下采样), 即对高频(频率高于thr)的token, 以 sqrt( thr /freq_rate(token) )的概率保留
+    <unk>未知字符代表的是所有「超低频」字符, 所以不应该带在降采样之列. 在subsample过程中会将<unk>以0概率保留(即去除)
+
+    return:
+        subsampled sentences(word tokens) & counter(count every token's frequency except <unk>)
+    '''
+    # exclude <unk>
+    sentences = [[token for token in line if vocab[token] != vocab.unk] for line in sentences]
+    # count all tokens
+    counter = collections.Counter([token for line in sentences for token in line])
+    num_all_tokens = sum(counter.values())
+
+    def keep(token):
+        return random.uniform(0, 1) < math.sqrt(thr/ counter['token'] * num_all_tokens)
+
+    return [[token for token in line if keep(token)] for line in sentences], counter
