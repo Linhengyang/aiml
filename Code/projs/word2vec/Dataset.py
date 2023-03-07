@@ -23,7 +23,7 @@ def get_centers_and_contexts(sentences, max_window_size, size_random=True):
     '''
     centers, contexts = [], []
     for line in sentences:
-        if len(line):
+        if len(line) < 2:
             continue
         centers += line # 当前line的每一个token都是center
         for i in range(len(line)):
@@ -31,7 +31,7 @@ def get_centers_and_contexts(sentences, max_window_size, size_random=True):
                 window_size = random.randint(1, max_window_size)
             else:
                 window_size = max_window_size
-            indices = list( range( max(0, i-window_size), min(len(centers), i+window_size+1) ) )
+            indices = list( range( max(0, i-window_size), min(len(line), i+window_size+1) ) )
             indices.remove(i)
             contexts.append([ line[idx] for idx in indices ])
     return centers, contexts
@@ -99,10 +99,10 @@ class skipgramDataset(torch.utils.data.Dataset):
         centers, ctx_neg_list, masks, labels = build_skipgram_arrays(centers_idx, contexts_idx, negatives_idx, 0)
         self.centers = torch.tensor(centers).unsqueeze(1) # shape: (batch_size, 1)
         self.ctxs_negs = torch.tensor(ctx_neg_list) # shape: (batch_size, 2*(K+1)*mask_window_size)
-        self.labels = torch.tensor(labels) # shape: (batch_size, 2*(K+1)*mask_window_size)
+        self.labels = torch.tensor(labels).type(torch.float32) # shape: (batch_size, 2*(K+1)*mask_window_size)
         self.masks = torch.tensor(masks) # shape: (batch_size, 2*(K+1)*mask_window_size)
-        self.vocab = vocab
-        self.counter = counter
+        self._vocab = vocab
+        self._counter = counter
     
     def __len__(self):
         return self.centers.shape[0]
@@ -112,11 +112,11 @@ class skipgramDataset(torch.utils.data.Dataset):
     
     @property
     def vocab(self):
-        return self.vocab
+        return self._vocab
     
     @property
     def counter(self):
-        return self.counter
+        return self._counter
 
 
 class cbowDataset(torch.utils.data.Dataset):
@@ -137,10 +137,10 @@ class cbowDataset(torch.utils.data.Dataset):
         pad_contexts, center_negtives, masks, labels = build_cbow_arrays(contexts_idx, centers_idx, negatives_idx, 0)
         self.contexts = torch.tensor(pad_contexts) # shape: (batch_size, 2*mask_window_size)
         self.center_negatives = torch.tensor(center_negtives) # shape: (batch_size, K+1)
-        self.labels = torch.tensor(labels) # shape: (batch_size, K+1)
+        self.labels = torch.tensor(labels).type(torch.float32) # shape: (batch_size, K+1)
         self.masks = torch.tensor(masks) # shape: (batch_size, K+1)
-        self.vocab = vocab
-        self.counter = counter
+        self._vocab = vocab
+        self._counter = counter
     
     def __len__(self):
         return self.contexts.shape[0]
@@ -150,8 +150,8 @@ class cbowDataset(torch.utils.data.Dataset):
     
     @property
     def vocab(self):
-        return self.vocab
+        return self._vocab
     
     @property
     def counter(self):
-        return self.counter
+        return self._counter

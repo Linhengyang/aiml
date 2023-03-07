@@ -4,11 +4,11 @@ from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.TrainTools import easyTrainer
 import yaml
-configs = yaml.load(open('Code/projs/{}/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/word2vec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
 
 
-class projTrainer(easyTrainer):
+class word2vecTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
         super().__init__()
         self.net = net
@@ -34,7 +34,10 @@ class projTrainer(easyTrainer):
         ''' 输入train_set(必须), valid_set(可选), test_set(可选, 用于resolve网络), 依次得到train_iter, valid_iter, test_iter'''
         assert hasattr(self, 'device'), "Device not set. Please set trainer's device before setting data_iters"
         def transfer(x):
-            pass
+            result = tuple()
+            for t in default_collate(x):
+                result += (t.to(self.device), )
+            return result
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=transfer)
         if valid_set:
             self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False, collate_fn=transfer)
@@ -45,6 +48,7 @@ class projTrainer(easyTrainer):
         '''
         用test_data_iter的first batch对net作一次forward计算, 使得所有lazyLayer被确定(resolve).随后检查整个前向过程和loss计算(check).
         resolve且check无误 --> True; resolve或check有问题 --> raise AssertionError; 不resolve或check直接训练 --> False
+        word2vec不需要
         '''
         if need_resolve:
             assert hasattr(self, 'test_iter'), 'Please input test_set when deploying .set_data_iter()'
@@ -61,7 +65,8 @@ class projTrainer(easyTrainer):
     def set_optimizer(self, lr, optim_type='adam'):
         '''set the optimizer at attribute optimizer'''
         assert type(lr) == float, 'learning rate should be a float'
-        pass
+        if optim_type == 'adam':
+            self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
     
     def set_grad_clipping(self, grad_clip_val=None):
         '''set the grad_clip_val at attribute grad_clip_val if input a float'''
@@ -82,5 +87,18 @@ class projTrainer(easyTrainer):
         assert hasattr(self, 'train_iter'), 'data_iter missing'
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
         for epoch in range(self.num_epochs):
-            pass
+            self.net.train()
+            self.epoch_evaluator.epoch_judge(epoch)
+            for cond_tks, tgt_tks, labels, masks in self.train_iter:
+                self.optimizer.zero_grad()
+                logits = self.net(cond_tks, tgt_tks, masks) # skip-gram用不到masks
+                l = self.loss(logits, labels, masks) # cbow 用不到masks
+                l.sum().backward()
+                if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
+                    nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
+                self.optimizer.step()
+                with torch.no_grad():
+                    self.epoch_evaluator.batch_record(labels, cond_tks, l)
+            with torch.no_grad():
+                self.epoch_evaluator.epoch_metric_cast()
         print('Fitting finished successfully')
