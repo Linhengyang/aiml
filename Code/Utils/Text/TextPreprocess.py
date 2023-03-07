@@ -127,6 +127,6 @@ def subsample(sentences, vocab, thr=1e-4):
     num_all_tokens = sum(counter.values())
 
     def keep(token):
-        return random.uniform(0, 1) < math.sqrt(thr/ counter['token'] * num_all_tokens)
+        return random.uniform(0, 1) < math.sqrt(thr/ counter[token] * num_all_tokens)
 
     return [[token for token in line if keep(token)] for line in sentences], counter

@@ -9,7 +9,7 @@ class skipgramNegSp(nn.Module):
         self.context_embed = nn.Embedding(vocab_size, embed_size)
         self.center_embed = nn.Embedding(vocab_size, embed_size)
 
-    def forwad(self, centers, context_negatives):
+    def forward(self, centers, context_negatives, *args, **kwargs):
         # centers: (batch_size, 1)
         # context_negatives: (batch_size, 2*(K+1)*max_window_size)
         emb_x = self.center_embed(centers) # (batch_size, 1, embd_size)
@@ -23,7 +23,7 @@ class cbowNegSp(nn.Module):
         self.context_embed = nn.Embedding(vocab_size, embed_size)
         self.center_embed = nn.Embedding(vocab_size, embed_size)
 
-    def forwad(self, contexts, center_negatives, masks):
+    def forward(self, contexts, center_negatives, masks):
         # contexts: (batch_size, 2*mask_window_size)
         # context_negatives: (batch_size, K+1)
         # masks: (batch_size, 2*mask_window_size)
