@@ -8,6 +8,8 @@ from .Dataset import skipgramDataset, cbowDataset
 from .Network import skipgramNegSp, cbowNegSp
 from .Trainer import word2vecTrainer
 from .Evaluator import word2vecEpochEvaluator
+from .Predictor import wordInference
+
 configs = yaml.load(open('Code/projs/word2vec/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 local_model_save_dir = configs['local_model_save_dir']
 base_data_dir = configs['base_data_dir']
@@ -43,6 +45,23 @@ def skipgram_train_job():
     trainer.fit()
     # save
     trainer.save_model('skipgram_v1.params')
+
+def skipgram_infer_job():
+    device = torch.device('cpu')
+    # load data & net
+    trainset = skipgramDataset(os.path.join(base_data_dir, word2vec_dir, ptb_train_fname))
+    vocab = trainset.vocab
+    # design net & loss
+    embed_size = 100
+    net = skipgramNegSp(len(vocab), embed_size)
+    trained_net_path = os.path.join(local_model_save_dir, 'word2vec', 'skipgram_v1.params')
+    net.load_state_dict(torch.load(trained_net_path, map_location=device))
+    # init predictor
+    synonym = wordInference(device)
+    query, k = 'disappointing', 3
+
+    print(f'{k} synonyms of {query}: ', synonym.predict(query, k, vocab, net))
+    print('similarity: ', synonym.pred_scores)
 
 def cbow_train_job():
     trainset = cbowDataset(os.path.join(base_data_dir, word2vec_dir, ptb_train_fname))
