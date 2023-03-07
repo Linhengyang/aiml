@@ -3,7 +3,7 @@ import warnings
 import torch
 import torch.nn as nn
 warnings.filterwarnings("ignore")
-from Code.projs.word2vec._jobs import skipgram_train_job, cbow_train_job, skipgram_infer_job
+from Code.projs.word2vec._jobs import skipgram_train_job, cbow_train_job, skipgram_infer_job, cbow_infer_job
 
 if __name__ == "__main__":
     '''

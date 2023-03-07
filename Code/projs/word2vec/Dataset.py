@@ -82,18 +82,18 @@ def build_cbow_arrays(contexts, centers, negatives, pad_value):
     return pad_contexts, center_negtives, masks, labels
 
 class skipgramDataset(torch.utils.data.Dataset):
-    def __init__(self, fpath):
+    def __init__(self, fpath, max_window_size: int, inflation_size: int, size_random=True):
         super().__init__()
         with open(fpath) as f:
             raw_text = f.read()
         sentences = [line.split() for line in raw_text.split('\n')]
         vocab = Vocab(sentences, min_freq=10)
         corpus, counter = subsample(sentences, vocab) #降采样后的token corpus和降采样前的token counter
-        centers, contexts = get_centers_and_contexts(corpus, 2)
+        centers, contexts = get_centers_and_contexts(corpus, max_window_size, size_random)
         # negative sampling
         population = vocab.to_tokens(list(range(1, len(vocab)))) # 采样的population是词汇表中所有词汇(去掉<unk>)
         sampling_weights = [counter[token]**0.75 for token in population]
-        negativeSampler = NegativeSampling(population, sampling_weights, 5) # 5 negative labels for 1 positive label
+        negativeSampler = NegativeSampling(population, sampling_weights, inflation_size) # 5 negative labels for 1 positive label
         negatives = negativeSampler.sample(contexts)
         centers_idx, contexts_idx, negatives_idx = vocab[centers], vocab[contexts], vocab[negatives]
         centers, ctx_neg_list, masks, labels = build_skipgram_arrays(centers_idx, contexts_idx, negatives_idx, 0)
@@ -120,18 +120,18 @@ class skipgramDataset(torch.utils.data.Dataset):
 
 
 class cbowDataset(torch.utils.data.Dataset):
-    def __init__(self, fpath):
+    def __init__(self, fpath, max_window_size: int, inflation_size: int, size_random: bool = True):
         super().__init__()
         with open(fpath) as f:
             raw_text = f.read()
         sentences = [line.split() for line in raw_text.split('\n')]
         vocab = Vocab(sentences, min_freq=10)
         corpus, counter = subsample(sentences, vocab) #降采样后的token corpus和降采样前的token counter
-        centers, contexts = get_centers_and_contexts(corpus, 2)
+        centers, contexts = get_centers_and_contexts(corpus, max_window_size, size_random)
         # negative sampling
         population = vocab.to_tokens(list(range(1, len(vocab)))) # 采样的population是词汇表中所有词汇(去掉<unk>)
         sampling_weights = [counter[token]**0.75 for token in population]
-        negativeSampler = NegativeSampling(population, sampling_weights, 5) # 5 negative labels for 1 positive label
+        negativeSampler = NegativeSampling(population, sampling_weights, inflation_size) # 5 negative labels for 1 positive label
         negatives = negativeSampler.sample(centers) # CBOW模型中, centers是目标vector, 对其负采样
         centers_idx, contexts_idx, negatives_idx = vocab[centers], vocab[contexts], vocab[negatives]
         pad_contexts, center_negtives, masks, labels = build_cbow_arrays(contexts_idx, centers_idx, negatives_idx, 0)
