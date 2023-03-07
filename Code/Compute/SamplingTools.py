@@ -21,7 +21,7 @@ class RandomGenerator:
     
     def draw(self):
         if self.i == len(self.candidates):
-            self.candidates = random.choices(self.population, self.sampling_weights, self.cache_size)
+            self.candidates = random.choices(self.population, self.sampling_weights, k=self.cache_size)
             self.i = 0
         self.i += 1
         return self.candidates[self.i - 1]
