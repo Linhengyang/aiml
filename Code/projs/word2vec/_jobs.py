@@ -17,7 +17,10 @@ word2vec_dir = configs['word2vec_dir']
 ptb_train_fname = configs['ptb_train_fname']
 
 def skipgram_train_job():
-    trainset = skipgramDataset(os.path.join(base_data_dir, word2vec_dir, ptb_train_fname))
+    # dataset
+    max_window_size, inflation_size = 5, 5
+    fpath = os.path.join(base_data_dir, word2vec_dir, ptb_train_fname)
+    trainset = skipgramDataset(fpath, max_window_size, inflation_size)
     vocab = trainset.vocab
     # design net & loss
     embed_size = 100
@@ -32,7 +35,7 @@ def skipgram_train_job():
             return out.mean(dim=1) # (batch_size, )
     loss = WeightedSigmoidBCELoss()
     # init trainer for num_epochs & batch_size & learning rate
-    num_epochs, batch_size, lr = 100, 128, 0.00015
+    num_epochs, batch_size, lr = 200, 256, 0.00015
     trainer = word2vecTrainer(net, loss, num_epochs, batch_size)
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset)## set the data iters
@@ -48,8 +51,10 @@ def skipgram_train_job():
 
 def skipgram_infer_job():
     device = torch.device('cpu')
-    # load data & net
-    trainset = skipgramDataset(os.path.join(base_data_dir, word2vec_dir, ptb_train_fname))
+    # dataset
+    max_window_size, inflation_size = 1, 1
+    fpath = os.path.join(base_data_dir, word2vec_dir, ptb_train_fname)
+    trainset = skipgramDataset(fpath, max_window_size, inflation_size)
     vocab = trainset.vocab
     # design net & loss
     embed_size = 100
@@ -58,13 +63,18 @@ def skipgram_infer_job():
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
     synonym = wordInference(device)
-    query, k = 'disappointing', 3
-
-    print(f'{k} synonyms of {query}: ', synonym.predict(query, k, vocab, net))
-    print('similarity: ', synonym.pred_scores)
+    # query, k = 'stock', 3
+    # print(f'{k} synonyms of {query}: ', synonym.predict(query, k, vocab, net))
+    # print('similarity: ', synonym.pred_scores)
+    token_a, token_b, token_c = 'stock', 'market', 'cash'
+    analogy, score = synonym.get_analogy(token_a, token_b, token_c, vocab, net)
+    print(f'analogy of {token_b} of {token_a} as {analogy} of {token_c} with score {score}')
 
 def cbow_train_job():
-    trainset = cbowDataset(os.path.join(base_data_dir, word2vec_dir, ptb_train_fname))
+    # dataset
+    max_window_size, inflation_size = 5, 5
+    fpath = os.path.join(base_data_dir, word2vec_dir, ptb_train_fname)
+    trainset = cbowDataset(fpath, max_window_size, inflation_size)
     vocab = trainset.vocab
     # design net & loss
     embed_size = 100
@@ -79,7 +89,7 @@ def cbow_train_job():
             return out.mean(dim=1) # (batch_size, )
     loss = SigmoidBCELoss()
     # init trainer for num_epochs & batch_size & learning rate
-    num_epochs, batch_size, lr = 100, 128, 0.00015
+    num_epochs, batch_size, lr = 150, 128, 0.00015
     trainer = word2vecTrainer(net, loss, num_epochs, batch_size)
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset)## set the data iters
@@ -92,3 +102,22 @@ def cbow_train_job():
     trainer.fit()
     # save
     trainer.save_model('cbow_v1.params')
+
+def cbow_infer_job():
+    device = torch.device('cpu')
+    # dataset
+    max_window_size, inflation_size = 5, 5
+    fpath = os.path.join(base_data_dir, word2vec_dir, ptb_train_fname)
+    trainset = cbowDataset(fpath, max_window_size, inflation_size)
+    vocab = trainset.vocab
+    # design net & loss
+    embed_size = 100
+    net = cbowNegSp(len(vocab), embed_size)
+    trained_net_path = os.path.join(local_model_save_dir, 'word2vec', 'cbow_v1.params')
+    net.load_state_dict(torch.load(trained_net_path, map_location=device))
+    # init predictor
+    synonym = wordInference(device)
+    query, k = 'sales', 3
+
+    print(f'{k} synonyms of {query}: ', synonym.predict(query, k, vocab, net))
+    print('similarity: ', synonym.pred_scores)

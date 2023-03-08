@@ -66,6 +66,6 @@ class LearnAbsPosEnc(nn.Module):
 
     def forward(self, X):
         assert X.shape[-1] == self.PosEnc.shape[-1], "input's feature dim not equal to num_hiddens arg of LearnPosEnc"
-        assert X.shape[1] == self.PosEnc.shape[1], "input's sequence length not equal to seq_len arg of LearnPosEnc"
+        assert X.shape[1] <= self.PosEnc.shape[1], "input's sequence length must be shorter than seq_len arg of LearnPosEnc"
         X = X + self.PosEnc
         return self.dropout(X)
