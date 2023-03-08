@@ -63,10 +63,12 @@ def skipgram_infer_job():
     net.load_state_dict(torch.load(trained_net_path, map_location=device))
     # init predictor
     synonym = wordInference(device)
-    query, k = 'stock', 3
-
-    print(f'{k} synonyms of {query}: ', synonym.predict(query, k, vocab, net))
-    print('similarity: ', synonym.pred_scores)
+    # query, k = 'stock', 3
+    # print(f'{k} synonyms of {query}: ', synonym.predict(query, k, vocab, net))
+    # print('similarity: ', synonym.pred_scores)
+    token_a, token_b, token_c = 'stock', 'market', 'cash'
+    analogy, score = synonym.get_analogy(token_a, token_b, token_c, vocab, net)
+    print(f'analogy of {token_b} of {token_a} as {analogy} of {token_c} with score {score}')
 
 def cbow_train_job():
     # dataset

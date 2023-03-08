@@ -19,6 +19,21 @@ def get_k_synonyms(query_token, k, vocab, net):
     similarity = topk.values[1:].cpu().numpy().tolist()
     return vocab.to_tokens(synonyms), similarity
 
+def get_analogy(token_a, token_b, token_c, vocab, net):
+    if isinstance(net, skipgramNegSp):
+        embed = net.center_embed
+    elif isinstance(net, cbowNegSp):
+        embed = net.context_embed
+    else:
+        raise ValueError('input net must be one of skip-gram/cbow')
+    W = embed.weight.data
+    x = W[vocab[token_b]] - W[vocab[token_a]] + W[vocab[token_c]]
+    cosine = torch.mv(W, x)/torch.sqrt(W.pow(2).sum(dim=1) * x.pow(2).sum() + 1e-9)
+    top = torch.topk(cosine, k=1)
+    analogy = top.indices.cpu().numpy().astype('int32').tolist()
+    similarity = top.values.cpu().numpy().tolist()
+    return vocab.to_tokens(analogy), similarity
+
 class wordInference(easyPredictor):
     def __init__(self, device=None):
         super().__init__()
@@ -32,6 +47,21 @@ class wordInference(easyPredictor):
         net.to(self.device)
         self.preds, self._pred_scores = self.pred_fn(query_token, k, vocab, net)
         return self.preds
+
+    def get_analogy(self, token_a, token_b, token_c, vocab, net):
+        if isinstance(net, skipgramNegSp):
+            embed = net.center_embed
+        elif isinstance(net, cbowNegSp):
+            embed = net.context_embed
+        else:
+            raise ValueError('input net must be one of skip-gram/cbow')
+        W = embed.weight.data
+        x = W[vocab[token_b]] - W[vocab[token_a]] + W[vocab[token_c]]
+        cosine = torch.mv(W, x)/torch.sqrt(W.pow(2).sum(dim=1) * x.pow(2).sum() + 1e-9)
+        top = torch.topk(cosine, k=1)
+        analogy = top.indices.cpu().numpy().astype('int32').tolist()
+        similarity = top.values.cpu().numpy().tolist()
+        return vocab.to_tokens(analogy), similarity
 
     def evaluate(self):
         pass
