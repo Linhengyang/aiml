@@ -20,3 +20,17 @@ Large-Scale Pretrain
     有一种下游任务叫text pair classification, 两个sequence是否配对. 这是因为bert的预训练任务中, 还有一个loss, 是预测1个sentence是否
     直接连接另1个. 然而在一些bert变种模型中(RoBERTa), 研究者发现这个任务的loss是无用的. bert的变种很多, 有结构上的变化, 更有预训练任务的变化.
 
+以往词向量化模型的局限性:
+    context-independent   -----> context-sensitive
+    word2vec模型(skipgram/cbow/glove/subword): 没有考虑语境(context-independent), word2vec将一个token映射到固定的vector, 不考虑语境
+业界有人提出了ELMo模型, 它将input sequence作为输入, 给出序列中每一个词的embedding representation. 具体来说, ELMo使用预训练的BiLSTM, 然后将
+token的所有中间层表示组合起来, 成为该token的输出表示. 在使用ELMo时, 将ELMo的输出表示作为额外特征, 加入到工作模型中. 在训练该工作模型的时候,
+ELMo是不会被更新的, 也就是说ELMo的输出纯粹被当成了工作模型的特征.
+    Task-Specific   -----> Task-Agnostic
+    ELMo模型仅仅相当于是特征工程的算子, 为解决每个具体任务, 仍然需要搭建具体的工作模型(Task-Specific). 
+业界提出了GPT模型(Generative Pre-Training). 它基于transformer的decoder, 可以fine-tune使用, 即以最小的变化续接输出层, 从头输入input, 输出任务label,
+预训练模型一起被更新.
+    Unidirectional   -----> Bidirectional
+
+
+BERT正是一个context-sensitive/Task-Agnostic/Bidirectional的模型. 「语境相关/任务无关/双向上下文相关」
