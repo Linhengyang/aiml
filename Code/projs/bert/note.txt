@@ -1,1 +1,22 @@
-这个project是一个模板项目. 当新建项目时, 请复制本 mlp 文件夹下的所有模块文件, 并更名为所需的项目名.
+这个project是经典bert的pytorch版实现, 包括pretrain/fine-tune.
+这个project可能包括经典bert的应用(pytorch版), 包括sentimental analysis/natural language inference.
+
+Large-Scale Pretrain 
+1. bert等大规模预训练模型出现的先决条件
+    1. transformer的scalability, 即transformer能处理超大规模、多模态的训练数据
+    2. 经典狭义的transfomer专注于翻译translation任务, encoder用来表征input sequence, 然后decoder用来生成target sequence.
+       为了通用的下游任务, 预训练模型的真正用武之地.
+
+2. bert是encoder-only的transformer variant: Bidirectional Encoder Representations from Transformers
+    encoder-only的模型作用在表征: represent token sequence(N tokens) into tensor sequence(N tensors)
+
+    bert将input sequence随机mask掉其中一个token, 然后在input sequence最前面添加表示位置的cls_token
+    在前向过程的sel-attetion部分, 类似transformer的encoder, 是不加自回归限制的, 即每一个位置的token都参与表征了其他位置的tokens. 
+    从而, mask位置的token可以从其前、后双向的tokens表征出来, 即bert名字中(Bidirectional)的意义.
+
+3. fine-tune BERT 
+    将pretrain bert model的token representions作为下游任务(scratch)的输入, 直至输出scratch任务的label, 组建成一个完整的模型.
+    用scratch任务的数据(input和label)来train scratch layers, 以及update bert modules.
+    有一种下游任务叫text pair classification, 两个sequence是否配对. 这是因为bert的预训练任务中, 还有一个loss, 是预测1个sentence是否
+    直接连接另1个. 然而在一些bert变种模型中(RoBERTa), 研究者发现这个任务的loss是无用的. bert的变种很多, 有结构上的变化, 更有预训练任务的变化.
+
