@@ -43,4 +43,21 @@ bert有两个预训练任务: 完形填空 + 上下句是否连续判断.
     对第一种输入序列, segments = [0, 0,..., 0], K个0
     对第二种输入序列, segments = [0, 0,..., 0, 1, 1,..., 1], N个0 + M个1
 
-token序列 embedding + segment labels embedding + position embedding, 三者之和作为transformer encoder的输入
+token序列 embedding + segment labels embedding + position embedding, 三者之和作为bert encoder的输入
+
+bert encoder层就是原transformer encoder的复用. 总共12个block, hidden size 768, head num 12
+bert task层要完成两个预训练任务: 完形填空 + 上下句是否连续判断
+
+完形填空: Masked Language Model(MLM)
+    随机抽取15%的tokens, 选为mask token, 用各mask token同序列的其他tokens去预测这个mask token
+    在一个token被选为mask token之后, 还依概率作如下选择:
+    1. 80%的概率, 该mask token被替换为<mask>
+    2. 10%的概率, 该mask token被替换为词汇表vocab中其他随机token
+    3. 10%的概率, 该mask token不作替换, 原token保留
+原因: MLM任务的根本目的, 是为了表征序列中的每一个token, 而不仅仅是mask token. 过多关注<mask>预测, 会让模型过多关注mask token.
+而finetune时, 是不会有<mask>这一特殊token的. 在数据制作时加入这些noise工作, 让token表征时注重每一个token的表征.
+
+MLM部分的输入:
+    1. batch tokens embedding: (batch_size, seq_len, num_hiddens)
+    2. pred_positions: (batch_size, num_positions)
+即每一条input sequence, 有num_positions个mask tokens, 这些mask tokens的位置index就记录在pred_positions的某一行
