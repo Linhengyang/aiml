@@ -5,10 +5,10 @@ from ...Modules._transformer import TransformerEncoderBlock
 from ...Base.RootLayers.PositionalEncodings import LearnAbsPosEnc
 
 class BERTEncoder(nn.Module):
-    def __init__(self, vocab_size, num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, seq_len, use_bias=True, **kwargs):
+    def __init__(self, vocab_size, num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, max_len=1000, use_bias=True, **kwargs):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, num_hiddens)
-        self.pos_encoding = LearnAbsPosEnc(seq_len, num_hiddens, dropout) # seq_len是数据制作时, 输入batch align后的序列长度(text/text pair)
+        self.pos_encoding = LearnAbsPosEnc(max_len, num_hiddens, dropout) # 所有输入序列的最大token数量. 因为fine-tune要使用, 所以模型里不能用seq_len
         self.seg_embedding = nn.Embedding(2, num_hiddens)
         self.blks = nn.Sequential()
         for i in range(num_blks):
