@@ -34,3 +34,13 @@ ELMo是不会被更新的, 也就是说ELMo的输出纯粹被当成了工作模�
 
 
 BERT正是一个context-sensitive/Task-Agnostic/Bidirectional的模型. 「语境相关/任务无关/双向上下文相关」
+
+bert的输入:
+bert有两个预训练任务: 完形填空 + 上下句是否连续判断.
+    第一个任务的输入序列是[<cls>, <sA_tk_1>, ..., <sA_tk_K>, <sep>]
+    第二个任务的输入序列是[<cls>, <sA_tk_1>, ..., <sA_tk_N>, <sep>, <sB_tk_1>,...,<sB_tk_M>, <sep>]
+所以bert input sequence有两种可能性, 单条text sequence or 双条text sequence. 同时输出对应的segment labels:
+    对第一种输入序列, segments = [0, 0,..., 0], K个0
+    对第二种输入序列, segments = [0, 0,..., 0, 1, 1,..., 1], N个0 + M个1
+
+token序列 embedding + segment labels embedding + position embedding, 三者之和作为transformer encoder的输入
