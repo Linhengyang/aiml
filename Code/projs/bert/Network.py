@@ -5,17 +5,17 @@ from ...Modules._transformer import TransformerEncoderBlock
 from ...Base.RootLayers.PositionalEncodings import LearnAbsPosEnc
 
 class BERTEncoder(nn.Module):
-    def __init__(self, vocab_size, num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, max_len=1000, use_bias=True, **kwargs):
+    def __init__(self, vocab_size, num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, seq_len, use_bias=True, **kwargs):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, num_hiddens)
-        self.pos_encoding = LearnAbsPosEnc(max_len, num_hiddens, dropout) # 所有输入序列的最大token数量. 因为fine-tune要使用, 所以模型里不能用seq_len
+        self.pos_encoding = LearnAbsPosEnc(seq_len, num_hiddens, dropout) # 所有输入序列的最大token数量. 因为fine-tune要使用, 所以模型里不能用seq_len
         self.seg_embedding = nn.Embedding(2, num_hiddens)
         self.blks = nn.Sequential()
         for i in range(num_blks):
             cur_blk = TransformerEncoderBlock(num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
             self.blks.add_module(f'blk{i+1}', cur_blk)
     
-    def forward(self, tokens, segments, valid_lens):# bert的输入同样用pad补齐/截断, 所以不同batch的seq_len都是一样的
+    def forward(self, tokens, segments, valid_lens):# bert的输入同样用pad补齐, 所以不同batch的seq_len都是一样的
         # tokens shape: (batch_size, seq_len<=max_len)int64
         # segments shape: (batch_size, seq_len<=max_len)01 int64
         X = self.token_embedding(tokens) + self.seg_embedding(segments)
@@ -49,11 +49,11 @@ class MLM(nn.Module):
 class NSP(nn.Module):
     def __init__(self):
         super().__init__()
-        self.output = nn.LazyLinear(2)
+        self.head = nn.LazyLinear(2)
     
     def forward(self, cls_X):
         # input cls_X shape: (batch_size, num_hiddens)
-        return self.outputs(cls_X) # output shape: (batch_size, 2)
+        return self.head(cls_X) # output shape: (batch_size, 2)
 
 class BERT(nn.Module):
     def __init__(self, vocab_size, num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, seq_len):
