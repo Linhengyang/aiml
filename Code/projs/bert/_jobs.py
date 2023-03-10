@@ -11,10 +11,13 @@ import yaml
 configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 local_model_save_dir = configs['local_model_save_dir']
 base_data_dir = configs['base_data_dir']
+bert_fname = configs['bert_fname']
+train_fname = configs['train_fname']
+test_fname = configs['test_fname']
 
 def train_job():
-    train_path, max_len = os.path.join('../../data', 'bert/wikitext-2', 'wiki.train.tokens'), 64
-    test_path = os.path.join('../../data', 'bert/wikitext-2', 'wiki.test.tokens')
+    train_path, max_len = os.path.join(base_data_dir, bert_fname, train_fname), 64
+    test_path = os.path.join(base_data_dir, bert_fname, test_fname)
     trainset = wikitextDataset(train_path, max_len)
     testset = wikitextDataset(test_path, max_len)
     # design net & loss
