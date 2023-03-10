@@ -5,7 +5,7 @@ from ...Utils.Text.TextPreprocess import Vocab
 def _read_wiki(data_dir):
     with open(data_dir, 'r') as f:
         lines = f.readlines() # list of strings. each string is several sentences(joined by ' . '), that is a paragraph
-    paragraphs = [line.strip().lower().split(' . ') for line in lines if len(line.split(' . ')) > 2] # list of sentence lists
+    paragraphs = [line.strip().lower().split(' . ') for line in lines if len(line.split(' . ')) > 2] # list of sentence lists. 句子数量要大于2
     random.shuffle(paragraphs)
     return paragraphs
 
@@ -30,11 +30,16 @@ def _get_next_sentence(sentence, next_sentence, paragraphs):
     return sentence, next_sentence, is_next # 输出1个sentence, next sentence, 是否连接flag
 
 def _get_nsp_data_from_paragraph(paragraph, paragraphs, vocab, max_len):
-    # paragraph is a 2-D list: each list is a list of sentences. a sentence is a list of tokens
+    # paragraph is a 2-D list: each list is a list of sentences. a sentence is a list of tokens. sentence和paragraph都不会是空list
     # paragraphs is a list of paragraph
     nsp_data_from_paragraph = []
     for i in range(len(paragraph)-1): # 当前paragraph
         tokens_a, tokens_b, is_next = _get_next_sentence(paragraph[i], paragraph[i+1], paragraphs)
+        # tokens_a和tokens_b要去掉可能存在于原文本的<cls><sep>
+        tokens_a = [token for token in tokens_a if token not in ('<cls>', '<sep>')]
+        tokens_b = [token for token in tokens_b if token not in ('<cls>', '<sep>')]
+        if len(tokens_a) == 0 or len(tokens_b) == 0: # 如果任一句子去掉<cls>和<sep>后, 长度为0, 放弃
+            continue
         if len(tokens_a) + len(tokens_b) + 3 > max_len: # 如果当前前后两句token数量+<cls>+2个<sep>数量超过max_len, 放弃
             continue # 即放弃拼接后过长的前后句对. 相当于truncate处理. 所以后面只需pad到这个max_len即可
         tokens, segments = get_tokens_segments(tokens_a, tokens_b) # 拼接后的token list, 和对应的segments
@@ -69,6 +74,8 @@ def _get_mlm_data_from_tokens(tokens, vocab):
     for i, token in enumerate(tokens):
         if token not in ('<cls>', '<sep>'):
             candidate_mask_positions.append(i)
+    # 如果candidate_mask_positions还是[], 中断并打印错误信息
+    assert len(candidate_mask_positions) > 0, f'invalid token list processing {tokens}'
     num_mlm_masks = max(1, round(len(tokens)*0.15))
     mlm_input_tokens, mask_positions_labels = _replace_mlm_tokens(tokens, candidate_mask_positions, num_mlm_masks, vocab)
     mask_positions_labels = sorted(mask_positions_labels, key=lambda x: x[0]) # 将mask_positions_labels按照positions从小到大排列
@@ -112,30 +119,35 @@ class wikitextDataset(torch.utils.data.Dataset):
         super().__init__()
         # lower/按.分句, 没有对数字/其他符号
         paragraphs = _read_wiki(fpath) #list of lists of sentences. Now sentence is string, paragraphs is 2D list
-        # tokenize.
-        paragraphs = [[line.split() for line in paragraph] for paragraph in paragraphs] # 3D list
+        # tokenize. 空段落过滤, 段落中空字符串的句子过滤
+        paragraphs = [[ line.split() for line in paragraph if len(line) > 0 ] for paragraph in paragraphs if len(paragraph) > 0] # 3D list
         # 为了建立vocab, 需要传入一个2D list
         sentences = [line for paragraph in paragraphs for line in paragraph]
         # 建立vocab
-        self.vocab = Vocab(sentences, min_freq=5, reserved_tokens=['<pad>', '<mask>', '<cls>', '<sep>'])
+        self._vocab = Vocab(sentences, min_freq=5, reserved_tokens=['<pad>', '<mask>', '<cls>', '<sep>'])
         nsp_sample = []
         for paragraph in paragraphs:
             # cur_nsp_sample: list of [拼接后token list, segment list, 是否相邻flag]
-            cur_nsp_sample = _get_nsp_data_from_paragraph(paragraph, paragraphs, self.vocab, max_len)
+            cur_nsp_sample = _get_nsp_data_from_paragraph(paragraph, paragraphs, self._vocab, max_len)
             nsp_sample.extend(cur_nsp_sample)
         # 组装samples
         examples = []
         for tokens, segments, if_next in nsp_sample:
             # masked token_idx list, mask position list, mask true token_idx list
-            tokens_idx, mask_positions, mlm_labels_idx = _get_mlm_data_from_tokens(tokens, self.vocab)
+            tokens_idx, mask_positions, mlm_labels_idx = _get_mlm_data_from_tokens(tokens, self._vocab)
             examples.append( [tokens_idx, mask_positions, mlm_labels_idx, segments, if_next] )
         # 灌入dataset
-        self.all_tokens_idx, self.all_segments, self.valid_lens, self.all_mask_positions, self.all_mlm_weights, self.all_mlm_labels_idx, self.nsp_labels = _pad_bert_inputs(examples, max_len, self.vocab)
+        self.all_tokens_idx, self.all_segments, self.valid_lens, self.all_mask_positions, self.all_mlm_weights, self.all_mlm_labels_idx, self.nsp_labels = _pad_bert_inputs(examples, max_len, self._vocab)
 
     def __getitem__(self, index):
         # 单条样本
         # tokens_idx_list, segments_list, valid_len_int, mask_positions_list, mlm_weights_list, mlm_labels_idx_list, if_next_int
-        return (self.all_tokens_idx[index], self.all_segments[index], self.valid_lens[index], self.all_mask_positions[index], self.all_mlm_weights[index], self.all_mlm_labels_idx[index], self.nsp_labels[index])
+        return (tuple([self.all_tokens_idx[index], self.all_segments[index], self.valid_lens[index], self.all_mask_positions[index]]), 
+                tuple([self.all_mlm_weights[index], self.all_mlm_labels_idx[index], self.nsp_labels[index]]))
 
     def __len__(self):
         return len(self.all_tokens_idx)
+    
+    @property
+    def vocab(self):
+        return self._vocab
