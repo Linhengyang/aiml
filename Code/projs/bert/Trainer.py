@@ -8,7 +8,7 @@ configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.Full
 online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
 
 
-class projTrainer(easyTrainer):
+class bertTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
         super().__init__()
         self.net = net
@@ -34,8 +34,15 @@ class projTrainer(easyTrainer):
         ''' 输入train_set(必须), valid_set(可选), test_set(可选, 用于resolve网络), 依次得到train_iter, valid_iter, test_iter'''
         assert hasattr(self, 'device'), "Device not set. Please set trainer's device before setting data_iters"
         def transfer(x):
-            pass
+            result = []
+            for tp in default_collate(x):
+                res_ = tuple()
+                for ts in tp:
+                    res_ += (ts.to(self.device), )
+                result.append(res_)
+            return tuple(result)
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=transfer)
+        self.valid_iter, self.test_iter = None, None
         if valid_set:
             self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False, collate_fn=transfer)
         if test_set:
@@ -48,20 +55,36 @@ class projTrainer(easyTrainer):
         '''
         if need_resolve:
             assert hasattr(self, 'test_iter'), 'Please input test_set when deploying .set_data_iter()'
-            pass
+            self.net.train()
+            for net_inputs_batch, loss_inputs_batch in self.test_iter:
+                # net_inputs_batch: tokens_idx, segments, valid_lens, mask_positions
+                # (bs, seq_len), (bs, seq_len), (bs, ), (bs, num_masks)
+                # loss_inputs_batch: mlm_weights, mlm_labels_idx, nsp_labels
+                # (bs, num_masks), (bs, num_masks), (bs,)
+                break
+            try:
+                _, mlm_Y_hat, nsp_Y_hat = self.net(*net_inputs_batch)
+                #(bs, seq_len, num_hiddens), (bs, num_masks, vocab_size), (bs, 2)
+                l, mlm_l, nsp_l = self.loss(mlm_Y_hat, nsp_Y_hat, *loss_inputs_batch)
+                print(f'Net resolved & logged. Net & Loss checked with batch loss sum {l.sum()}. Ready to fit')
+                return True
+            except:
+                raise AssertionError('Net or Loss has problems. Please check code before fit')
         print('Net unresolved. Net & Loss unchecked. Ready to skip init_params and fit')
         return False
     
     def init_params(self):
         '''customize the weights initialization behavior and initialize the net'''
         def xavier_init_weights(m):
-            pass
+            if type(m) == nn.Linear:
+                nn.init.xavier_uniform_(m.weight)
         self.net.apply(xavier_init_weights)
     
     def set_optimizer(self, lr, optim_type='adam'):
         '''set the optimizer at attribute optimizer'''
         assert type(lr) == float, 'learning rate should be a float'
-        pass
+        if optim_type == 'adam':
+            self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
     
     def set_grad_clipping(self, grad_clip_val=None):
         '''set the grad_clip_val at attribute grad_clip_val if input a float'''
@@ -82,5 +105,19 @@ class projTrainer(easyTrainer):
         assert hasattr(self, 'train_iter'), 'data_iter missing'
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
         for epoch in range(self.num_epochs):
-            pass
+            self.net.train()
+            self.epoch_evaluator.epoch_judge(epoch)
+            for net_inputs_batch, loss_inputs_batch in self.train_iter:
+                self.optimizer.zero_grad()
+                _, mlm_Y_hat, nsp_Y_hat = self.net(*net_inputs_batch)
+                l, mlm_l, nsp_l = self.loss(mlm_Y_hat, nsp_Y_hat, *loss_inputs_batch)
+                l.sum().backward()
+                if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
+                    nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
+                self.optimizer.step()
+                with torch.no_grad():
+                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l, l)
+            with torch.no_grad():
+                self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter)
+                self.epoch_evaluator.epoch_metric_cast()
         print('Fitting finished successfully')
