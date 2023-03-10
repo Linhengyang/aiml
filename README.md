@@ -80,6 +80,7 @@ the online working space must contain following directories:
     │   │       └── PatchOperation.py
     │   └── projs
     │       ├── _mlp
+    │       ├── bert
     │       ├── recsys
     │       ├── transformer
     │       ├── vit
