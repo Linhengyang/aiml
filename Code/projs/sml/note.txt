@@ -1,0 +1,3 @@
+这个project是为了手动实现各经典统计机器学习(statistical machine learning)模型, 可能包括svm/decision tree/GBDT等.
+
+本project主要是为了实现svm(support vector machine)的手动实现. 目的是在实现svm的过程中复习最优化理论(拉格朗日乘数法/对偶问题/KKT条件)的知识.
