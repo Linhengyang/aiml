@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from .Dataset import wikitextDataset
 from .Network import BERT
-from .Trainer import bertTrainer
+from .Trainer import bertPreTrainer
 from .Evaluator import bertEpochEvaluator
 import yaml
 configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
@@ -15,7 +15,7 @@ bert_fname = configs['bert_fname']
 train_fname = configs['train_fname']
 test_fname = configs['test_fname']
 
-def train_job():
+def pretrain_job():
     train_path, max_len = os.path.join(base_data_dir, bert_fname, train_fname), 64
     test_path = os.path.join(base_data_dir, bert_fname, test_fname)
     trainset = wikitextDataset(train_path, max_len)
@@ -38,7 +38,7 @@ def train_job():
     loss = bertLoss()
     # init trainer
     num_epochs, batch_size, lr = 300, 512, 0.00015
-    trainer = bertTrainer(net, loss, num_epochs, batch_size)
+    trainer = bertPreTrainer(net, loss, num_epochs, batch_size)
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset, None, testset)## set the data iters
     trainer.set_optimizer(lr)## set the optimizer
