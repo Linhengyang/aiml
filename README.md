@@ -79,7 +79,8 @@ the online working space must contain following directories:
     │   │   └── image
     │   │       └── PatchOperation.py
     │   └── projs
-    │       ├── _mlp
+    │       ├── _demo
+    │       ├── bert
     │       ├── recsys
     │       ├── transformer
     │       ├── vit

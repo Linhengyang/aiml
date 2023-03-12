@@ -60,4 +60,22 @@ bert task层要完成两个预训练任务: 完形填空 + 上下句是否连续
 MLM部分的输入:
     1. batch tokens embedding: (batch_size, seq_len, num_hiddens)
     2. pred_positions: (batch_size, num_positions)
-即每一条input sequence, 有num_positions个mask tokens, 这些mask tokens的位置index就记录在pred_positions的某一行
+即每一条input sequence, 有num_positions个mask tokens, 这些mask tokens的位置index就记录在pred_positions的一行
+MLM部分的输出:
+    用pred_positions位置的token embeddings, 拿去预测具体的token分布, 即(batch_size, num_positions, vocab_size)的输出
+    与真正的label tokens(batch_size, num_positions)作对比, 求出交叉熵损失
+
+上下句判断: Next Sentence Prediction(NSP)
+    每一行样本取上下句, 50%的概率上下句在原文中相连, 50%的概率上下句在原文中不相连
+    在样本句首添加代表位置的cls_token, 在encoder前向过程中, 由于cls_token与所有的tokens都经过了self-att运算, 所以它可以认为是「句向量」(两个sentences的综合)
+    用cls_token的embdding预测, 这一行样本是否代表相邻的两个sentences
+
+NSP部分的输入:
+    1. 每一个text pair的第一个位置cls_token的embedding: (batch_size, num_hiddens)
+NSP部分的输出
+    binary分类的logits(batch_size, 2), 与真正的是否上下句标签(batch_size, )作对比, 求出交叉熵损失
+
+全局loss采用: MLM部分的「当前样本平均一个mask位置预测的loss」+「当前样本上下句是否相连的二分类loss」作为当前样本的loss
+
+
+考虑在bert model是为了fine-tune使用的, 所以在forward的时候, 要考虑fine-tune的使用模式. fine-tune的时候可能只输入一句, 且没有mask_positions作为输入

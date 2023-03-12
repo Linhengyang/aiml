@@ -8,7 +8,7 @@ configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.Full
 online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
 
 
-class bertTrainer(easyTrainer):
+class bertPreTrainer(easyTrainer):
     def __init__(self, net, loss, num_epochs, batch_size):
         super().__init__()
         self.net = net
