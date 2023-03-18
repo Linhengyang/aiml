@@ -1,7 +1,7 @@
 # repo skeleton  
 ## Execute Note:  
 * a `__init__.py` file shows that the package imports all from underlying modules.  
-* always run `python -B xxx.py` file under `autodl` directory in case of relative importing  
+* always run `python -B xxx.py` file under `aiml` directory in case of relative importing  
 * always check ideas in `experiment.ipynb`, test code chunk in `test.py`
 * after successful tests, wrap code chunk to `_jobs.py` under `Code/projs/xxxx`
 * invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
@@ -32,7 +32,7 @@
 the online working space must contain following directories:  
 * `model`: consisting directory named by the `proj_name` -- save trained params
 * `logs`: consisting directory named by the `proj_name`  -- save logs
-* `autodl`: `git clone https://github.com/Linhengyang/autodl.git`
+* `aiml`: `git clone https://github.com/Linhengyang/aiml.git`
 ---
     model
     ├── mlp
@@ -42,7 +42,7 @@ the online working space must contain following directories:
     ├── mlp
     ├── transformer
     ├── vit
-    autodl
+    aiml
     ├── Code
     │   ├── Base
     │   │   ├── MetaFrames
