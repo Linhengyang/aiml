@@ -1,0 +1,3 @@
+语义分割：分两种，
+一种叫图片分割，image segmentation，主要关注像素点之间的关系，以在图片中区分“区域”即可，对区域本身代表什么不作太多关注：only semantic segment
+另一种叫实例分割，image segmentation，不光要将图片中的“区域”区分开，更要预测区域本身的内容or属性：semantic segment and detection simultaneously

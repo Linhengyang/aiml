@@ -78,6 +78,9 @@ the online working space must contain following directories:
     │   │   │   └── TextPreprocess.py
     │   │   └── image
     │   │       └── PatchOperation.py
+    │   ├── apps
+    │   │   ├── semantic_segmentation
+    │   │   └── sentiment_analysis
     │   └── projs
     │       ├── _demo
     │       ├── bert
