@@ -23,6 +23,7 @@ class vitEpochEvaluator(epochEvaluator):
             self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
 
     def epoch_judge(self, epoch):
+        # 确定当前epoch是否要 reveal 训练情况 or evaluate 模型
         self.reveal_flag = (self.reveal_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.reveal_cnts) == 0 or epoch == 0 )
         self.eval_flag = (self.eval_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.eval_cnts) == 0 or epoch == 0 )
         if self.reveal_flag or self.eval_flag:
