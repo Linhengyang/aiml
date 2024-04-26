@@ -16,9 +16,8 @@ class TestNN(nn.Module):
     """
     def __init__(self, onehot_size, hidden_size, out_size, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.embedding = nn.Embedding(onehot_size, hidden_size)
-        # self.relu = nn.ReLU()
-        self.linear = nn.Linear(hidden_size, out_size)
+        self.embedding_1 = nn.Embedding(onehot_size, hidden_size)
+        self.linear_2 = nn.Linear(hidden_size, out_size)
 
     ## 经典的带参数前向计算 layers
 
@@ -47,9 +46,39 @@ class TestNN(nn.Module):
     ## 其他用在 图像 等数据上的 Layers
     # Convolution / Pooling / Padding 等
 
+    ## 以上构成了torch模型的一些经典layers
+    ## 在内部, 可以使用私有属性 _modules 访问
+        # print("_modules: ", self._modules)
+        # print("**************************************")
+    
+    ## 但是很多时候, 模型需要微操至tensor. torch提供多种方式添加tensor. 如果该tensor是需要被更新的, 那么它是parameter, 如果不需要, 那么它是buffer
+    
+    ## 添加 不需要被更新的 buffer
+        # 方式0: 成员变量
+        # self.buffer = torch.tensor(1.) 这种方式是不行的, 该值不会被注册进入模型, 无法跟随 state_dict 表述, 也不能跟随整个模型在device之间移动
+        # 唯一的方式
+        self.register_buffer("my_buffer", torch.tensor(1.) )
+        # 可以使用私有属性 _buffers 访问
+        # print("_buffers: ", self._buffers)
+        # 在外部, 可以使用方法 named_buffers()/ buffers 来展示
+
+    ## 添加 需要被更新的 parameter
+        # 有两种写法，效果几乎完全相同
+        # 都是创建新 parameter 变量, 并注册到模型中; 都需要使用 nn.Parameter()方法来确定梯度
+        self.register_parameter("my_param1", nn.Parameter(torch.tensor(1.)) )
+        self.my_param2 = nn.Parameter(torch.tensor(2.))
+        # 在内部, 可以使用私有属性 _parameters 访问
+        # print("_parameters: ", self._parameters)
+        # print("**************************************")
+        # 在外部, 可以使用方法 named_parameters()/ parameters() 来展示.
+        # _parameters 只会返回 额外注册的 parameters, 通过 _modules 注册的参数不会被访问
+        # 而 外部的 named_parameters()/ parameters() 会返回 _parameters 和 _modules 所有可学习参数
+
+
+
     def forward(self, X):
-        X_embd = self.embedding(X)
-        Y = self.linear(nn.functional.relu(X_embd))
+        X_embd = self.embedding_1(X)
+        Y = self.linear_2(nn.functional.relu(X_embd))
         return Y
     
 
@@ -62,4 +91,4 @@ if __name__ == "__main__":
     X = torch.randint(low=0, high=9, size=(3,4,5), dtype=torch.int)
     tnn = TestNN(onehot_size=10, hidden_size=3, out_size=5)
     Y = tnn(X)
-    print(Y)
+    print(  list( tnn.named_parameters() ) )
