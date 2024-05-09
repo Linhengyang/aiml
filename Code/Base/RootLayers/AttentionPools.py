@@ -73,7 +73,7 @@ class AdditiveAttention(nn.Module):
         self.W_v = nn.LazyLinear(1, bias=False)
         self.dropout = nn.Dropout(dropout)
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
-        # n_query, q:query_size; n: n_kv, k:key_size; v:value_size
+        # m:n_query, q:query_size; n: n_kv, k:key_size; v:value_size
         # Q_batch: batch of shape(m, q); K_batch: batch of shape(n, k); V_batch: batch of shape(n, v)
         batch_size, m, q = Q_batch.shape
         _, n, k = K_batch.shape
