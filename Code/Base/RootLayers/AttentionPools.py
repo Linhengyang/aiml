@@ -12,7 +12,7 @@ def masked_softmax(S, valid_lens):
         (if len=0 in valid_lens, it means average all Vs in QKV pool)
     
     returns: convex weight tensor with shape (batch_size, n_queries, n_kvpairs), denoted as W
-        W[sample_idx][query_idx] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
+        W[sample_idx, query_idx, :] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
 
     explains:
         for sample i,
