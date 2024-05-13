@@ -109,7 +109,7 @@ class TransformerDecoderBlock(nn.Module):
         else: # infer过程中
             # infer_recoder是一个dict of (1, _, d_dim) tensor
             assert type(infer_recorder) == dict, 'in infer mode, a dictionary as infer recorder should be input'
-            try: 
+            try:
                 infer_recorder[self.blk_ind] = torch.cat([infer_recorder[self.blk_ind], X], dim=1)
             except KeyError: # 从<bos> infer第一个token时, infer_recorder中存在空的元素
                 infer_recorder[self.blk_ind] = X
