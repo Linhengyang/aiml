@@ -1,0 +1,34 @@
+数据样式
+
+
+features
+
+user_id                  day1                                     day2                      ...                dayN
+0000001     stock1:+100.00,stock2:-100.00, ...        stock1:+100.00,stock3:-100.00, ...          stock1:+100.00,stock3:-100.00, ...
+
+
+
+
+
+
+
+labels
+
+user_id                 dayN+1                             if_margin_trading
+0000001       stock?:???,stock?:???, ...                           1?0                
+
+
+
+
+
+
+features
+
+user_id               net_investment_amount   trading_amount   num_buy_stocks    num_sell_stocks    trading_frequency
+0000001               sequence with length L     
+
+
+labels
+
+user_id                if_margin_trading
+0000001                      1?0                

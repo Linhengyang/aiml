@@ -68,7 +68,7 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
         path: seq2seq text file path
         num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
         num_examples: total sample size if given. None to read all
-
+    
     returns: denoted as tuple of tensors(tensor dataset), tuple of vocabs
         tensor dataset:
             1. source seqs, shape (num_examples, num_steps)
