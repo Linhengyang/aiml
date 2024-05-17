@@ -11,9 +11,11 @@ class seq4recTrainer(easyTrainer):
         self.num_epochs = num_epochs
         self.batch_size = batch_size
     
+    
     def log_topology(self, *args, **kwargs):
         with open('../logs/seq4rec/seq4rec_net_topo.txt', 'w') as f:
-            print(self.net, f)
+            print(self.net, file=f)
+
 
     def set_data_iter(self, train_set):
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True)
@@ -24,7 +26,6 @@ class seq4recTrainer(easyTrainer):
             self.net.train()
             for X, y in self.train_iter:
                 break
-
             try:
                 y_hat = self.net(X)
                 l = self.loss(y_hat, y).sum()
@@ -41,8 +42,11 @@ class seq4recTrainer(easyTrainer):
         assert isinstance(lr, float), 'learning rate should be a float'
         if optim_type == 'adam':
             self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
-        else:
+        elif optim_type == 'sgd':
             self.optimizer = torch.optim.sgd(self.net.parameters(), lr=lr)
+        else:
+            raise NotImplementedError(f'unknown optimization {optim_type}')
+
 
     def set_epoch_eval(self, epoch_evaluator):
         self.epoch_evaluator = epoch_evaluator

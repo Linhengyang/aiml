@@ -33,11 +33,13 @@ class seq4recDataset(torch.utils.data.Dataset):
 
 
 
+
+
 if __name__ == "__main__":
     path = "../../../../data/seq4rec/train_data.csv"
     data = seq4recDataset(path)
     print(data)
-    
+
     # data = pd.read_csv(path, header=0, dtype=str)
 
     # labels = data.head()['if_margin_trading'].astype(int)
