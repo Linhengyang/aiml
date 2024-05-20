@@ -1,6 +1,8 @@
 import torch
 import pandas as pd
 import numpy as np
+from ...Data.dbconnect import DatabaseConnection
+import typing as t
 
 def row_parse(array:np.ndarray):
     cat_row = "|".join( array.tolist() )
@@ -8,11 +10,31 @@ def row_parse(array:np.ndarray):
     return np.array( cat_row.split("|") )
 
 
-
 class seq4recDataset(torch.utils.data.Dataset):
-    def __init__(self, path, *args, **kwargs):
+    def __init__(self, path, tbl_name='csv', *args, **kwargs):
         super().__init__(*args, **kwargs)
-        data = pd.read_csv(path, header=0, dtype=str)
+        if tbl_name == 'csv':
+            data = pd.read_csv(path, header=0, dtype=str)
+        elif tbl_name == 'seq4rec_train':
+            db_info = {
+                'path':path
+                }
+            db = DatabaseConnection(db_info)
+
+            sql_query =\
+            '''
+            SELECT 
+                user_id,
+                net_investment_amount,
+                trading_amount,
+                num_buy_stocks,
+                num_sell_stocks,
+                trading_frequency,
+                if_margin_trading
+            FROM {tbl_name}
+            '''.format(tbl_name=tbl_name)
+            data = db.GetSQL(sql_query)
+
         labels = data['if_margin_trading'].astype(int)
         self._labelTensor = torch.tensor(labels, dtype=torch.int64)
         feat_cols = ["net_investment_amount", "trading_amount", "num_buy_stocks", "num_sell_stocks", "trading_frequency"]
@@ -27,11 +49,6 @@ class seq4recDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return 100000
-
-
-
-
-
 
 
 

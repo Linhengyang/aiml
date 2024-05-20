@@ -6,7 +6,8 @@ import torch.nn as nn
 
 
 def train_job():
-    trainset = seq4recDataset(path="../data/seq4rec/train_data.csv")
+    # trainset = seq4recDataset(path="../data/seq4rec/train_data.csv")
+    trainset = seq4recDataset(path="../data/seq4rec/train_data.db", tbl_name='seq4rec_train')
     num_hiddens, dropout = 128, 0.1
     net = seq4recEncoder(num_hiddens, dropout)
     loss = nn.CrossEntropyLoss()
