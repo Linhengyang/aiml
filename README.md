@@ -61,6 +61,8 @@ the online working space must contain following directories:
     │   │   ├── SamplingTools.py
     │   │   ├── TrainTools.py
     │   │   └── VisualizeTools.py
+    │   ├── Data
+    │   │   └── dbconnect.py
     │   ├── Loss
     │   │   ├── BPRankingLoss.py
     │   │   ├── L2PenaltyMSELoss.py
