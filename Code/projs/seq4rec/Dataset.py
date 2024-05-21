@@ -11,7 +11,7 @@ def row_parse(array:np.ndarray):
 
 
 class seq4recDataset(torch.utils.data.Dataset):
-    def __init__(self, path, tbl_name='csv', *args, **kwargs):
+    def __init__(self, path, tbl_name='csv', mode='train', *args, **kwargs):
         super().__init__(*args, **kwargs)
         if tbl_name == 'csv':
             data = pd.read_csv(path, header=0, dtype=str)
@@ -34,9 +34,14 @@ class seq4recDataset(torch.utils.data.Dataset):
             FROM {tbl_name}
             '''.format(tbl_name=tbl_name)
             data = db.GetSQL(sql_query)
-
-        labels = data['if_margin_trading'].astype(int)
-        self._labelTensor = torch.tensor(labels, dtype=torch.int64)
+            
+        if mode == 'train':
+            labels = data['if_margin_trading'].astype(int)
+            self._labelTensor = torch.tensor(labels, dtype=torch.int64)
+        elif mode == 'infer':
+            user_ids = data['user_id'].astype(int)
+            self._labelTensor = torch.tensor(user_ids, dtype=torch.int64)
+        
         feat_cols = ["net_investment_amount", "trading_amount", "num_buy_stocks", "num_sell_stocks", "trading_frequency"]
         raw_features = data[feat_cols].values
         features = np.apply_along_axis(row_parse, 1, raw_features).astype(float)
