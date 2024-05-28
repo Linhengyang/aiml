@@ -38,7 +38,8 @@ class Vocab:
             reserved_tokens = [] # 处理未输入预存tokens的情况
         counter = count_corpus(tokens) # 计算tokens出现频次
         # 将(token, frequency)组成的pair, 按照frequency从多到少排序记录在一个list里
-        # sorted()函数, 输入一个列表, 按照key参数排序, 默认从小到大排序, reverse=True则为从大到小排序）
+        # sorted()函数, 输入一个iterable对象, 按照key参数排序, 默认从小到大排序, reverse=True则为从大到小排序）
+        # 返回一个list, 元素是(key, value)对
         self._token_freqs = sorted(counter.items(), key=lambda x:x[1], reverse=True)
         
         # 建立从token到数字的双射
@@ -84,6 +85,8 @@ class Vocab:
     def token_freqs(self):
         return self._token_freqs
 
+
+
 def preprocess_space(text, need_lower=True, separate_puncs=',.!?'):
     '''
     inputs: text, need_lower(optional), separate_puncs(optional)
@@ -107,6 +110,9 @@ def preprocess_space(text, need_lower=True, separate_puncs=',.!?'):
     ## 从第二个字符开始遍历。如果它是,.!?且前一个字符不是空格，则将它变成 " "+标点
     out = [ " " + char if i > 0 and no_space(char, text[i-1]) else char for i, char in enumerate(text)]
     return "".join(out)
+
+
+
 
 def subsample(sentences, vocab, thr=1e-4):
     '''
