@@ -4,11 +4,37 @@ from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.TrainTools import easyTrainer
 import yaml
-configs = yaml.load(open('Code/projs/{}/configs.yaml', 'rb'), Loader=yaml.FullLoader)
-online_log_dir, online_model_save_dir, proj_name = configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
+configs = yaml.load(open('Code/projs/_demo/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+online_log_dir, online_model_save_dir, proj_name = \
+    configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
 
 
 class projTrainer(easyTrainer):
+    '''
+    组成一个trainer 至少需要:
+        network(nn.Module类) / loss function(也是nn.Module类, 输入pred和label, 输出 scalar loss) / num_epochs / batch_size
+        device: 执行训练的机器, torch.device 对象
+        data iterator: 一个 torch.utils.data.DataLoader 对象, 源源不断地给出 data batch (features 和 label)
+        optimizer: 一个 torch.optimizer 对象, 输入 network 的 parameters, 和其他参数, 作用是可更新这些parameters
+        epochEvaluator: 记录每个batch的训练情况、衡量整个模型, 并打印出训练过程中的各项metric
+
+    steps:
+        for epoch in epoch_loops:
+            set network to train mode
+            judge if train_reveal or model_eval would perform in this epoch
+
+            loop among the data_iterator:
+                get data_batch & label_batch in same length as batch_size
+                optimizer set grad to 0
+                get pred = net(data)
+                get loss = loss(pred, label)
+                l.sum().backward()
+                optional: clip_grad
+                optimizer step update
+                in no_grad mode: record this batch's metric
+            
+            in no_grad mode: evaluate the mode / reveal the train metric
+    '''
     def __init__(self, net, loss, num_epochs, batch_size):
         super().__init__()
         self.net = net

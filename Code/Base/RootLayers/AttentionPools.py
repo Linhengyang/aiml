@@ -12,7 +12,7 @@ def masked_softmax(S, valid_lens):
         (if len=0 in valid_lens, it means average all Vs in QKV pool)
     
     returns: convex weight tensor with shape (batch_size, n_queries, n_kvpairs), denoted as W
-        W[sample_idx][query_idx] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
+        W[sample_idx, query_idx, :] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
 
     explains:
         for sample i,
@@ -73,7 +73,7 @@ class AdditiveAttention(nn.Module):
         self.W_v = nn.LazyLinear(1, bias=False)
         self.dropout = nn.Dropout(dropout)
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
-        # n_query, q:query_size; n: n_kv, k:key_size; v:value_size
+        # m:n_query, q:query_size; n: n_kv, k:key_size; v:value_size
         # Q_batch: batch of shape(m, q); K_batch: batch of shape(n, k); V_batch: batch of shape(n, v)
         batch_size, m, q = Q_batch.shape
         _, n, k = K_batch.shape
