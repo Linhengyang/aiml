@@ -24,7 +24,7 @@ def count_corpus(sentences: t.List[list]|t.List[str]) -> t.Dict:
 
 
 
-def preprocess_space(text, need_lower=True, separate_puncs=',.!?'):
+def preprocess_space(text, need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~') -> str:
     '''
     inputs: text, need_lower(optional), separate_puncs(optional)
         text: a str object
@@ -37,15 +37,16 @@ def preprocess_space(text, need_lower=True, separate_puncs=',.!?'):
     explains:
         preprocess spaces inside a str obeject
     '''
-    text = text.replace('\u202f', ' ').replace('\xa0', ' ') #替换不间断空格为单空格
+    text = text.replace('\u202f', ' ').replace('\xa0', ' ').strip() #替换不间断空格为单空格, 并trim首尾空格
     if need_lower:
         text = text.lower()
     # 在文字和[,.!?]之间插入空格
     ## 判断 当前字符是否是separate_puncs，且前一个字符不是空格
     def no_space(char, prev_char):
         return char in set(separate_puncs) and prev_char != " "
-    ## 从第二个字符开始遍历。如果它是,.!?且前一个字符不是空格，则将它变成 " "+标点
+    ## 从第二个字符开始遍历。如果它是separate_puncs且前一个字符不是空格，则将它变成 " "+标点
     out = [ " " + char if i > 0 and no_space(char, text[i-1]) else char for i, char in enumerate(text)]
+
     return "".join(out)
 
 
@@ -72,3 +73,29 @@ def subsample(sentences:t.List[t.List[str]], vocab, thr=1e-4):
         return random.uniform(0, 1) < math.sqrt(thr/ counter[token] * num_all_tokens)
 
     return [[token for token in line if keep(token)] for line in sentences], counter
+
+
+
+def preprocess_space_append(text,
+                      need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
+                      append_punc='_') -> str:
+    '''
+    inputs: text, append_punc(optional)
+        text: a str object
+        append_punc: punctuation that shall be add before every space.
+
+    returns: A str obejct
+        whose spaces are normal single space ' ', and every space has append_punc append before it
+
+    explains:
+        首先处理text的所有非间断空格为单空格, 其次在每个word和punc后面(每个空格前面)添加append_punc.
+        因为subword会拆分整个word, append_punc 帮助区分subword之间和word之间的分割
+    '''
+    text = preprocess_space(text, need_lower, separate_puncs) + " "
+
+    words_puncs = text.split(" ") # 包含 ""
+    _SPACE = append_punc+" "
+    
+    return _SPACE.join(words_puncs).strip()
+
+
