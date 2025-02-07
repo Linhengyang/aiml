@@ -1,6 +1,7 @@
 import torch
 import random
-from ...Utils.Text.TextPreprocess import Vocab, subsample
+from ...Utils.Text.Vocabulize import Vocab
+from ...Utils.Text.TextPreprocess import subsample
 from ...Utils.Common.SeqOperation import truncate_pad
 from ...Compute.SamplingTools import NegativeSampling
 

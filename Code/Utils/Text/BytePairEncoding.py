@@ -1,6 +1,6 @@
 # BytePairEncoding.py
 
-# a learner, learning from corpus to induce a vocaburary
+# a learner, which learns from corpus to induce a vocaburary
 
 # function byte-pair-encoding(corpus C, numbers of merges k) --> vocab V
 # init V <-- all unique characters in C
@@ -11,10 +11,14 @@
 #   update corpus: replace all occurrence of tok_L, tok_R in C with tok_new
 # return V
 
-corpus = "low "
+
+import collections
+
+
+corpus = "low low lower lower lower "
 
 
 
 
 
-# a segmenter, tokenize a raw sentences
+# a segmenter, which tokenizes a raw sentences
