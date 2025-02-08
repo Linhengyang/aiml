@@ -75,7 +75,9 @@ the online working space must contain following directories:
     │   │   │   ├── DataTransform.py
     │   │   │   └── SeqOperation.py
     │   │   ├── Text
-    │   │   │   └── TextPreprocess.py
+    │   │   │   └── BytePairEncoding.py
+    │   │   │   ├── TextPreprocess.py
+    │   │       └── Vocabulize.py
     │   │   └── image
     │   │       └── PatchOperation.py
     │   ├── apps

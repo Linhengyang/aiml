@@ -1,6 +1,6 @@
 import torch
 import random
-from ...Utils.Text.TextPreprocess import Vocab
+from ...Utils.Text.Vocabulize import Vocab
 
 def _read_wiki(data_dir):
     with open(data_dir, 'r') as f:

@@ -1,5 +1,5 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
-from ...Utils.Text.TextPreprocess import Vocab
+from ...Utils.Text.Vocabulize import Vocab
 from ...Utils.Common.SeqOperation import truncate_pad
 import torch
 
