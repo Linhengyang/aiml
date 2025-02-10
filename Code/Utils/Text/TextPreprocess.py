@@ -2,6 +2,7 @@ import collections
 import random
 import math
 import typing as t
+import re
 
 
 
@@ -76,7 +77,7 @@ def subsample(sentences:t.List[t.List[str]], vocab, thr=1e-4):
 
 
 
-def preprocess_space_append(text,
+def preprocess_space_appndstop(text,
                             need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
                             append_punc='_') -> str:
     '''
@@ -97,3 +98,19 @@ def preprocess_space_append(text,
     _SPACE = append_punc+" "
     
     return _SPACE.join(words_puncs).strip() #切除掉末尾 由于空字符串带来的 " "
+
+
+
+def text_atomize(text, reserved_tokens, uniq=False) -> t.List[str]:
+    '''
+    按顺序分割字符串到不可分割字符（保留reserved_tokens里的组合不拆分，其他拆分成单个字符）
+    '''
+    pattern = re.compile( "(" + "|".join(reserved_tokens) + ")" + "|(.)" ) # (<unk>|...|</w>)|(.)  保留字符匹配group1，其他所有单个字符匹配group2
+    result = []
+    for match in re.finditer(pattern, text):
+        result.append( match.group(1) if match.group(1) else match.group(2) ) # 如果 match 匹配的是group1, 保留词；如果 match 匹配的是group2, 任意其他字符
+
+    if uniq:
+        result = list( set(result) )
+    
+    return result
