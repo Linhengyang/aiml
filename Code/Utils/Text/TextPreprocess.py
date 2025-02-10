@@ -77,8 +77,8 @@ def subsample(sentences:t.List[t.List[str]], vocab, thr=1e-4):
 
 
 def preprocess_space_append(text,
-                      need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-                      append_punc='_') -> str:
+                            need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
+                            append_punc='_') -> str:
     '''
     inputs: text, append_punc(optional)
         text: a str object
@@ -96,6 +96,4 @@ def preprocess_space_append(text,
     words_puncs = text.split(" ") # 包含 ""
     _SPACE = append_punc+" "
     
-    return _SPACE.join(words_puncs).strip()
-
-
+    return _SPACE.join(words_puncs).strip() #切除掉末尾 由于空字符串带来的 " "
