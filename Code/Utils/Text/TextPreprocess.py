@@ -25,12 +25,18 @@ def count_corpus(sentences: t.List[list]|t.List[str]) -> t.Dict:
 
 
 
-def preprocess_space(text, need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~') -> str:
+def preprocess_space(
+        text,
+        need_lower=True,
+        separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
+        normalize_whitespace=True
+        ) -> str:
     '''
-    inputs: text, need_lower(optional), separate_puncs(optional)
-        text: a str object
+    inputs:
+        text
         need_lower: Bool, default as True. If true, then input str will be lowered
         separate_puncs: punctuations that shall be seen as independent tokens, such as ,.!?
+        normalize_whitespace: False -> 制表符换行符等其他种类空白字符保留，连续空格保留；True -> 以上全部转换为 单个单空格
 
     returns: A str obejct
         whose spaces are normal single space ' ', and single space is inserted before every independent token
@@ -39,16 +45,23 @@ def preprocess_space(text, need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=
         preprocess spaces inside a str obeject
     '''
     text = text.replace('\u202f', ' ').replace('\xa0', ' ').strip() #替换不间断空格为单空格, 并trim首尾空格
+
     if need_lower:
         text = text.lower()
+    
     # 在文字和[,.!?]之间插入空格
     ## 判断 当前字符是否是separate_puncs，且前一个字符不是空格
     def no_space(char, prev_char):
         return char in set(separate_puncs) and prev_char != " "
     ## 从第二个字符开始遍历。如果它是separate_puncs且前一个字符不是空格，则将它变成 " "+标点
     out = [ " " + char if i > 0 and no_space(char, text[i-1]) else char for i, char in enumerate(text)]
+    out_str = "".join(out)
 
-    return "".join(out)
+    # 如果 normalize_whitespace = True, 那么把 所有其他种类的空白字符(\t \n)以及多个连续的单空格 转换为 单个单空格 
+    if normalize_whitespace:
+        out_str = re.sub(r'\s+', ' ', out_str)
+    
+    return out_str
 
 
 
@@ -77,27 +90,37 @@ def subsample(sentences:t.List[t.List[str]], vocab, thr=1e-4):
 
 
 
-def preprocess_space_appndstop(text,
-                            need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-                            append_punc='_') -> str:
+def preprocess_appdtokn_b4_space(
+        text,
+        append_tok,
+        need_lower=True,
+        separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
+        normalize_whitespace=True
+        ) -> str:
     '''
-    inputs: text, append_punc(optional)
-        text: a str object
-        append_punc: punctuation that shall be add before every space.
+    inputs:
+        text
+        append_tok: 该 append_tok 将被插入到每个 单空格之前
+        need_lower: Bool, default as True. If true, then input str will be lowered
+        separate_puncs: punctuations that shall be seen as independent tokens, such as ,.!?
+        normalize_whitespace: False -> 制表符换行符等其他种类空白字符保留，连续空格保留；True -> 以上全部转换为 单个单空格
 
-    returns: A str obejct
+    returns:
         whose spaces are normal single space ' ', and every space has append_punc append before it
 
     explains:
-        首先处理text的所有非间断空格为单空格, 其次在每个word和punc后面(每个空格前面)添加append_punc.
-        因为subword会拆分整个word, append_punc 帮助区分subword之间和word之间的分割
+        因为 subword 会拆分整个word, append_tok 帮助区分subword之间和word之间的分割。该 append_tok 将被插入到每个 单空格之前
+        参数 separate_puncs 确认了 作为独立token的标点符号
+        参数 normalize_whitespace 确认了如何处理 单空格之外的空白字符。
+        当 它为 True 时，所有 空白字符和连续单空格都被处理为 单个单空格，所以只有 word 和 punc 被 append tok
+        当 它为 False时，诸如制表符和换行符之类的空白字符，以及连续单空格都被保留，所以 空白字符和空字符 也会被 append tok
     '''
-    text = preprocess_space(text, need_lower, separate_puncs) + " "
+    text = preprocess_space(text, need_lower, separate_puncs, normalize_whitespace) + " "
 
-    words_puncs = text.split(" ") # 包含 ""
-    _SPACE = append_punc+" "
+    words_and_puncs = text.split(" ") # 末尾包含 一个空字符串 ""
+    _SPACE = append_tok+" "
     
-    return _SPACE.join(words_puncs).strip() #切除掉末尾 由于空字符串带来的 " "
+    return _SPACE.join(words_and_puncs).strip() # 剪去 最后面的 空格
 
 
 
