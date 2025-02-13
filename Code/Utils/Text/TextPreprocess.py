@@ -124,11 +124,15 @@ def preprocess_appdtokn_b4_space(
 
 
 
-def text_atomize(text, reserved_tokens, uniq=False) -> t.List[str]:
+def text_atomize(text, reserved_combos:t.List[str]=[], uniq=False) -> t.List[str]:
     '''
-    按顺序分割字符串到不可分割字符（保留reserved_tokens里的组合不拆分，其他拆分成单个字符）
+    按顺序分割字符串到不可分割字符（保留reserved_combos里的组合不拆分，其他拆分成单个字符）
     '''
-    pattern = re.compile( "(" + "|".join(reserved_tokens) + ")" + "|(.)" ) # (<unk>|...|</w>)|(.)  保留字符匹配group1，其他所有单个字符匹配group2
+    # 如果 reserved_combos 为空, 那么就是不需要保留组合，直接返回 list(text)
+    if not reserved_combos:
+        return list(text)
+    
+    pattern = re.compile( "(" + "|".join(reserved_combos) + ")" + "|(.)" ) # (<unk>|...|</w>)|(.)  保留字符匹配group1，其他所有单个字符匹配group2
     result = []
     for match in re.finditer(pattern, text):
         result.append( match.group(1) if match.group(1) else match.group(2) ) # 如果 match 匹配的是group1, 保留词；如果 match 匹配的是group2, 任意其他字符
