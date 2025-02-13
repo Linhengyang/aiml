@@ -43,6 +43,10 @@ def preprocess_space(
 
     explains:
         preprocess spaces inside a str obeject
+        参数 separate_puncs 确认了 作为独立token的标点符号
+        参数 normalize_whitespace 确认了如何处理 单空格之外的空白字符。
+        当 它为 True 时，所有 空白字符和连续单空格都被处理为 单个单空格，所以只有 word 和 punc 被 append tok
+        当 它为 False时，诸如制表符和换行符之类的空白字符，以及连续单空格都被保留，所以 空白字符和空字符 也会被 append tok
     '''
     text = text.replace('\u202f', ' ').replace('\xa0', ' ').strip() #替换不间断空格为单空格, 并trim首尾空格
 
@@ -92,30 +96,20 @@ def subsample(sentences:t.List[t.List[str]], vocab, thr=1e-4):
 
 def preprocess_appdtokn_b4_space(
         text,
-        append_tok,
-        need_lower=True,
-        separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-        normalize_whitespace=True
+        append_tok
         ) -> str:
     '''
     inputs:
         text
         append_tok: 该 append_tok 将被插入到每个 单空格之前
-        need_lower: Bool, default as True. If true, then input str will be lowered
-        separate_puncs: punctuations that shall be seen as independent tokens, such as ,.!?
-        normalize_whitespace: False -> 制表符换行符等其他种类空白字符保留，连续空格保留；True -> 以上全部转换为 单个单空格
 
     returns:
         whose spaces are normal single space ' ', and every space has append_punc append before it
 
     explains:
         因为 subword 会拆分整个word, append_tok 帮助区分subword之间和word之间的分割。该 append_tok 将被插入到每个 单空格之前
-        参数 separate_puncs 确认了 作为独立token的标点符号
-        参数 normalize_whitespace 确认了如何处理 单空格之外的空白字符。
-        当 它为 True 时，所有 空白字符和连续单空格都被处理为 单个单空格，所以只有 word 和 punc 被 append tok
-        当 它为 False时，诸如制表符和换行符之类的空白字符，以及连续单空格都被保留，所以 空白字符和空字符 也会被 append tok
     '''
-    text = preprocess_space(text, need_lower, separate_puncs, normalize_whitespace) + " "
+    text = text.strip() + " "
 
     words_and_puncs = text.split(" ") # 末尾包含 一个空字符串 ""
     _SPACE = append_tok+" "
