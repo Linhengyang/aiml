@@ -18,8 +18,8 @@ class Vocab:
     explains:
         定义一个vocab类, 它提供将token映射到integer ID的功能, 并可以自定义忽视token的阈值, 以及预先设定的tokens
     '''
-    # 初始化, 需要提供tokens, token去除阈值, 预存tokens
-    def __init__(self, tokens=None, min_freq=0, reserved_tokens=None):
+    # 初始化, 需要提供tokens, token去除阈值（频次小于该值的视作<unk>）, 预存tokens
+    def __init__(self, tokens=None, min_freq=0, reserved_tokens=None, unk_token='<unk>'):
         if tokens is None: # 处理未输入tokens的情况, 用空列表
             tokens = []
         if reserved_tokens is None:
@@ -32,7 +32,7 @@ class Vocab:
         
         # 建立从token到数字的双射
         ## 初始化token列表, 以便用index取出token, 即从 数字映射到token
-        self.idx_to_token = ['<unk>'] + reserved_tokens
+        self.idx_to_token = [unk_token] + reserved_tokens
         ## 初始化token-idx字典, 以便用取value的方式取idx, 即从token映射到数字
         self.token_to_idx = {token: idx for idx, token in enumerate(self.idx_to_token)}
         ## 遍历_token_freqs中的所有token, 按序添加到self.idx_to_token, 并添加token-idx的kv pair到token_to_idx
@@ -40,7 +40,7 @@ class Vocab:
             if freq < min_freq: # 如果该token出现的频次小于阈值, 则视该token为<unk>, 即已经建立好双射了. 后续的也不需要再建立映射, 跳出循环
                 break
             else:
-                if token not in ['<unk>'] + reserved_tokens: # <unk>和保留token已经在idx_to_token和token_to_idx中建立好双射关系了
+                if token not in [unk_token] + reserved_tokens: # <unk>和保留token已经在idx_to_token和token_to_idx中建立好双射关系了
                     self.idx_to_token.append(token) # 添加该token到self.idx_to_token
                     self.token_to_idx[token] = len(self.idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
     
@@ -50,7 +50,7 @@ class Vocab:
     
     @property # 修饰器, 在内部方法这样添加修饰之后, 可以以调用属性的方式来调用方法. 即 .unk() = .unk
     def unk(self):
-        '''未知元<unk>的idx为0'''
+        '''未知元 unk_token(默认为<unk>) 的idx为0'''
         return 0
     
     # 对给定的token（或者是tokens的hierarchy组合体）, 返回idx（或者是indices对应的hierarchy组合体）
