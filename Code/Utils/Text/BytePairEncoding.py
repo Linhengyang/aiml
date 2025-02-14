@@ -2,7 +2,7 @@
 import collections
 import typing as t
 import re
-from .TextPreprocess import count_corpus, preprocess_appdtokn_b4_space, text_atomize
+from .TextPreprocess import count_corpus, preprocess_space, preprocess_appdtokn_b4_space, text_atomize
 
 
 
@@ -17,15 +17,6 @@ from .TextPreprocess import count_corpus, preprocess_appdtokn_b4_space, text_ato
 #   update corpus: replace all occurrence of tok_L, tok_R in C with tok_new
 # return V
 
-tail_token: str = '</w>'
-reserved_tokens: t.List[str ]= ['<unk>'] + [tail_token]
-
-text = "low low lower lower   \n  lower high higher\thigh high high"
-text = preprocess_appdtokn_b4_space(text, tail_token)
-# text: low</w> low</w> lower</w> lower</w> lower</w> high</w> higher</w> high</w> high</w> high</w>
-
-raw_corpus = count_corpus(text.split(" "))
-symbols = set(text) | set(reserved_tokens)
 
 
 # corpus C 应该是个 counter, tokcombo_freq, key 是 token combo(用空格组合 token), value 是 token组成的词对应的 freq
@@ -43,6 +34,7 @@ def init_tokcombo_freqs(
     input：
         raw_corpus：原始的 corpus 统计器，一个 统计 word/punc 频数 的 dict. word/punc 按照原始方式组织
         reserved_tokens：保留字符, 作为整体不可分割的 token 列表. 在初始化分割时 就保留它们作为最小token
+        tail_token：标识原词末尾的符号。它和它前面的非空字符不被分割。
         type：类型，返回的 token combo 频数 corpus 的类型，dict / list
     return:
         一个  token combo 频数 统计器，类型是 type
@@ -90,6 +82,7 @@ def merge_maxfreq_token_pair(
         tokcombo_freqs: tokcombo中, 最频繁出现的 连续 token pair 被合并. 如果 merge_mode 选择了all, 那么所有 token_pair将以 它们在 输入列表中顺序作合并
         symbols: 最频繁出现的 连续 token pair 被合并后, 添加入symbols
     '''
+    
     if merge_mode != 'all':
 
         if merge_mode == 'first':
@@ -119,20 +112,21 @@ def merge_maxfreq_token_pair(
             for token_pair in maxfreq_token_pairs:
                 token_combo = token_combo.replace(" ".join(token_pair), "".join(token_pair))
             new_tokcombo_freqs[token_combo] = freq
-
+        
         return new_tokcombo_freqs, symbols
     
     elif isinstance(tokcombo_freqs, list):
-
+        
         for i, (token_combo, freq) in enumerate(tokcombo_freqs):
             # 对于 token_combo / freq 这个 kv对，需要检测 token combo 是否需要合并。因为不需要合并的不用改
             maxfreq_toknpair_pattern = '|'.join( [' '.join(token_pair) for token_pair in maxfreq_token_pairs] ) # tk1 tk2|...|tk3 tk4
-
-            if re.match(maxfreq_toknpair_pattern, token_combo): # 如果匹配到 任意一个 maxfreq token pair
+            
+            if re.search(maxfreq_toknpair_pattern, token_combo): # 如果匹配到 任意一个 maxfreq token pair
+                
                 for token_pair in maxfreq_token_pairs:
                     token_combo = token_combo.replace(" ".join(token_pair), "".join(token_pair))
                 tokcombo_freqs[i] = (token_combo, freq)
-
+        
         return tokcombo_freqs, symbols
     
     else:
@@ -158,7 +152,7 @@ def get_maxfreq_token_pair(
         计算 adjacent token pair 的 frequency，并返回 max freq 的 adjacent token pairs, 同时返回这个 maxfreq
     """ 
     token_pair_freq = collections.defaultdict(int)
-  
+    
     if isinstance(tokcombo_freqs, dict):
         for tokcombo, freq in tokcombo_freqs.items():
             tokens = tokcombo.split()
@@ -168,14 +162,14 @@ def get_maxfreq_token_pair(
             # 故 若 num_tok = 1，直接不跑 for chunk 是 ok 的
             for i in range(num_tok-1):
                 token_pair_freq[(tokens[i], tokens[i+1])] += freq
-
+    
     elif isinstance(tokcombo_freqs, list):
         for tokcombo, freq in tokcombo_freqs:
             tokens = tokcombo.split()
             num_tok = len(tokens)
             for i in range(num_tok-1):
                 token_pair_freq[(tokens[i], tokens[i+1])] += freq
-
+    
     # 处理 token_pair_freq 为空的极端情况：当且仅当 tokcombo_freqs 为空，又或者 tokcombo_freqs 中所有 tokcombo 都是单token, 即无可合并
     if not token_pair_freq:
         return (), 0
@@ -183,7 +177,7 @@ def get_maxfreq_token_pair(
     # max-freq 可能有 多个 pair 达到
     maxfreq = max(token_pair_freq.values())
     token_pairs_w_maxfreq = [k for k, v in token_pair_freq.items() if v == maxfreq]
-
+    
     return token_pairs_w_maxfreq, maxfreq
 
 
@@ -212,22 +206,27 @@ def get_BPE_symbols(
     if tail_token not in reserved_tokens:
         reserved_tokens.append( tail_token )
 
-    # 原始 text 处理空格和标点，并在每个单词/标点末尾添加 tail_token
-    text = preprocess_appdtokn_b4_space(text, tail_token, need_lower, separate_puncs, normalize_whitespace)
+    # 处理空白字符. 在标点前面添加空格
+    text_normspace = preprocess_space(text, need_lower, separate_puncs, normalize_whitespace)
 
-    raw_corpus = count_corpus(text.split(" "))
+    # 在每个单词/标点末尾添加 tail_token
+    text_normspace_appdtail = preprocess_appdtokn_b4_space(text_normspace, tail_token)
+
+    raw_corpus = count_corpus(text_normspace_appdtail.split(" "))
+
     # 初始化 tokcombo_freqs：用单空格 分割 corpus 中的key，至不可分割粒度。
     tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, type='list') # 默认使用 list 来制作 tokcombo freq counter
-
-    # 初始化 symbols：包含 tail_token 和 输入的 reserved_tokens
-    symbols = set(text) | set(reserved_tokens) # text 的 unique 单字符 union 保留字符 reserved_tokens
+    
+    # 初始化 symbols：包含 tail_token 和 输入的 reserved_tokens 和 
+    symbols = set(text_normspace) | set(reserved_tokens) # text 的 unique 单字符 union 保留字符 reserved_tokens
+    
     # 这里也可以不 union reserved_tokens.
     # 因为 reversed_tokens 在合并生成 bpe symbols 的过程中没有起作用, 而且它可以在 vocab 类中设定. 故它不是必须的
     if symbols_type == 'list':
         symbols = list(symbols)
 
     # merge 一定次数, 或 maxfreq 的token pair 的出现频次 低于 阈值
-    for i in range(merge_times):
+    for _ in range(merge_times):
 
         token_pairs_w_maxfreq, maxfreq = get_maxfreq_token_pair(tokcombo_freqs) # 得到 max freq token pairs
         
@@ -235,7 +234,7 @@ def get_BPE_symbols(
         if maxfreq > 0 and maxfreq >= merge_occur_freq_min:
             # merge maxfreq token pair(s) : update vocab(symbols), tokcombo_freqs, 
             tokcombo_freqs, symbols = merge_maxfreq_token_pair(token_pairs_w_maxfreq, tokcombo_freqs, symbols, merge_mode)
-
+        
     return symbols
 
 
