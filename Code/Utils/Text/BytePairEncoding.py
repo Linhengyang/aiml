@@ -194,7 +194,7 @@ def get_BPE_symbols(
         tail_token,
         merge_times: int,
         merge_mode: str = 'first',
-        merge_occur_freq_min: int = 0,
+        min_occur_freq_merge: int = 0,
         reserved_tokens: t.List[str] = [],
         symbols_type: str = 'list',
         need_lower: bool = True,
@@ -232,7 +232,7 @@ def get_BPE_symbols(
         token_pairs_w_maxfreq, maxfreq = get_maxfreq_token_pair(tokcombo_freqs) # 得到 max freq token pairs
         
         # 当 token pair occurrence freq >= min_freq 且 maxfreq > 0 时，才进行 merge 操作
-        if maxfreq > 0 and maxfreq >= merge_occur_freq_min:
+        if maxfreq > 0 and maxfreq >= min_occur_freq_merge:
             # merge maxfreq token pair(s) : update vocab(symbols), tokcombo_freqs, 
             tokcombo_freqs, symbols = merge_maxfreq_token_pair(token_pairs_w_maxfreq, tokcombo_freqs, symbols, merge_mode)
         
