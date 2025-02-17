@@ -118,27 +118,24 @@ def preprocess_appdtokn_b4_space(
 
 
 
-def text_atomize(text, tail_token:str = '', reserved_combos:t.List[str]=[], uniq=False) -> t.List[str]:
+def text_atomize(text, reserved_combos:t.List[str]=[], uniq=False) -> t.List[str]:
     '''
-    按顺序分割字符串到不可分割字符（保留reserved_combos里的组合不拆分，其他拆分成单个字符；tail_token和它前一个字符不被分割）
-    tail_token 不能出现在 reserved_combos 的任意一个组合中
+    按顺序分割字符串到不可分割字符（保留reserved_combos里的组合不拆分，其他拆分成单个字符）
+    reserved_combos里可以有正则表达式.
     返回list
     '''
-    rsvd_tokn_pattern = "(" + "|".join(reserved_combos) + ")" # (<unk>|...|<eos>)
-
-    if re.search(tail_token, rsvd_tokn_pattern): # 如果在 rsvd_tokn_pattern 中检测到 tail_token
-        raise ValueError(f'tail_token {tail_token} exists in reserved_combos {reserved_combos}. must get rid of tail_token')
-    
     # 如果 reserved_combos 为空, 那么就是不需要保留组合，直接返回 list(text)
     if not reserved_combos:
         return list(text)
     
-    pattern = re.compile( "(" + "|".join(reserved_combos) + ")" + "|" + "|(.)" ) # (<unk>|...|</w>)|(.)  保留字符匹配group1，其他所有单个字符匹配group2
+    rsvd_tokn_pattern = "(" + "|".join(reserved_combos) + ")" # (<unk>|...|<eos>)
+
+    pattern = re.compile( rsvd_tokn_pattern + "|(.)" ) # (<unk>|...|</w>)|(.)  保留字符匹配group1，其他所有单个字符匹配group2
     result = []
     for match in re.finditer(pattern, text):
         result.append( match.group(1) if match.group(1) else match.group(2) ) # 如果 match 匹配的是group1, 保留词；如果 match 匹配的是group2, 任意其他字符
 
-    if uniq:
+    if uniq: # 如果需要 unique
         result = list( set(result) )
     
     return result
