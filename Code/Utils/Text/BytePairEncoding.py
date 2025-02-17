@@ -28,19 +28,23 @@ from .TextPreprocess import count_corpus, preprocess_space, preprocess_appdtokn_
 def init_tokcombo_freqs(
         raw_corpus:dict,
         reserved_tokens:t.List[str],
-        type: str = 'list'):
+        tail_token:str = '',
+        type:str = 'list'):
     '''
     初始化一个 token combo frequency counter, 类型可以是 dict/list
     input：
         raw_corpus：原始的 corpus 统计器，一个 统计 word/punc 频数 的 dict. word/punc 按照原始方式组织
-        reserved_tokens：保留字符, 作为整体不可分割的 token 列表. 在初始化分割时 就保留它们作为最小token
-        tail_token：标识原词末尾的符号。它和它前面的非空字符不被分割。
-        type：类型，返回的 token combo 频数 corpus 的类型，dict / list
+        reserved_tokens：保留字符, 作为整体不可分割的 token 列表. 在初始化分割时 保留它们作为最小token
+        tail_token：标识原词末尾的符号。它和它前面的字符不被分割。
+        type：类型，返回的 token combo 频数 corpus 的类型，可以是 dict / list
     return:
-        一个  token combo 频数 统计器，类型是 type
+        一个  token combo 频数 统计器，类型是 输入参数 type
     explain:
-        token combo 频数统计器中，word/punc 被 单空格拆成了独立字符，用以迭代组合，来创造新的token
+        token combo 频数统计器中，word/punc 被 单空格拆成了独立字符。用以迭代组合，来创造新的token
     '''
+    if tail_token: # 若输入了 tail_token
+        reserved_tokens = ['.'+tail_token, ] + reserved_tokens # 最先匹配 (.tail_token), 即完整的tail_token 和它前面一个字符
+
     if type == "dict":
         tokcombo_freqs = {}
         for raw_word, freq in raw_corpus.items():
@@ -74,7 +78,7 @@ def merge_maxfreq_token_pair(
             Dict: { token_combo_by_space: word_frequency ... } / list of tuple: [ (token_combo_by_space, word_frequency) ... ]
         symbols:
             set/list
-        merge_mode: str, one of first/all/shortest ...
+        merge_mode: str, one of first/all/shortest/random ...
     output:
         updated tokcombo_freqs & symbols
     
@@ -83,20 +87,23 @@ def merge_maxfreq_token_pair(
         symbols: 最频繁出现的 连续 token pair 被合并后, 添加入symbols
     '''
     
-    if merge_mode != 'all':
+    if merge_mode != 'all': # 当 mode 不为 all 时，以某种方式确定 单个 token pair 以合并
 
-        if merge_mode == 'first':
+        if merge_mode == 'first': # 合并 maxfreq 的 token pair 列表中的 第一对pair
             select = 0
-        elif merge_mode == 'shortest':
+        elif merge_mode == 'shortest': # 合并 maxfreq 的 token pair 列表中的 最短的 pair
             tokns_len = [ len(''.join(token_pair)) for token_pair in maxfreq_token_pairs]
             select, _ = min( enumerate(tokns_len), key=lambda x:x[1] )
+        elif merge_mode == 'random': # 合并 maxfreq 的 token pair 列表中的 随机某个 pair
+            import random
+            select = random.randrange(0, len(maxfreq_token_pairs))
         else:
             raise NotImplementedError(f'merge mode {merge_mode} not implemented')
     
         maxfreq_token_pairs = maxfreq_token_pairs[select:select+1]
 
     # update vocab(symbols)
-    for token_pair in maxfreq_token_pairs:
+    for token_pair in maxfreq_token_pairs: # 逐一在 symbols 添加 合并后的 token pair 作为 新token
         if isinstance(symbols, set):
             symbols.union( ''.join(token_pair) )
         elif isinstance(symbols, list):
@@ -188,7 +195,7 @@ def get_BPE_symbols(
         merge_times: int,
         merge_mode: str = 'first',
         merge_occur_freq_min: int = 0,
-        reserved_tokens: t.List[str] | None = None,
+        reserved_tokens: t.List[str] = [],
         symbols_type: str = 'list',
         need_lower: bool = True,
         separate_puncs: str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
@@ -198,27 +205,21 @@ def get_BPE_symbols(
     # 输入文本中不应该存在用以分割的 tail_token. 如果存在, 报错;
     if tail_token in text:
         raise ValueError(f'tail_token {tail_token} exists in text. change tail_token')
-
-    if not reserved_tokens:
-        reserved_tokens = []
     
-    # 最后输出的 symbols 包含 tail_token 和 输入的 reserved_tokens
-    if tail_token not in reserved_tokens:
-        reserved_tokens.append( tail_token )
-
-    # 处理空白字符. 在标点前面添加空格
+    # 处理空白字符. 在标点前面添加 单空格
     text_normspace = preprocess_space(text, need_lower, separate_puncs, normalize_whitespace)
 
     # 在每个单词/标点末尾添加 tail_token
     text_normspace_appdtail = preprocess_appdtokn_b4_space(text_normspace, tail_token)
 
+    # 原始的 corpus counter
     raw_corpus = count_corpus(text_normspace_appdtail.split(" "))
 
-    # 初始化 tokcombo_freqs：用单空格 分割 corpus 中的key，至不可分割粒度。
-    tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, type='list') # 默认使用 list 来制作 tokcombo freq counter
+    # 初始化 tokcombo_freqs：用单空格 分割 corpus 中的key，至不可分割粒度。参数 reserved_tokens 是不可分割token；tail_token和它前面一个字符不被分割
+    tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, tail_token, type='list') # 默认使用 list 来制作 tokcombo freq counter
     
-    # 初始化 symbols：包含 tail_token 和 输入的 reserved_tokens 和 
-    symbols = set(text_normspace) | set(reserved_tokens) # text 的 unique 单字符 union 保留字符 reserved_tokens
+    # 初始化 symbols：包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens、tail_token
+    symbols = set(text_normspace) | set(reserved_tokens) | set([tail_token])
     
     # 这里也可以不 union reserved_tokens.
     # 因为 reversed_tokens 在合并生成 bpe symbols 的过程中没有起作用, 而且它可以在 vocab 类中设定. 故它不是必须的
