@@ -201,7 +201,20 @@ def get_BPE_symbols(
         separate_puncs: str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
         normalize_whitespace: bool = True
         ) -> t.List|t.Set:
-    
+    '''
+    input:
+        text: 输入文本, 用以 构建 token symbols 集合（vocab）
+        tail_token: 用来标记每个 单词的末尾，区分从中间分割的token和结尾token。会被加入到 输出的集合中。
+        merge_times: 超参数，用来确定 生成的 token symbols集合大小
+        merge_mode: 当有多个 token pair 是 最大出现频率的时候，采用什么方法选择 该合并的 token pair
+            all全部都合并 / first第一个合并 / random 随机选 / shortest 最短的合并
+        min_occur_freq_merge: 最低要合并的token pair 出现频率。出现频率小于这个值的 token pair 不再合并添加到集合中
+        reserved_tokens: 保留token组合. 列表中的tokens将被作为最小单元保留, 不会被分割。会出现在 输出的集合中
+        symbols_type: 输出的集合数据类型。list / set
+        need_lower: 输入text是否要小写化
+        separate_puncs: 作为独立视作token的标点符号
+        normalize_whitespace: 是否将text中非 单空格 的连续空白字符or空白字符 统一转换为 单空格
+    '''
     # 输入文本中不应该存在用以分割的 tail_token. 如果存在, 报错;
     if tail_token in text:
         raise ValueError(f'tail_token {tail_token} exists in text. change tail_token')
@@ -243,3 +256,4 @@ def get_BPE_symbols(
 
 
 # a segmenter, which tokenizes a raw sentences
+
