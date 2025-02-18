@@ -1,7 +1,9 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.Vocabulize import Vocab
 from ...Utils.Common.SeqOperation import truncate_pad
+from ...Utils.Text.Tokenize import tokenize_simple
 import torch
+import typing as t
 
 def read_text2str(path):
     """
@@ -17,15 +19,16 @@ def read_text2str(path):
     with open(path, 'r', encoding='utf-8') as f:
         return f.read() # 文本对象.read()方法：将整个文本对象读进一个str对象
 
-def tokenize_seq2seq(text, num_examples=None):
+def tokenize_seq2seq(text, sentence_tokenizer:t.Callable, num_examples=None):
     """
     inputs: text, num_example(optional)
         text: str object with \n to seperate lines, and each line consists of 'source_seq\ttarget_seq'
+        sentence_tokenizer: callable, take a sentence as input, return a corresponding tokenized list of string as output
         num_examples: max sample size to read into memory
     
     returns: denoted as source, target
         source: 2D list, each element is a list of source token sequence
-        target: 2D list, each element is a list of target token sequence
+        target: 2D list, each element is a list of target token sequence correspondingly
     
     explains:
         process translation text data, split it into source token sequence and target token sequence
@@ -35,10 +38,13 @@ def tokenize_seq2seq(text, num_examples=None):
     for i, line in enumerate(text.split('\n')): # 大文本按行分隔
         if num_examples and i >= num_examples: # 当有最大样本数限制, 且循环已经收集足够样本时, 跳出循环
             break
-        parts = line.split('\t') # 每一行按制表符分开
-        if len(parts) == 2:
-            source.append(parts[0].split(' ')) # source列表添加英文序列token list
-            target.append(parts[1].split(' ')) # target列表添加法文序列token list
+        try:
+            src_sentence, tgt_sentence = line.split('\t') # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
+            source.append( sentence_tokenizer(src_sentence) ) # source list append tokenized 英文序列 token list
+            target.append( sentence_tokenizer(tgt_sentence) ) # target list append tokenized 法文序列 token list
+        except ValueError:
+            raise ValueError(f"line {i+1} of text {line} unpack wrong")
+
     return source, target
 
 def build_tensorDataset(lines, vocab, num_steps):
@@ -83,8 +89,8 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
         返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
     """
     raw_text = read_text2str(path) # read text
-    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?') # 小写,替换其他空格为单空格, 保证文字和,.!?符号之间有空格
-    source, target = tokenize_seq2seq(text, num_examples) # 词元化, 得到source语料序列和target语料序列
+    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?') # 小写化,并替换其他空格为单空格, 保证文字和,.!?符号之间有空格
+    source, target = tokenize_seq2seq(text, tokenize_simple, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
     tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作tgt词表
     src_array, src_valid_len = build_tensorDataset(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
