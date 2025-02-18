@@ -25,7 +25,10 @@ def count_corpus(sentences: t.List[list]|t.List[str]) -> t.Dict:
 
 
 
-def add_space_around_puncs(text, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~') -> str:
+def add_space_around_puncs(
+        text,
+        separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'
+        ) -> str:
     '''
     在字符串中所有标点符号前后，如果没有空格的话，添加一个空格。连续的标点符号之间只添加一个空格
 
