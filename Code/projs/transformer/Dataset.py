@@ -19,11 +19,16 @@ def read_text2str(path):
     with open(path, 'r', encoding='utf-8') as f:
         return f.read() # 文本对象.read()方法：将整个文本对象读进一个str对象
 
-def tokenize_seq2seq(text, sentence_tokenizer:t.Callable, num_examples=None):
+def tokenize_seq2seq(
+        text,
+        sentence_tokenizer:t.Callable,
+        symbols:t.List[str] | t.Set[str] | None = None,
+        num_examples=None):
     """
     inputs: text, num_example(optional)
         text: str object with \n to seperate lines, and each line consists of 'source_seq\ttarget_seq'
-        sentence_tokenizer: callable, take a sentence as input, return a corresponding tokenized list of string as output
+        sentence_tokenizer: callablem function, take a sentence as input, return a corresponding tokenized list of string as output
+        symbols: the token symbols vocab to tokenize text
         num_examples: max sample size to read into memory
     
     returns: denoted as source, target
@@ -40,8 +45,8 @@ def tokenize_seq2seq(text, sentence_tokenizer:t.Callable, num_examples=None):
             break
         try:
             src_sentence, tgt_sentence = line.split('\t') # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
-            source.append( sentence_tokenizer(src_sentence) ) # source list append tokenized 英文序列 token list
-            target.append( sentence_tokenizer(tgt_sentence) ) # target list append tokenized 法文序列 token list
+            source.append( sentence_tokenizer(src_sentence, symbols) ) # source list append tokenized 英文序列 token list
+            target.append( sentence_tokenizer(tgt_sentence, symbols) ) # target list append tokenized 法文序列 token list
         except ValueError:
             raise ValueError(f"line {i+1} of text {line} unpack wrong")
 
@@ -90,8 +95,8 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
     """
     raw_text = read_text2str(path) # read text
     text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?') # 小写化,并替换其他空格为单空格, 保证文字和,.!?符号之间有空格
-    # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer
-    source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
+    # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer。symbols 为 None
+    source, target = tokenize_seq2seq(text, line_tokenize_simple, None, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
     # 制作 vocab
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
     tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作tgt词表
