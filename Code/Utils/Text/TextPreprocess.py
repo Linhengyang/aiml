@@ -121,14 +121,14 @@ def subsample(sentences:t.List[t.List[str]], vocab, thr=1e-4):
 
 
 
-def preprocess_appdtokn_b4_space(
+def attach_EOW_token(
         text,
-        append_tok
+        eow_tok
         ) -> str:
     '''
     inputs:
         text
-        append_tok: 该 append_tok 将被插入到每个 单空格之前
+        eow_tok: 该 append_tok 将被插入到每个 单空格之前
 
     returns:
         whose spaces are normal single space ' ', and every space has append_punc append before it
@@ -139,7 +139,7 @@ def preprocess_appdtokn_b4_space(
     text = text.strip() + " "
 
     words_and_puncs = text.split(" ") # 末尾包含 一个空字符串 ""
-    _SPACE = append_tok+" "
+    _SPACE = eow_tok+" "
     
     return _SPACE.join(words_and_puncs).strip() # 剪去 最后面的 空格
 

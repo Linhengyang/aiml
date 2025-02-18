@@ -2,7 +2,7 @@
 import collections
 import typing as t
 import re
-from .TextPreprocess import count_corpus, preprocess_space, preprocess_appdtokn_b4_space, text_atomize
+from .TextPreprocess import count_corpus, preprocess_space, attach_EOW_token, text_atomize
 
 
 
@@ -223,7 +223,7 @@ def get_BPE_symbols(
     text_normspace = preprocess_space(text, need_lower, separate_puncs, normalize_whitespace)
 
     # 在每个单词/标点末尾添加 tail_token
-    text_normspace_appdtail = preprocess_appdtokn_b4_space(text_normspace, tail_token)
+    text_normspace_appdtail = attach_EOW_token(text_normspace, tail_token)
 
     # 原始的 corpus counter
     raw_corpus = count_corpus(text_normspace_appdtail.split(" "))
