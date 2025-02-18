@@ -29,21 +29,38 @@ def init_tokcombo_freqs(
         raw_corpus:dict,
         reserved_tokens:t.List[str],
         tail_token:str = '',
+        attach_tail_token_init: bool = False,
         type:str = 'list'):
     '''
     初始化一个 token combo frequency counter, 类型可以是 dict/list
     input：
         raw_corpus：原始的 corpus 统计器，一个 统计 word/punc 频数 的 dict. word/punc 按照原始方式组织
         reserved_tokens：保留字符, 作为整体不可分割的 token 列表. 在初始化分割时 保留它们作为最小token
-        tail_token：标识原词末尾的符号。它和它前面的字符不被分割。
+        tail_token：标识原词末尾的符号。
+        attach_tail_token_init：True/False. if True, tail_token和它前面的字符在初始化 token combos的时候 不被分割。
         type：类型，返回的 token combo 频数 corpus 的类型，可以是 dict / list
     return:
         一个  token combo 频数 统计器，类型是 输入参数 type
     explain:
-        token combo 频数统计器中，word/punc 被 单空格拆成了独立字符。用以迭代组合，来创造新的token
+        token combo 频数统计器中，word/punc 被 单空格拆成了独立字符。用以迭代组合，来创造新的token。每次迭代将出现频次最高的连续token合并，生成新token
+        参数 reserved_tokens 指明了哪些 字符combo 不会被拆分, 作为独立字符
+        参数 tail_token 指明了 end-of-word token。它将被加到 每个 word/punc 的末尾，以区分 中断 和 结束。tail_token 作为 独立字符，不会被拆分
+        参数 attach_tail_token_init 指明了 end-of-word token 是如何被加到每个 word/punc 的末尾的。
+            True: tail_token 和 末尾char 之间不分割，即 tail_token 从最开始就和末尾字符绑定。
+            False: tail_token 和 末尾char 之间分割。tail_token 作为一个独立 的 字符，参与 token 的合并生成过程
+            区别：业界通常使用 False，这样 token 生成的 灵活性更高，
     '''
-    if tail_token: # 若输入了 tail_token
-        reserved_tokens = ['.'+tail_token, ] + reserved_tokens # 最先匹配 (.tail_token), 即完整的tail_token 和它前面一个字符
+    # 输入了 tail_token
+
+    # 要求 tail_token和它前面的字符在初始化 token combos的时候 不分割。
+    if tail_token and attach_tail_token_init:
+        # 最先匹配 (.tail_token), 即完整的tail_token 和它前面一个字符
+        reserved_tokens = ['.'+tail_token, ] + reserved_tokens
+    
+    # 要求 tail_token和它前面的字符在初始化 token combos的时候 被分割。
+    elif tail_token:
+        # tail_token 自身应该作为 独立字符，保证不被 分割
+        reserved_tokens.append( tail_token )
 
     if type == "dict":
         tokcombo_freqs = {}
@@ -199,7 +216,8 @@ def get_BPE_symbols(
         symbols_type: str = 'list',
         need_lower: bool = True,
         separate_puncs: str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-        normalize_whitespace: bool = True
+        normalize_whitespace: bool = True,
+        attach_tail_token_init: bool = False
         ) -> t.List|t.Set:
     '''
     input:
@@ -214,6 +232,7 @@ def get_BPE_symbols(
         need_lower: 输入text是否要小写化
         separate_puncs: 作为独立视作token的标点符号
         normalize_whitespace: 是否将text中非 单空格 的连续空白字符or空白字符 统一转换为 单空格
+        attach_tail_token_init: 是否绑定 tail_token 和 末尾char。如果否，tail_token 作为独立字符 参与token生成
     '''
     # 输入文本中不应该存在用以分割的 tail_token. 如果存在, 报错;
     if tail_token in text:
@@ -228,8 +247,8 @@ def get_BPE_symbols(
     # 原始的 corpus counter
     raw_corpus = count_corpus(text_normspace_appdtail.split(" "))
 
-    # 初始化 tokcombo_freqs：用单空格 分割 corpus 中的key，至不可分割粒度。参数 reserved_tokens 是不可分割token；tail_token和它前面一个字符不被分割
-    tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, tail_token, type='list') # 默认使用 list 来制作 tokcombo freq counter
+    # 初始化 tokcombo_freqs：用单空格 分割 corpus 中的key，至不可分割粒度。参数 reserved_tokens 是不可分割token
+    tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, tail_token, attach_tail_token_init)
     
     # 初始化 symbols：包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens、tail_token
     symbols = set(text_normspace) | set(reserved_tokens) | set([tail_token])
