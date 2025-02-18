@@ -1,7 +1,7 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.Vocabulize import Vocab
 from ...Utils.Common.SeqOperation import truncate_pad
-from ...Utils.Text.Tokenize import tokenize_simple
+from ...Utils.Text.Tokenize import line_tokenize_simple
 import torch
 import typing as t
 
@@ -90,9 +90,12 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
     """
     raw_text = read_text2str(path) # read text
     text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?') # 小写化,并替换其他空格为单空格, 保证文字和,.!?符号之间有空格
-    source, target = tokenize_seq2seq(text, tokenize_simple, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
+    # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer
+    source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
+    # 制作 vocab
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
     tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作tgt词表
+    # 制作 tensor dataset
     src_array, src_valid_len = build_tensorDataset(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
     tgt_array, tgt_valid_len = build_tensorDataset(target, tgt_vocab, num_steps)# all tgt data, shapes (num_examples, num_stpes), (num_examples,)
     return (src_array, src_valid_len, tgt_array, tgt_valid_len), (src_vocab, tgt_vocab)
