@@ -122,19 +122,19 @@ def subsample(sentences:t.List[t.List[str]], vocab, thr=1e-4):
 
 
 def attach_EOW_token(
-        text,
-        eow_tok
+        text: str,
+        eow_tok: str
         ) -> str:
     '''
     inputs:
-        text
-        eow_tok: 该 append_tok 将被插入到每个 单空格之前
+        text: string
+        eow_tok: 该 end-of-word token 将被插入到每个 单空格之前
 
     returns:
         whose spaces are normal single space ' ', and every space has append_punc append before it
 
     explains:
-        因为 subword 会拆分整个word, append_tok 帮助区分subword之间和word之间的分割。该 append_tok 将被插入到每个 单空格之前
+        因为 subword 会拆分整个word, eow_token 帮助区分subword之间和word之间的分割。该 eow_token 将被插入到每个 单空格之前
     '''
     text = text.strip() + " "
 
