@@ -276,3 +276,51 @@ def get_BPE_symbols(
 
 # a segmenter, which tokenizes a raw sentences
 
+def word_segment_greedy(
+        word:str,
+        EOW_token:str,
+        symbols: t.List[str] | t.Set[str]
+        ):
+    '''
+    input:
+        word: 输入单词，用以拆分成多个 subword
+        EOW_token: end-of-word token, 用以标识 word 的结尾. 在
+        symbols: token set 词元集
+    return:
+        segmented: list of string,
+            word被切分成 symbols 中包含的 subwords/tokens
+        unsegmented: string
+            word中未被 symbols 切分的部分。若成功切分, 则它为 空字符串
+    explain:
+        用贪心的方法来切割输入 word, 即用 symbols 中尽量少的 symbol 来切分 word(将 word 切割成尽量长的subwords/tokens)
+    '''
+    # start 是起始为止, end 是终结位置后一
+    # 从start 位置开始
+    #   从 end 为止开始，检查 start 到 end 是不是 symbols 中的 symbol
+    #       如果不是，end 指针 往前 移 一位，重新判断
+    #       如果是，记录该 symbol，同时 start 移动到 end(即终结位置后一)，end 回到末尾后一
+    # 重复这个过程直到 start 等于 end
+    #   start 等于 end 有两种可能：
+    #       可能1: end = length 被赋值给 start. 此时即start 和 end 都处于末尾后一 位置。这意味着 word 被切割完毕
+    #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始，往右的每一个字符组合都不是symbols中的symbol，
+    #       说明 word的start位置的字符 不存在于 symbols 中
+    word += EOW_token
+    length = len(word)
+    start, end, segmented = 0, length, []
+    while start < end:
+        if word[start:end] in symbols:
+            segmented.append( word[start:end] )
+            start = end
+            end = length
+        else:
+            end -= 1
+    
+    return segmented, word[start:]
+
+
+
+
+
+
+
+
