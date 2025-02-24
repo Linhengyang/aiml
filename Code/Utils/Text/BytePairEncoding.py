@@ -278,14 +278,14 @@ def get_BPE_symbols(
 
 def word_segment_greedy(
         word:str,
-        EOW_token:str,
-        symbols: t.List[str] | t.Set[str]
+        symbols: t.List[str] | t.Set[str],
+        EOW_token:str|None = None,
         ):
     '''
     input:
         word: 输入单词，用以拆分成多个 subword
-        EOW_token: end-of-word token, 用以标识 word 的结尾. 在
         symbols: token set 词元集
+        EOW_token: end-of-word token, 用以标识 word 的结尾. 当输入时, 在word后面attach
     return:
         segmented: list of string,
             word被切分成 symbols 中包含的 subwords/tokens
@@ -304,7 +304,10 @@ def word_segment_greedy(
     #       可能1: end = length 被赋值给 start. 此时即start 和 end 都处于末尾后一 位置。这意味着 word 被切割完毕
     #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始，往右的每一个字符组合都不是symbols中的symbol，
     #       说明 word的start位置的字符 不存在于 symbols 中
-    word += EOW_token
+
+    if EOW_token:
+        word += EOW_token
+    
     length = len(word)
     start, end, segmented = 0, length, []
     while start < end:
