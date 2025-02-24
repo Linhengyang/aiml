@@ -65,10 +65,10 @@ def preprocess_space(
 
     explains:
         preprocess spaces inside a str obeject
-        参数 separate_puncs 确认了 作为独立token的标点符号
+        参数 separate_puncs 确认了 作为独立token的标点符号. 独立token前面会加单空格
         参数 normalize_whitespace 确认了如何处理 单空格之外的空白字符.
-            当 它为 True 时，所有 空白字符和连续单空格都被处理为 单个单空格，所以只有 word 和 punc 被 append tok
-            当 它为 False时，诸如制表符和换行符之类的空白字符，以及连续单空格都被保留，所以 空白字符和空字符 也会被 append tok
+            当 它为 True 时，所有 空白字符和连续单空格都被处理为 单个单空格（副作用：当使用单空格来分割时，只有word和punc被视作token）
+            当 它为 False时，诸如制表符和换行符之类的空白字符，以及连续单空格都被保留（副作用：当使用单空格来分割时，非单空格的空白字符和空字符也被视作token）
         text的左右空白都会被trim
     '''
     text = text.replace('\u202f', ' ').replace('\xa0', ' ').strip() #替换不间断空格为单空格, 并trim首尾空格
