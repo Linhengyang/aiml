@@ -276,23 +276,33 @@ def get_BPE_symbols(
 
 # a segmenter, which tokenizes a raw sentences
 
-def word_segment_greedy(
+def segment_word_BPE_greedy(
         word:str,
         symbols: t.List[str] | t.Set[str],
-        EOW_token:str|None = None,
+        UNK_token:str = "<unk>",
+        EOW_token:str = ''
         ):
     '''
     input:
-        word: 输入单词，用以拆分成多个 subword
-        symbols: token set 词元集
-        EOW_token: end-of-word token, 用以标识 word 的结尾. 当输入时, 在word后面attach
+        word: 输入单词，用以拆分成多个 subword. 末尾可以已经添加 EOW_token
+        symbols: 以 EOW_token 作为 end-of-word token，且以标准BPE流程制作的词元集
+        UNK_token: unknown token, 用以替代 无法分割的片段
+        EOW_token: end-of-word token, 用以标识 word 的结尾.
+            当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下：
+                分割成功：      tok1, ... tokn  
+                分割不成功：    tok1, ... tokn, UNK_token, EOW_token
+            当不输入时, 无视 EOW_token
+                分割成功：      tok1, ... tokn  
+                分割不成功：    tok1, ... tokn, UNK_token
     return:
-        segmented: list of string,
-            word被切分成 symbols 中包含的 subwords/tokens
+        segmented: list of string
+            word被切分成 symbols 中包含的 subwords/tokens, 以列表的方式返回
         unsegmented: string
             word中未被 symbols 切分的部分。若成功切分, 则它为 空字符串
     explain:
         用贪心的方法来切割输入 word, 即用 symbols 中尽量少的 symbol 来切分 word(将 word 切割成尽量长的subwords/tokens)
+        以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集 symbols, EOW_token 必然以整体参与形成 token
+        那么在 greedy 的算法下, 即使EOW_token 以部分参与来分割word的过程会出现, 但这种情况不会出现在最终分割结果中
     '''
     # start 是起始为止, end 是终结位置后一
     # 从start 位置开始
@@ -305,18 +315,29 @@ def word_segment_greedy(
     #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始，往右的每一个字符组合都不是symbols中的symbol，
     #       说明 word的start位置的字符 不存在于 symbols 中
 
-    if EOW_token:
+    if EOW_token and not word.endswith(EOW_token): # 如果输入了 EOW_token 且 word 不是以 EOW_token 结尾
         word += EOW_token
     
     length = len(word)
     start, end, segmented = 0, length, []
     while start < end:
-        if word[start:end] in symbols:
-            segmented.append( word[start:end] )
+        fragment = word[start:end]
+        if fragment in symbols:
+            segmented.append( fragment )
             start = end
             end = length
         else:
             end -= 1
+    
+    # 循环结束时 start = end. 此时有两种可能
+    #   start = end = length, 此时 word 被切割完毕
+    #   start = end < length, 此时 word 存在 不可被识别片段: 从 start位置开始
+    if start < length:
+        if EOW_token:
+            segmented = segmented + [UNK_token, EOW_token]
+        else:
+            segmented.append( UNK_token )
+
     
     return segmented, word[start:]
 
