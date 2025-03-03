@@ -1,22 +1,15 @@
 import warnings
 warnings.filterwarnings("ignore")
-from Code.Utils.Text.BytePairEncoding import get_BPE_symbols, word_segment_greedy
-from Code.Utils.Text.Tokenize import line_tokenize_greedy
 import re
-
-
+from Code.projs.transformer.Dataset import *
+import os
 
 if __name__ == "__main__":
-    '''
-    test code in this test.py file. After successful tests, code will be moved to _jobs.py under proj_name
-    '''
-    tail_token: str = '</z>'
-    text = "fast fast fast fast faster faster faster tall tall tall tall tall taller taller taller taller"
-    symbols = get_BPE_symbols(text, tail_token, merge_times=10)
+    base_path = "../../data"
+    proj_folder = "text_translator/fra-eng"
+    data_file = "fra.txt"
 
-    symbols = symbols
-    print(symbols)
+    fname = os.path.join(base_path, proj_folder, data_file)
+    print(fname)
+
     
-    segmented, unsegmented = line_tokenize_greedy("tallfaster tallerfast fastt tallerf", tail_token, symbols)
-    print(segmented)
-    print(unsegmented)
