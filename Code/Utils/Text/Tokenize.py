@@ -6,7 +6,7 @@
 import typing as t
 import re
 from .TextPreprocess import preprocess_space, attach_EOW_token
-from .BytePairEncoding import word_segment_greedy
+from .BytePairEncoding import segment_word_BPE_greedy
 
 
 
@@ -23,14 +23,14 @@ def line_tokenize_simple(
 
 def line_tokenize_greedy(
         sentence:str,
-        EOW_token:str,
         symbols:t.List[str] | t.Set[str],
-        flatten:bool = True,
+        EOW_token:str,
+        UNK_token:str = "<unk>",
         need_lower:bool = True,
+        flatten:bool = True,
         separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
         normalize_whitespace:bool = True,
         ):
-    
 
     # 处理空白和大小写。空白：该加单空格的地方加，该改单空格的地方改，该去单空格的地方去
     # separate_puncs 确认了当作 独立token 的标点符号
@@ -45,14 +45,14 @@ def line_tokenize_greedy(
     segmented_output, unsegmented_output = [], []
 
     for word in words:
-        segmented, unsegmented = word_segment_greedy(word, symbols)
+        segmented_lst, unsegmented_str = segment_word_BPE_greedy(word, symbols, UNK_token, EOW_token)
 
-        if not flatten:
-            segmented_output.append( segmented ) # append list of string
+        if flatten:
+            segmented_output = segmented_output + segmented_lst # segmented_output: list of string
         else:
-            segmented_output = segmented_output + segmented # add list of string
+            segmented_output.append( segmented_lst ) # segmented_output: list of list of string
 
-        unsegmented_output.append( unsegmented ) # append string
+        unsegmented_output.append( unsegmented_str ) # unsegmented_output: list of string
 
     return segmented_output, unsegmented_output
     
