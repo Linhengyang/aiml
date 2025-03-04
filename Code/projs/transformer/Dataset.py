@@ -5,7 +5,7 @@ from ...Utils.Text.Tokenize import line_tokenize_simple
 import torch
 import typing as t
 
-def read_text2str(path):
+def read_text2str(path) -> str:
     """
     inputs: path
         path: str path of the text data
@@ -67,8 +67,7 @@ def build_tensorDataset(lines, vocab, num_steps):
         map tokens of input lines into indices according to input vocab, and set the sequence length
         将输入的词元序列lines映射成数字序列, 并设定num_steps(sequence length)序列长度
     """
-    lines = [vocab[l] for l in lines] # id映射
-    lines = [ l + [vocab['<eos>']] for l in lines ] # 每句末尾加<eos>
+    lines = [vocab[l] + [vocab['<eos>']] for l in lines] # id映射: lines 2D list, l & vocab[l] list. 在每个 line 末尾添加 vocab['<eos>']. 注意这里不能用append
     array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines]) # tensor化 truncate_pad之后的token序列, int64
     valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数, int32
     return array, valid_len
