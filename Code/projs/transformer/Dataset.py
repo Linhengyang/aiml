@@ -48,7 +48,7 @@ def tokenize_seq2seq(
             source.append( sentence_tokenizer(src_sentence, symbols) ) # source list append tokenized 英文序列 token list
             target.append( sentence_tokenizer(tgt_sentence, symbols) ) # target list append tokenized 法文序列 token list
         except ValueError:
-            raise ValueError(f"line {i+1} of text {line} unpack wrong")
+            raise ValueError(f"line {i+1} of text unpack wrong")
 
     return source, target
 
@@ -93,7 +93,7 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
         返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
     """
     raw_text = read_text2str(path) # read text
-    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?') # 小写化,并替换其他空格为单空格, 保证文字和,.!?符号之间有空格
+    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?', normalize_whitespace=False) # 小写化,并替换其他空格为单空格, 保证文字和,.!?符号之间有空格
     # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer。symbols 为 None
     source, target = tokenize_seq2seq(text, line_tokenize_simple, None, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
     # 制作 vocab
