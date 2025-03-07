@@ -11,7 +11,7 @@ encoder-decoder结构的不同:
 
 rnn: 
     train: 
-    单步: 从time 0到i-1生成 time i，具体方法是: MLP(time i-1, state extracted from time 0到i-2)), 伴随生成了 state extracted from time 0到i-1
+    单步: 从time 0到i-1生成 time i，具体方法是: MLP(time i-1, state extracted from time 0到i-2), 伴随生成了 state extracted from time 0到i-1
     T步(「生成一个length为T的decode过程」): 重复单步T次, i从1到T
     decode过程中, 存在时间前后依赖关系. 具体是因为前后的MLP之间在传递state, state从前一个MLP出来, 输入后一个MLP
     state在其中按时间步更新, 必须要做完前一时间步的生成, 才能用它的state去做下一时间步的生成.
