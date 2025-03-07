@@ -159,6 +159,7 @@ class MultiHeadAttention(nn.Module):
         self.W_v = nn.LazyLinear(num_hiddens, bias=use_bias)
         self.W_o = nn.LazyLinear(num_hiddens, bias=use_bias)
         self.attention = ScaledDotProductAttention(dropout)
+    
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
         Q = transpose_qkv(self.W_q(Q_batch), self.h)
         K = transpose_qkv(self.W_k(K_batch), self.h)

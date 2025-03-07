@@ -149,21 +149,34 @@ if __name__ == "__main__":
             (tuple(tensor[batch::] for tensor in [X, dec_X, X_valid_lens]), tuple(tensor[batch::] for tensor in [Y, Y_valid_lens]))
             即:
             (X[batch::], dec_X[batch::], X_valid_lens[batch::]), (Y[batch::], Y_valid_lens[batch::])
+        逐一move到cuda上
         '''
-        result = []
-        for x_ in default_collate(x):
-            res_ = tuple()
-            for t in x_:
-                res_ += (t.to(device_cuda),)
-            result.append(res_)
-        return tuple(result)
+        
+        # result = []
+        # for x_ in default_collate(batch_list):
+        #     res_ = tuple()
+        #     for t in x_:
+        #         res_ += (t.to(device_cuda),)
+        #     result.append(res_)
+        # return tuple(result)
+        (X_batch, dec_X_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch) = default_collate(batch_list)
+
+        X_batch = X_batch.to(device_cuda)
+        dec_X_batch = dec_X_batch.to(device_cuda)
+        X_valid_lens_batch = X_valid_lens_batch.to(device_cuda)
+        Y_batch = Y_batch.to(device_cuda)
+        Y_valid_lens_batch = Y_valid_lens_batch.to(device_cuda)
+
+        return (X_batch, dec_X_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch)
     
     
-    train_iter = torch.utils.data.DataLoader(trainset, batch_size=5, shuffle=True, collate_fn=transfer)
+    train_iter = torch.utils.data.DataLoader(trainset, batch_size=5, shuffle=True, collate_fn=move_to_cuda)
     for x, y in train_iter:
         print("epoch 3")
-        print('x as\n', x)
-        print('y as\n', y)
+        print('x in cuda\n', x[0].device)
+        print('y in cuda\n', y[0].device)
 
 
+    # network: transformer = encoder + decoder
     
+    ## encoder
