@@ -49,6 +49,9 @@ def masked_softmax(S, valid_lens):
         S = _sequence_mask(S.reshape(-1, shape[-1]), valid_lens, value=-1e20)
         return nn.functional.softmax(S.reshape(shape), dim=-1) # nn.f.softmax操作是梯度可传的
 
+
+
+
 class AdditiveAttention(nn.Module):
     '''
     args: num_hiddens, dropout
@@ -88,6 +91,10 @@ class AdditiveAttention(nn.Module):
         self.attention_weights = masked_softmax(Scores, valid_lens) # shape是(batch_size, m, n)
         return torch.bmm(self.dropout(self.attention_weights), V_batch) # 返回的shape是(batch_size, m, v)
 
+
+
+
+
 class ScaledDotProductAttention(nn.Module):
     '''
     args: dropout
@@ -123,16 +130,27 @@ class ScaledDotProductAttention(nn.Module):
 
         return torch.bmm( self.dropout(self.attention_weights), V_batch )
 
+
+
+
 def transpose_qkv(X, num_heads):
     h = num_heads
     batch_size, n, _ = X.shape
     return X.permute(0,2,1).reshape(batch_size, h, -1, n).permute(0,1,3,2).reshape(batch_size*h, n, -1)
+
+
+
 
 def transpose_o(X, num_heads):
     h = num_heads
     prod_batchsize_h, m, _ = X.shape
     batch_size = prod_batchsize_h // h
     return X.permute(0,2,1).reshape(batch_size, -1, m).permute(0,2,1)
+
+
+
+
+
 
 class MultiHeadAttention(nn.Module):
     '''
