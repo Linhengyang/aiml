@@ -4,6 +4,7 @@ import re
 from Code.projs.transformer.Dataset import *
 import os
 from Code.Utils.Text.Vocabulize import Vocab
+import math
 
 if __name__ == "__main__":
     # base_path = "../../data"
@@ -231,4 +232,125 @@ if __name__ == "__main__":
 
     ## 根据求梯度的链式法则, 被 slice-reset value 的变量, 由于被赋值了常数, 在梯度反传时它们不再贡献计算 梯度
 
-    # 
+
+    ## 注意力机制 Atttention: Q K V --> sum of weights @ V, where weights = f(Q, K)
+    ## query/key/value 都有各自的数量和维度. 其中 query 的数量自由决定, 但是其维度要和key相同(毕竟要计算query和key之间的相似度)
+    ## value的维度自由决定, 但是其数量要和key相同(key决定了其对应value在最终输出结果中的重要程度)
+
+    ## ScaledDotProductAttention
+    # 积式注意力 ScaledDotProductAttention 简单地根据 每条 query和不同keys之间地相似度, 决定了每个key对应的value的权重, 组合出最后的结果
+    # 最终由 n_queries 条结果
+
+    class dotProdAttention(torch.nn.Module):
+
+        def __init__(self, dropout):
+            super().__init__()
+            self.dropout = torch.nn.Dropout(dropout)
+
+        def forward(self, Q, K, V, valid_lens=None):
+            # Q(batch_size, n_query, qk_size), K(batch_size, n_kv, qk_size), V(batch_size, n_kv, v_size), 
+            # valid_lens(batch_size, n_query) or (batch_size)
+
+            # Q K之间 相似度计算
+            d = Q.shape[2]
+            logits = torch.bmm(Q, K.permute(0, 2, 1)) / math.sqrt(d) # (batch_size, n_query, n_kv)
+
+            if valid_lens:
+                # 如果有 valid_lens, 需要用 mask 确保只有 valid logits 参与生成 概率分布
+                from Code.Utils.Common.Mask import valid_slice_mask
+
+                mask = valid_slice_mask(logits.shape, valid_lens)
+                logits[~mask] = -1e20 # invalid logits 用 负无穷 slice-reset. 此操作梯度可反传
+
+            # 如果没有 valid_lens, 直接使用 softmax 生成 概率分布 weights
+            weights = torch.nn.functional.softmax(logits, dim=-1)
+
+            # 正则化 weights
+            return torch.bmm(self.dropout(weights), V)
+
+
+
+    Q = torch.tensor([[3, 4, 1, 0],
+                      [2, 1, 0, 1],
+                      [1, 4, 5, 5]], dtype=torch.float32)
+    Q = Q.unsqueeze(0).repeat(3, 1, 1)
+    print(Q)
+
+    net = dotProdAttention(0)
+    
+    y_hat = net(Q, Q, Q)
+    print(y_hat)
+
+
+    ##
+    ## 多头注意力:
+    ##    单头注意力是指 对 QKV 作各自线性映射(至相同维度 num_hiddens/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, num_hiddens/H)
+    ## H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, num_hiddens) 的结果. 再follow一个 num_hiddens -> num_hiddens 的线性映射
+
+    ## 统一映射到 num_hiddens 维 -> Q(batch_size, n_query, num_hiddens), K(batch_size, n_kv, num_hiddens), V(batch_size, n_kv, num_hiddens)
+
+    ## 若可以切分成 H = num_heads 个头 reshape -> Q(batch_size, H, n_query, w), K(batch_size, H, n_kv, w), V(batch_size, H, n_kv, w)
+    ## 那么合并前两个维度, 即得 Q(batch_size*H, n_query, w), K(batch_size*H, n_kv, w), V(batch_size*H, n_kv, w)
+    ## 即可完成 DotProdAttention. 
+
+    ## 从 (batch_size, n_, num_hiddens=H*w) 变换到 (batch_size, H, n_, w) 的方法如下:
+    ## (batch_size, n_, num_hiddens=H*w) --转置--> (batch_size, num_hiddens=H*w, n_) --> reshape--> (batch_size, H, w, n_) --转置-->  (batch_size, H, n_, w)
+    ## --reshape--> (batch_size*H, n_, w)
+
+    def multihead_transpose_qkv(tensor, num_heads):
+
+        batch_size, n_, num_hiddens = tensor.shape # num_hiddens = num_heads * w
+        w = num_hiddens // num_heads
+
+        return tensor.permute(0, 2, 1).reshape(batch_size, num_heads, w, n_).permute(0, 1, 3, 2).reshape(-1, n_, w)
+
+    ## Q(batch_size*H, n_query, w) K(batch_size*H, n_kv, w)  V(batch_size*H, n_kv, w)  --dotProdAttention--> (batch_size*H, n_query, w)
+    ## 重建过程
+    ##  (batch_size*H, n_query, w) --reshape--> (batch_size, H, n_query, w) --转置--> (batch_size, H, w, n_query) --reshape--> (batch_size, H*w, n_query)
+    ## --转置--> (batch_size, n_query, num_hiddens=H*w)
+    def multihead_transpose_o(tensor, num_heads):
+        _, n_query, w = tensor.shape # (batch_size*H, n_query, w)
+
+        return tensor.reshape(-1, num_heads, n_query, w).permute(0, 1, 3, 2).reshape(-1, num_heads*w, n_query).permute(0, 2, 1)
+
+
+
+    class MultiHeadAttention(torch.nn.Module):
+
+        def __init__(self, num_heads, num_hiddens, dropout, use_bias=False):
+            super().__init__()
+            self.H = num_heads
+            self.W_q = torch.nn.LazyLinear(num_hiddens, bias=use_bias)
+            self.W_k = torch.nn.LazyLinear(num_hiddens, bias=use_bias)
+            self.W_v = torch.nn.LazyLinear(num_hiddens, bias=use_bias)
+            self.attention = dotProdAttention(dropout)
+            self.W_o = torch.nn.LazyLinear(num_hiddens, bias=use_bias)
+
+        def forward(self, Q, K, V, valid_lens=None):
+            # Q(batch_size, n_query, qk_size), K(batch_size, n_kv, qk_size), V(batch_size, n_kv, v_size), 
+            # valid_lens: (batch_size, n_query) / (batch_size,)  elements are integers <= n_kv
+
+            Q_ = multihead_transpose_qkv( self.W_q(Q), self.H ) # (batch_size*H, n_query, w). w = num_hiddens//H
+            K_ = multihead_transpose_qkv( self.W_k(K), self.H ) # (batch_size*H, n_kv, w). w = num_hiddens//H
+            # Q_ 和 K_ 确定的 weights: (batch_size*H, n_query, n_kv)
+            V_ = multihead_transpose_qkv( self.W_v(V), self.H ) # (batch_size*H, n_kv, w). w = num_hiddens//H
+
+            if valid_lens:
+                # valid_lens 需要从 (batch_size, n_query) / (batch_size,) 扩张为(batch_size*H, n_query) / (batch_size*H,)
+                valid_lens = torch.repeat_interleave(valid_lens, repeats=self.H, dim=0)
+
+            output = self.attention(Q_, K_, V_, valid_lens) # (batch_size*H, n_query, w). w = num_hiddens//H
+
+            return self.W_o( multihead_transpose_o(output, self.H) ) # (batch_size, n_query, num_hiddens=H*w)
+
+    num_heads, num_hiddens, dropout = 3, 9, 0.
+    net = MultiHeadAttention(num_heads, num_hiddens, dropout)
+    
+    Q = torch.tensor([[3, 4, 1, 0],
+                      [2, 1, 0, 1],
+                      [1, 4, 5, 5]], dtype=torch.float32)
+    Q = Q.unsqueeze(0).repeat(3, 1, 1)
+    print(Q)
+    
+    y_hat = net(Q, Q, Q)
+    print(y_hat)
