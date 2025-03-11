@@ -27,12 +27,15 @@ def masked_softmax(S, valid_lens):
         2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens表征(纯洁性)
     这种对纯洁性的保证, 是从两个方面保证的， 即 1. invalid位置的元素不能参与计算下一层valid位置的元素; 2. invalid位置的元素无论结果如何, 不能在bp中贡献更新运算它们的参数
     '''
+
     # 确定2-D tensor的mask操作。这里X是2-D tensor, valid_len是1-D tensor
     def _sequence_mask(X, valid_len, value=0):
         maxlen = X.size(1)
+        
         mask = torch.arange(maxlen, dtype=torch.float32, device=X.device).unsqueeze(0) < valid_len.unsqueeze(1)
         X[~mask] = value # indexput 操作是梯度可传的. 被put的位置在之后的BP反传中,将不会贡献更新组成运算它们的参数
         return X
+    
     # 将S和valid_lens分别转化为2-D tensor和1-D tensor
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
         return nn.functional.softmax(S, dim=-1) # nn.f.softmax操作是梯度可传的
@@ -100,18 +103,24 @@ class ScaledDotProductAttention(nn.Module):
         O's shape: (batch_size, n_queries, value_size)
     
     explains:
-        returns W @ V where W = attention pool of (Q, K)
+        returns W @ V where W is attention pool of (Q, K)
         Scaled Dot Production on queries and keys to attention pool for weight matrices W (batch_size, n_queries, n_kvs)
         Convex combinations of Values based on weight matrices are returned
     '''
     def __init__(self, dropout, **kwargs):
         super().__init__(**kwargs)
         self.dropout = nn.Dropout(dropout)
+
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
-        assert Q_batch.size(-1) == K_batch.size(-1), 'query_size not equal to key_size'
+
+        assert Q_batch.size(-1) == K_batch.size(-1), \
+            f'query_size {Q_batch.size(-1)} not equal to key_size {K_batch.size(-1)}'
+        
         d = Q_batch.size(-1)
         S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d)
+
         self.attention_weights = masked_softmax(S_batch, valid_lens)
+
         return torch.bmm( self.dropout(self.attention_weights), V_batch )
 
 def transpose_qkv(X, num_heads):
