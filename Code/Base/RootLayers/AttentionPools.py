@@ -113,6 +113,12 @@ class ScaledDotProductAttention(nn.Module):
         returns W @ V where W is attention pool of (Q, K)
         Scaled Dot Production on queries and keys to attention pool for weight matrices W (batch_size, n_queries, n_kvs)
         Convex combinations of Values based on weight matrices are returned
+    
+    query/key/value 都有各自的数量和维度. 其中 query 的数量自由决定, 但是其维度要和key相同(毕竟要计算query和key之间的相似度)
+    value的维度自由决定, 但是其数量要和key相同(key决定了其对应value在最终输出结果中的重要程度)
+    
+    积式注意力 ScaledDotProductAttention 简单地根据 每条 query和不同keys之间地相似度, 决定了每个key对应的value的权重, 组合出最后的结果
+    最终由 n_queries 条结果
     '''
     def __init__(self, dropout, **kwargs):
         super().__init__(**kwargs)
@@ -123,11 +129,14 @@ class ScaledDotProductAttention(nn.Module):
         assert Q_batch.size(-1) == K_batch.size(-1), \
             f'query_size {Q_batch.size(-1)} not equal to key_size {K_batch.size(-1)}'
         
-        d = Q_batch.size(-1)
-        S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d)
+        d = Q_batch.size(-1) # scale 相似度计算中因为维数过大引起的数值不稳定
 
-        self.attention_weights = masked_softmax(S_batch, valid_lens)
+        # Q: (batch_size, n_query, qk_size) @ K: (batch_size, n_kvs, qk_size) 转置 -> (batch_size, n_query, n_kvs)
+        S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d) # 本质是 Q 和 K 的相似度计算
 
+        self.attention_weights = masked_softmax(S_batch, valid_lens) # 注意力权重shape (batch_size, n_queries, n_kvs)
+
+        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, value_size) ->  (batch_size, n_query, value_size) 
         return torch.bmm( self.dropout(self.attention_weights), V_batch )
 
 
@@ -172,10 +181,14 @@ class MultiHeadAttention(nn.Module):
         After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
         and a final linear project is followed.
         In detail:
-            1. H linear projections on Q K V whom projected to num_hiddens // h dimensions, which stands for H heads
+            1. H linear projections on Q K V whom projected to num_hiddens // H dimensions, which stands for H heads
             2. For every head's result, perform scaled-dot-prod attention pool
             3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to 
                num_hiddens linear project is followed
+
+    多头注意力:
+        单头注意力是指 对 QKV 作各自线性映射(至相同维度 num_hiddens/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, num_hiddens/H)
+    H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, num_hiddens) 的结果. 再follow一个 num_hiddens -> num_hiddens 的线性映射
     '''
     def __init__(self, num_heads, num_hiddens, dropout, use_bias=False, **kwargs):
         assert num_hiddens % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
