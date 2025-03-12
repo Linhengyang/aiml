@@ -25,6 +25,11 @@ class PositionWiseFFN(nn.Module):
     def forward(self, X):
         return self.dense2(self.relu(self.dense1(X)))
 
+
+
+
+
+
 class TransformerEncoderBlock(nn.Module):
     '''
     components: 
@@ -37,7 +42,7 @@ class TransformerEncoderBlock(nn.Module):
 
     inputs: enc_X, valid_lens(optional) 
         enc_X's shape: (batch_size, seq_len, d_dim) 
-        valid_lens(optional)'s shape: (batch_size,) since it's self-att here 
+        valid_lens(optional)'s shape: (batch_size,) since it's self-attention. 一条样本只有一个valid length
     
     returns: denoted as enc_O 
         enc_O's shape: (batch_size, seq_len, d_dim), the same as enc_X 
@@ -45,18 +50,36 @@ class TransformerEncoderBlock(nn.Module):
     explains: 
         keep batch shape at every layer's input/output through the block 
         encode source sequence time 1 to T directly to deep sequence time 1 to T, that is: 
-            f(time 1 to T) --> node 1 to T on next layer 
+            f(time 1 to T) --> node 1 to T on next layer
+        
+        自注意力Encoder Block. 对输入样本data作[自注意力-前向-norm]的深度处理, 样本从时间步1到T, 输出结果也是从时间步1到T
+        单个样本内部, 时间步之间由于自注意力的机制, 作到了双向前后全连接表征. 
     '''
     def __init__(self, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False):
         super().__init__()
+        # multi-head attention
+        # input: Q(batch_size, n_query, q_size), K(batch_size, n_kv, k_size), V(batch_size, n_kv, v_size)
+        # output: (batch_size, n_query, num_hiddens)
         self.attention = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
+        # add + layer norm
+        # input: (batch_size, n_query, num_hiddens)
+        # output: (batch_size, n_query, num_hiddens)
         self.addlnorm1 = AddLNorm(num_hiddens, dropout)
+        # PosFFN
+        # input: (batch_size, n_query, num_hiddens)
+        # output: (batch_size, n_query, num_hiddens)
         self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
+
         self.addlnorm2 = AddLNorm(num_hiddens, dropout)
     
     def forward(self, X, valid_lens):
         Y = self.addlnorm1(X, self.attention(X, X, X, valid_lens))
         return self.addlnorm2(Y, self.PosFFN(Y))
+
+
+
+
+
 
 class TransformerDecoderBlock(nn.Module):
     '''
