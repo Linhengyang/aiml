@@ -4,7 +4,21 @@ from ...Modules._transformer import TransformerEncoderBlock, TransformerDecoderB
 import torch.nn as nn
 import math
 
+
+
+
+
 class TransformerEncoder(Encoder):
+    '''
+    Transformer的 Encoder 部分由以下组成. 各层的 shape 变化如下:
+    1. Embedding层. 输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID.
+        Embedding层相当于一个 onehot + linear-projection 的组合体,
+        (batch_size, seq_length) --onehot--> (batch_size, seq_length, vocab_size) --linear_proj--> (batch_size, seq_length, num_hiddens)
+    2. PositionEncoding层. 输入 (batch_size, seq_length, num_hiddens). 输出 add position info 后的 (batch_size, seq_length, num_hiddens)
+    3. 连续的 Encoder Block. 每个 EncoderBlock 的输入 src_X (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
+        输入 valid_lens (batch_size,)
+        在EncoderBlock内部, 前后关系依赖是输入 timestep 1-seq_length, 输出 timestep 1-seq_length，作为对 input data 的深度表征
+    '''
     def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
         super().__init__()
         self.num_hiddens = num_hiddens
@@ -22,6 +36,11 @@ class TransformerEncoder(Encoder):
         for i, blk in enumerate(self.blks):
             X = blk(X, valid_lens)
         return X, valid_lens
+
+
+
+
+
 
 class TransformerDecoder(AttentionDecoder):
     def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
@@ -48,6 +67,12 @@ class TransformerDecoder(AttentionDecoder):
         #train: output[0] shape: (batch_size, num_steps, vocab_size), output[2]: None
         #infer: output[0] shape: (1, 1, vocab_size), output[2]: dict of (1, cur_infer_step, d_dim) tensor
         return self.dense(X), infer_recorder
+
+
+
+
+
+
 
 class Transformer(EncoderDecoder):
     ## 整体两种实现模式:
