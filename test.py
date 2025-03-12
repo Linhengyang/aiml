@@ -257,7 +257,7 @@ if __name__ == "__main__":
 
             if valid_lens:
                 # 如果有 valid_lens, 需要用 mask 确保只有 valid logits 参与生成 概率分布
-                from Code.Utils.Common.Mask import valid_slice_mask
+                from Code.Utils.Common.Mask import valid_slice_mask, frontValidMask
 
                 mask = valid_slice_mask(logits.shape, valid_lens)
                 logits[~mask] = -1e20 # invalid logits 用 负无穷 slice-reset. 此操作梯度可反传

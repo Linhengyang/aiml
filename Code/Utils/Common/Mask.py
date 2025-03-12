@@ -29,12 +29,66 @@ def valid_slice_mask(shape, valid_lens):
         pass
 
     # [0, 1, ..., n_logits-1] 的 index tensor. 直接创建在 valid_lens 所在的设备上, 且使用 valid_lens 所使用的数据类型
-    index_ts = torch.arange(shape[2], device=valid_lens.device, dtype=valid_lens.dtype)
+    index_ts = torch.arange(shape[-1], device=valid_lens.device, dtype=valid_lens.dtype)
 
     # index_ts: (n_logits, ), valid_lens: (batch_size, n_queries)
     mask = index_ts < valid_lens.unsqueeze(2)
 
     return mask
+
+
+
+
+def frontValidMask(shape, valid_lens):
+    '''
+    input:
+        shape: (..., n_logits) 
+        valid_lens: tensor with shape as (...,)
+        
+        valid_lens的某元素有位置(...,), 在原shape中有唯一的长度为n_logtis的1dtensor与其对应. 元素值代表了这个1dtensor前几个是valid的
+    
+    return:
+        mask: (..., n_logits)
+        mask 是一个 True/False tensor, 它的shape等于 输入参数shape. 前提是 valid_lens 只比
+    '''
+
+    index_1dtensor = torch.arange(shape[-1], device=valid_lens.device, dtype=valid_lens.dtype)
+
+    # 伸展 valid_lens 的last dim, 即变成单个元素的1dtensor. index_1dtensor 在和 单个元素的1dtensor对比过程中, broadcast机制保证生成结果是 shape
+    mask = index_1dtensor < valid_lens.unsqueeze(-1)
+
+    return mask
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
