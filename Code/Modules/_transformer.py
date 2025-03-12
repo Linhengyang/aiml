@@ -41,11 +41,11 @@ class TransformerEncoderBlock(nn.Module):
         num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False
 
     inputs: enc_X, valid_lens(optional) 
-        enc_X's shape: (batch_size, seq_len, d_dim) 
+        enc_X's shape: (batch_size, seq_len, num_hiddens) 
         valid_lens(optional)'s shape: (batch_size,) since it's self-attention. 一条样本只有一个valid length
     
     returns: denoted as enc_O 
-        enc_O's shape: (batch_size, seq_len, d_dim), the same as enc_X 
+        enc_O's shape: (batch_size, seq_len, num_hiddens), the same as enc_X 
     
     explains: 
         keep batch shape at every layer's input/output through the block 
@@ -53,7 +53,8 @@ class TransformerEncoderBlock(nn.Module):
             f(time 1 to T) --> node 1 to T on next layer
         
         自注意力Encoder Block. 对输入样本data作[自注意力-前向-norm]的深度处理, 样本从时间步1到T, 输出结果也是从时间步1到T
-        单个样本内部, 时间步之间由于自注意力的机制, 作到了双向前后全连接表征. 
+        单个样本内部, 时间步之间由于自注意力的机制, 作到了双向前后全连接表征.
+        依靠Add+LayerNorm层, 自注意力的输入data batch shape 和输出 data batch shape 是相同的. 这样处理是方便多个Block堆叠
     '''
     def __init__(self, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False):
         super().__init__()
