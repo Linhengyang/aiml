@@ -138,6 +138,7 @@ class TransformerDecoderBlock(nn.Module):
             except KeyError: # 从<bos> infer第一个token时, infer_recorder中存在空的元素
                 infer_recorder[self.blk_ind] = X
             KVs, mask = infer_recorder[self.blk_ind], None # 用所有recorded tokens作注意力的K和V, infer过程中不需要mask
+            
         Y = self.addlnorm1(X, self.attention1(X, KVs, KVs, mask))
         Z = self.addlnorm2(Y, self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens))
         return self.addlnorm3(Z, self.PosFFN(Z)), infer_recorder
