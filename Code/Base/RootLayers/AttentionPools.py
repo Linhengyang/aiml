@@ -28,6 +28,25 @@ def masked_softmax(S, valid_lens):
     masked_softmax是为了完成两个目标:
         1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征.
         2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens生成
+    
+    masked_softmax 生成了 shape 为(batch_size, n_queries, n_kvpairs) 的 W, 和 V (batch_size, n_kvpairs, v_size) 作 bmm 乘法, 即 batch_size 个
+    (n_queries, n_kvpairs) @ (n_kvpairs, v_size) 矩阵乘法, 结果是 n_queries 个 V 行向量的凸线性组合, shape 为 (n_queries, v_size)
+
+    从单条 query 的结果来看, Q (batch_size, n_queries, qk_size) 中的单条query (1, 1, qk_size) 与 K (batch_size, n_kvpairs, qk_size) 转置的 单样本
+    (1, qk_size, n_kvpairs) 生成 单条logits (1, 1, n_kvpairs)。经过mask_softmax操作后, 前 valid 部分形成 单条凸组合分布权重，后 invalid 部分权重为 0
+
+    即: n_queries 次(1, 1, qk_size) @ (1, qk_size, n_kvpairs) --> n_queries 条凸组合分布权重 (1, 1, n_kvpairs)
+    mask_softmax只保留了 n_kvpairs 中前valid部分, 所以 K的单样本 (1, n_kvpairs, qk_size) 中只有前 valid 部分参与运算, 后 invalid 部分被舍弃
+    单条凸组合分布权重 (1, 1, n_kvpairs) @ V的单样本 (1, n_kvpairs, v_size)，得到的 (1, 1, v_size) 中只包含了 V 的单样本中 前 valid 部分.
+
+    综上, scaled-dot-production with masked-softmax, 即 masked_softmax(Q @ K', valid_lens) @ V 操作中, 
+    Q: (batch_size, n_queries, qk_size) @ K: (batch_size, n_kvpairs, qk_size)  --transpose_matprod--> S: (batch_size, n_queries, n_kvpairs)
+    --masked_softmax_with_valid_lens(batch_size, n_queries)--> W:  (batch_size, n_queries, n_kvpairs) @ V: (batch_size, n_kvpairs, v_size)
+    = output: (batch_size, n_queries, v_size)
+    Q中 所有 query 分别和 K中 valid 部分 得到了 W中 valid 部分, 然后和 V中 valid 部分 得到了结果。简而言之, valid_lens 作用在 K 和 V 的 n_kvpairs 维度
+    mased_softmax with valid_lens 使得 在 QkV attention 计算中, K 和 V 只有 valid 部分参与了运算.
+    Q: (batch_size, n_queries, qk_size) 代表了 (batch_size, n_queries)次 (1,1, qk_size) 查询. 查询结果output: (batch_size, n_queries, v_size)
+    valid_lens 不能作用在 Q 和 output 中 的 n_queries 维度.
     '''
 
     # 确定2-D tensor的mask操作。这里X是2-D tensor, valid_len是1-D tensor
@@ -40,6 +59,7 @@ def masked_softmax(S, valid_lens):
     
     # 将S和valid_lens分别转化为2-D tensor和1-D tensor
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
+
         return nn.functional.softmax(S, dim=-1) # nn.f.softmax操作是梯度可传的
     else:
         shape = S.shape # 保存S的shape
@@ -50,7 +70,7 @@ def masked_softmax(S, valid_lens):
         # 将S转化为2-D tensor, last axis不变
         S = _sequence_mask(S.reshape(-1, shape[-1]), valid_lens, value=-1e20)
 
-        return nn.functional.softmax(S.reshape(shape), dim=-1) # nn.f.softmax操作是梯度可传的
+        return nn.functional.softmax(S.reshape(shape), dim=-1)
 
 
 
@@ -92,6 +112,7 @@ class AdditiveAttention(nn.Module):
         S_batch = Q_batch_tilda.unsqueeze(2).expand(-1, -1, n, -1) + K_batch_tilda.unsqueeze(1).expand(-1, m, -1, -1)
         Scores = self.W_v(torch.tanh(S_batch)).squeeze(-1) # shape是(batch_size, m, n, 1) --> # shape是(batch_size, m, n)
         self.attention_weights = masked_softmax(Scores, valid_lens) # shape是(batch_size, m, n)
+
         return torch.bmm(self.dropout(self.attention_weights), V_batch) # 返回的shape是(batch_size, m, v)
 
 
