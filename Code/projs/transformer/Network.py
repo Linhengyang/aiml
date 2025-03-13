@@ -30,13 +30,15 @@ class TransformerEncoder(Encoder):
             cur_blk = TransformerEncoderBlock(num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
             self.blks.add_module("encblock"+str(i), cur_blk)
 
-    def forward(self, src_X, valid_lens):
-        # src_X shape: (batch_size, num_steps)int64, valid_lens shape: (batch_size,)int32
-        embed_X = self.embedding(src_X)
-        X = self.pos_encoding(embed_X * math.sqrt(self.num_hiddens)) # 在embed后, 位置编码前, 将embed结果scale sqrt(d)
-        for i, blk in enumerate(self.blks):
-            X = blk(X, valid_lens)
-        return X, valid_lens
+    def forward(self, src, valid_lens):
+        # src shape: (batch_size, num_steps)int64, timestep: 1 -> num_steps
+        # valid_lens shape: (batch_size,)int32
+        src_embd = self.embedding(src)
+        src_encd = self.pos_encoding(src_embd * math.sqrt(self.num_hiddens)) # 在embed后, 位置编码前, 将embed结果scale sqrt(d)
+        for _, blk in enumerate(self.blks):
+            src_encd = blk(src_encd, valid_lens)
+        
+        return src_encd, valid_lens
 
 
 
