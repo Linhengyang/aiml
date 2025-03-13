@@ -19,13 +19,15 @@ def masked_softmax(S, valid_lens):
             if valid_lens is 1-D tensor, W[i][:, k] are zeros when k > valid_lens[i]
             if valid_lens is 2-D tensor, W[i][j, k] are zeros when k > valid_lens[i, j], here j is query_idx
     
-    将S打分矩阵的部分元素换成无穷小(indexput操作), 然后再作softmax操作. 在torch框架下,这两个操作都是梯度可传的.
+    将S打分矩阵的部分元素换成无穷小(index-set, or slice-copy), 然后再作softmax操作.
+    在torch框架下,这两个操作都是梯度可传的, grad_fn 分别是 CopySlice 和 softmax
+
     1. 保证了invalid位置的元素, 不会参与计算下一层valid位置的元素.(因为softmax操作. softmax(无穷小)=0, 使得invalid位置元素的权重为0)
-    2. 保证了invalid位置的元素, 不论结果如何, 都不会在BP中贡献更新组成运算它们的参数.(因为indexput操作)
-    众所周知, masked_softmax是为了完成两个目标:
-        1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征(纯洁性)
-        2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens表征(纯洁性)
-    这种对纯洁性的保证, 是从两个方面保证的， 即 1. invalid位置的元素不能参与计算下一层valid位置的元素; 2. invalid位置的元素无论结果如何, 不能在bp中贡献更新运算它们的参数
+    2. 保证了invalid位置的元素, 不论结果如何, 都不会在BP中贡献更新组成运算它们的参数.(因为 slice-copy 操作)
+    
+    masked_softmax是为了完成两个目标:
+        1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征.
+        2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens生成
     '''
 
     # 确定2-D tensor的mask操作。这里X是2-D tensor, valid_len是1-D tensor
@@ -47,6 +49,7 @@ def masked_softmax(S, valid_lens):
             valid_lens = valid_lens.reshape(-1) # 摊平，返回1-D tensor
         # 将S转化为2-D tensor, last axis不变
         S = _sequence_mask(S.reshape(-1, shape[-1]), valid_lens, value=-1e20)
+
         return nn.functional.softmax(S.reshape(shape), dim=-1) # nn.f.softmax操作是梯度可传的
 
 
