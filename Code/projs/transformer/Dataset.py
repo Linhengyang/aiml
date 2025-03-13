@@ -108,10 +108,15 @@ class seq2seqDataset(torch.utils.data.Dataset):
     def __init__(self, path, num_steps, num_examples=None):
         super().__init__()
         (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples)
+        # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
         bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
-        dec_X = torch.cat([bos, Y[:, :-1]], dim=1)
-        self._net_inputs = (X, dec_X, X_valid_lens)
-        self._loss_inputs = (Y, Y_valid_lens)
+        # encoder 只对 source data 作深度表征, 故只需要 source data: X 和 X_valid_lens
+        # decoder 需要结合source信息, 对 target data 作 timestep 0 -> num_steps-1 至 1 -> num_steps 的预测, 故需要
+        # 步骤1 对 target data timestep 0 -> num_steps-1 作深度表征, 步骤2 传入 source data 信息. 步骤3 给出 target data timestep 1 -> num_steps
+        Y_frontshift1 = torch.cat([bos, Y[:, :-1]], dim=1) # target data timestep 0 -> num_steps-1 , 即 decoder的输入之一. 命名为 Y_frontshift1
+
+        self._net_inputs = (X, Y_frontshift1, X_valid_lens) # 输入给 transformer network
+        self._loss_inputs = (Y, Y_valid_lens) # 输入给 loss
         self._src_vocab = src_vocab
         self._tgt_vocab = tgt_vocab
     
