@@ -39,7 +39,7 @@ class TransformerEncoderBlock(nn.Module):
         4. addLnorm 
     args:
         num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False
-
+    
     inputs: enc_X, valid_lens(optional) 
         enc_X's shape: (batch_size, seq_len, num_hiddens) 
         valid_lens(optional)'s shape: (batch_size,) since it's self-attention. 一条样本只有一个valid length
@@ -117,28 +117,48 @@ class TransformerDecoderBlock(nn.Module):
         self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
         self.addlnorm3 = AddLNorm(num_hiddens, dropout)
     
-    def forward(self, X, enc_info, infer_recorder=None): # 函数内部对infer_recorder作in-place操作
-        src_enc_seqs, src_valid_lens = enc_info
-        # X' shape, train: (batch_size, seq_len, d_dim), infer: (1, 1, d_dim)
-        # src_enc_seqs'shape, train: (batch_size, seq_len, d_dim), infer: (1, seq_len, d_dim)
+
+    def forward(self, tgt_query, src_enc_info, KV_Caches=None): # 函数内部对 kv_caches 作in-place操作
+        src_enc_seqs, src_valid_lens = src_enc_info
+        # src_enc_seqs timestep 1 - num_steps, shape as
+        #   train: (batch_size, num_steps, d_dim), infer: (1, num_steps, d_dim)
+
         # src_valid_lens's shape, train: (batch_size,), infer: (1,)
-        if self.training: # train过程中
-            assert X.shape[-1] == src_enc_seqs.shape[-1],\
+
+        if self.training:
+            # train 过程中, tgt_query 是一个 shape 为 (batch_size, num_steps, d_dim) 的tensor. 时间步为 0 至 num_steps-1
+            # 代表 target sequence timestep 0 至 num_steps-1
+            assert tgt_query.shape[-1] == src_enc_seqs.tgt_query[-1],\
                 f'training: enc output & dec input block {self.blk_ind} are not in same shape'
-            assert X.shape[0] == src_enc_seqs.shape[0] == src_valid_lens.shape[0], \
-                f'enc output & enc valid lens & dec input block {self.blk_ind} differ batch_size'
-            batch_size, seq_len = X.shape[:-1]
-            mask = torch.arange(1, seq_len+1, dtype=torch.int32, device=X.device).repeat(batch_size, 1)
-            KVs, infer_recorder = X, None # 自注意力, 用上面的mask实现auto-regressive, train过程中不需要infer_recorder
-        else: # infer过程中
-            # infer_recoder是一个dict of (1, _, d_dim) tensor
-            assert type(infer_recorder) == dict, 'in infer mode, a dictionary as infer recorder should be input'
-            try:
-                infer_recorder[self.blk_ind] = torch.cat([infer_recorder[self.blk_ind], X], dim=1)
-            except KeyError: # 从<bos> infer第一个token时, infer_recorder中存在空的元素
-                infer_recorder[self.blk_ind] = X
-            KVs, mask = infer_recorder[self.blk_ind], None # 用所有recorded tokens作注意力的K和V, infer过程中不需要mask
             
-        Y = self.addlnorm1(X, self.attention1(X, KVs, KVs, mask))
+            # assert tgt_query.shape[0] == src_enc_seqs.shape[0] == src_valid_lens.shape[0], \
+            #     f'training: enc output & src valid lens & dec input block {self.blk_ind} differ batch_size'
+            
+            batch_size, num_steps = tgt_query.shape[:-1]
+
+            KVs, KV_Caches = tgt_query, None # 自注意力. train过程中不需要 kv_caches
+            # 用 mask 限制 kv valid 部分, 实现train过程中,
+            # 从0-T-1 T并行生成 1-T, 保证 step i 的 qkv timestepe分别是 i-1, 0至i-1, 0至i-1（限制了kv的valid len是i） 
+            mask = torch.arange(1, num_steps+1, dtype=torch.int32, device=tgt_query.device).repeat(batch_size, 1)
+        
+        else:
+            # infer过程中, tgt_query 是一个 shape 为 (1, 1, d_dim) 的tensor. 对于第i次infer, tgt_query 的时间步是 i-1
+            # 代表 target sequence hat timestep i-1   以此 tgt_query 为 q, target sequence hat timestep 0 - i-1 为KV, 生成 target sequence hat timestep i
+            assert type(KV_Caches) == dict, f'in infer mode, a dictionary as KV_Caches must be input'
+            # 对于第i次infer, tgt_query 的时间步是 i-1, KV 需要 target sequence hat timestep 0 - i-1, 所以需要额外输入 target sequence hat timestep 0 - i-2
+            try:
+                # i = 2, ..., num_steps
+                KV_Caches[self.blk_ind] = torch.cat([KV_Caches[self.blk_ind], tgt_query], dim=1) # (1, i-2, d_dim) + (1, 1, d_dim) = (1, i-1, d_dim)
+            except KeyError: # 从<bos> infer第一个token时, KV_Caches 于 当前 block 没有 target sequence hat 存档
+                # i = 1
+                KV_Caches[self.blk_ind] = tgt_query
+            
+            KVs, mask = KV_Caches[self.blk_ind], None # 用所有 已经保存的kv_caches 加上最新输入的信息(即 tgt_query) 作KV. infer过程中不需要mask
+        
+        # target info 深度表达
+        Y = self.addlnorm1(tgt_query, self.attention1(tgt_query, KVs, KVs, mask))
+        
+        # target info 和 source info 信息交合
         Z = self.addlnorm2(Y, self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens))
-        return self.addlnorm3(Z, self.PosFFN(Z)), infer_recorder
+
+        return self.addlnorm3(Z, self.PosFFN(Z)), KV_Caches
