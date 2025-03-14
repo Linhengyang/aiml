@@ -19,22 +19,47 @@ def masked_softmax(S, valid_lens):
             if valid_lens is 1-D tensor, W[i][:, k] are zeros when k > valid_lens[i]
             if valid_lens is 2-D tensor, W[i][j, k] are zeros when k > valid_lens[i, j], here j is query_idx
     
-    将S打分矩阵的部分元素换成无穷小(indexput操作), 然后再作softmax操作. 在torch框架下,这两个操作都是梯度可传的.
+    将S打分矩阵的部分元素换成无穷小(index-set, or slice-copy), 然后再作softmax操作.
+    在torch框架下,这两个操作都是梯度可传的, grad_fn 分别是 CopySlice 和 softmax
+
     1. 保证了invalid位置的元素, 不会参与计算下一层valid位置的元素.(因为softmax操作. softmax(无穷小)=0, 使得invalid位置元素的权重为0)
-    2. 保证了invalid位置的元素, 不论结果如何, 都不会在BP中贡献更新组成运算它们的参数.(因为indexput操作)
-    众所周知, masked_softmax是为了完成两个目标:
-        1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征(纯洁性)
-        2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens表征(纯洁性)
-    这种对纯洁性的保证, 是从两个方面保证的， 即 1. invalid位置的元素不能参与计算下一层valid位置的元素; 2. invalid位置的元素无论结果如何, 不能在bp中贡献更新运算它们的参数
+    2. 保证了invalid位置的元素, 不论结果如何, 都不会在BP中贡献更新组成运算它们的参数.(因为 slice-copy 操作)
+    
+    masked_softmax是为了完成两个目标:
+        1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征.
+        2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens生成
+    
+    masked_softmax 生成了 shape 为(batch_size, n_queries, n_kvpairs) 的 W, 和 V (batch_size, n_kvpairs, v_size) 作 bmm 乘法, 即 batch_size 个
+    (n_queries, n_kvpairs) @ (n_kvpairs, v_size) 矩阵乘法, 结果是 n_queries 个 V 行向量的凸线性组合, shape 为 (n_queries, v_size)
+
+    从单条 query 的结果来看, Q (batch_size, n_queries, qk_size) 中的单条query (1, 1, qk_size) 与 K (batch_size, n_kvpairs, qk_size) 转置的 单样本
+    (1, qk_size, n_kvpairs) 生成 单条logits (1, 1, n_kvpairs)。经过mask_softmax操作后, 前 valid 部分形成 单条凸组合分布权重，后 invalid 部分权重为 0
+
+    即: n_queries 次(1, 1, qk_size) @ (1, qk_size, n_kvpairs) --> n_queries 条凸组合分布权重 (1, 1, n_kvpairs)
+    mask_softmax只保留了 n_kvpairs 中前valid部分, 所以 K的单样本 (1, n_kvpairs, qk_size) 中只有前 valid 部分参与运算, 后 invalid 部分被舍弃
+    单条凸组合分布权重 (1, 1, n_kvpairs) @ V的单样本 (1, n_kvpairs, v_size)，得到的 (1, 1, v_size) 中只包含了 V 的单样本中 前 valid 部分.
+
+    综上, scaled-dot-production with masked-softmax, 即 masked_softmax(Q @ K', valid_lens) @ V 操作中, 
+    Q: (batch_size, n_queries, qk_size) @ K: (batch_size, n_kvpairs, qk_size)  --transpose_matprod--> S: (batch_size, n_queries, n_kvpairs)
+    --masked_softmax_with_valid_lens(batch_size, n_queries)--> W:  (batch_size, n_queries, n_kvpairs) @ V: (batch_size, n_kvpairs, v_size)
+    = output: (batch_size, n_queries, v_size)
+    Q中 所有 query 分别和 K中 valid 部分 得到了 W中 valid 部分, 然后和 V中 valid 部分 得到了结果。简而言之, valid_lens 作用在 K 和 V 的 n_kvpairs 维度
+    mased_softmax with valid_lens 使得 在 QkV attention 计算中, K 和 V 只有 valid 部分参与了运算.
+    Q: (batch_size, n_queries, qk_size) 代表了 (batch_size, n_queries)次 (1,1, qk_size) 查询. 查询结果output: (batch_size, n_queries, v_size)
+    valid_lens 不能作用在 Q 和 output 中 的 n_queries 维度.
     '''
+
     # 确定2-D tensor的mask操作。这里X是2-D tensor, valid_len是1-D tensor
     def _sequence_mask(X, valid_len, value=0):
         maxlen = X.size(1)
+        
         mask = torch.arange(maxlen, dtype=torch.float32, device=X.device).unsqueeze(0) < valid_len.unsqueeze(1)
         X[~mask] = value # indexput 操作是梯度可传的. 被put的位置在之后的BP反传中,将不会贡献更新组成运算它们的参数
         return X
+    
     # 将S和valid_lens分别转化为2-D tensor和1-D tensor
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
+
         return nn.functional.softmax(S, dim=-1) # nn.f.softmax操作是梯度可传的
     else:
         shape = S.shape # 保存S的shape
@@ -44,7 +69,11 @@ def masked_softmax(S, valid_lens):
             valid_lens = valid_lens.reshape(-1) # 摊平，返回1-D tensor
         # 将S转化为2-D tensor, last axis不变
         S = _sequence_mask(S.reshape(-1, shape[-1]), valid_lens, value=-1e20)
-        return nn.functional.softmax(S.reshape(shape), dim=-1) # nn.f.softmax操作是梯度可传的
+
+        return nn.functional.softmax(S.reshape(shape), dim=-1)
+
+
+
 
 class AdditiveAttention(nn.Module):
     '''
@@ -83,7 +112,12 @@ class AdditiveAttention(nn.Module):
         S_batch = Q_batch_tilda.unsqueeze(2).expand(-1, -1, n, -1) + K_batch_tilda.unsqueeze(1).expand(-1, m, -1, -1)
         Scores = self.W_v(torch.tanh(S_batch)).squeeze(-1) # shape是(batch_size, m, n, 1) --> # shape是(batch_size, m, n)
         self.attention_weights = masked_softmax(Scores, valid_lens) # shape是(batch_size, m, n)
+
         return torch.bmm(self.dropout(self.attention_weights), V_batch) # 返回的shape是(batch_size, m, v)
+
+
+
+
 
 class ScaledDotProductAttention(nn.Module):
     '''
@@ -100,30 +134,56 @@ class ScaledDotProductAttention(nn.Module):
         O's shape: (batch_size, n_queries, value_size)
     
     explains:
-        returns W @ V where W = attention pool of (Q, K)
+        returns W @ V where W is attention pool of (Q, K)
         Scaled Dot Production on queries and keys to attention pool for weight matrices W (batch_size, n_queries, n_kvs)
         Convex combinations of Values based on weight matrices are returned
+    
+    query/key/value 都有各自的数量和维度. 其中 query 的数量自由决定, 但是其维度要和key相同(毕竟要计算query和key之间的相似度)
+    value的维度自由决定, 但是其数量要和key相同(key决定了其对应value在最终输出结果中的重要程度)
+    
+    积式注意力 ScaledDotProductAttention 简单地根据 每条 query和不同keys之间地相似度, 决定了每个key对应的value的权重, 组合出最后的结果
+    最终由 n_queries 条结果
     '''
     def __init__(self, dropout, **kwargs):
         super().__init__(**kwargs)
         self.dropout = nn.Dropout(dropout)
+
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
-        assert Q_batch.size(-1) == K_batch.size(-1), 'query_size not equal to key_size'
-        d = Q_batch.size(-1)
-        S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d)
-        self.attention_weights = masked_softmax(S_batch, valid_lens)
+
+        assert Q_batch.size(-1) == K_batch.size(-1), \
+            f'query_size {Q_batch.size(-1)} not equal to key_size {K_batch.size(-1)}'
+        
+        d = Q_batch.size(-1) # scale 相似度计算中因为维数过大引起的数值不稳定
+
+        # Q: (batch_size, n_query, qk_size) @ K: (batch_size, n_kvs, qk_size) 转置 -> (batch_size, n_query, n_kvs)
+        S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d) # 本质是 Q 和 K 的相似度计算
+
+        self.attention_weights = masked_softmax(S_batch, valid_lens) # 注意力权重shape (batch_size, n_queries, n_kvs)
+
+        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, value_size) ->  (batch_size, n_query, value_size) 
         return torch.bmm( self.dropout(self.attention_weights), V_batch )
+
+
+
 
 def transpose_qkv(X, num_heads):
     h = num_heads
     batch_size, n, _ = X.shape
     return X.permute(0,2,1).reshape(batch_size, h, -1, n).permute(0,1,3,2).reshape(batch_size*h, n, -1)
 
+
+
+
 def transpose_o(X, num_heads):
     h = num_heads
     prod_batchsize_h, m, _ = X.shape
     batch_size = prod_batchsize_h // h
     return X.permute(0,2,1).reshape(batch_size, -1, m).permute(0,2,1)
+
+
+
+
+
 
 class MultiHeadAttention(nn.Module):
     '''
@@ -145,10 +205,14 @@ class MultiHeadAttention(nn.Module):
         After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
         and a final linear project is followed.
         In detail:
-            1. H linear projections on Q K V whom projected to num_hiddens // h dimensions, which stands for H heads
+            1. H linear projections on Q K V whom projected to num_hiddens // H dimensions, which stands for H heads
             2. For every head's result, perform scaled-dot-prod attention pool
             3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to 
                num_hiddens linear project is followed
+
+    多头注意力:
+        单头注意力是指 对 QKV 作各自线性映射(至相同维度 num_hiddens/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, num_hiddens/H)
+    H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, num_hiddens) 的结果. 再follow一个 num_hiddens -> num_hiddens 的线性映射
     '''
     def __init__(self, num_heads, num_hiddens, dropout, use_bias=False, **kwargs):
         assert num_hiddens % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
@@ -159,6 +223,7 @@ class MultiHeadAttention(nn.Module):
         self.W_v = nn.LazyLinear(num_hiddens, bias=use_bias)
         self.W_o = nn.LazyLinear(num_hiddens, bias=use_bias)
         self.attention = ScaledDotProductAttention(dropout)
+    
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
         Q = transpose_qkv(self.W_q(Q_batch), self.h)
         K = transpose_qkv(self.W_k(K_batch), self.h)

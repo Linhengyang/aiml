@@ -2,6 +2,8 @@ import torch
 from torch import nn
 
 ########## Basic Encoder-Decoder architectures ##########
+
+########## Encoder ##########
 class Encoder(nn.Module):
     """The base encoder interface for the encoder-decoder architecture.
 
@@ -15,6 +17,8 @@ class Encoder(nn.Module):
     def forward(self, enc_X, *args, **kwargs):
         raise NotImplementedError
 
+
+########## Decoder ##########
 class Decoder(nn.Module):
     """The base decoder interface for the encoder-decoder architecture.
 
@@ -35,6 +39,7 @@ class Decoder(nn.Module):
 
     def forward(self, dec_X, *args, **kwargs):
         raise NotImplementedError
+
 
 ########## Attention-Customized decoder ##########
 class AttentionDecoder(Decoder):
@@ -58,6 +63,10 @@ class AttentionDecoder(Decoder):
     def attention_weights(self):
         raise NotImplementedError
 
+
+
+
+########## Encoder-Decoder ##########
 class EncoderDecoder(nn.Module):
     """The base class for the encoder-decoder architecture.
 

@@ -1,6 +1,7 @@
 import torch
 import random
 from ...Utils.Text.Vocabulize import Vocab
+from ...Utils.Text.Tokenize import line_tokenize_simple
 
 def _read_wiki(data_dir):
     with open(data_dir, 'r') as f:
@@ -120,7 +121,10 @@ class wikitextDataset(torch.utils.data.Dataset):
         # lower/按.分句, 没有对数字/其他符号
         paragraphs = _read_wiki(fpath) #list of lists of sentences. Now sentence is string, paragraphs is 2D list
         # tokenize. 空段落过滤, 段落中空字符串的句子过滤
-        paragraphs = [[ line.split() for line in paragraph if len(line) > 0 ] for paragraph in paragraphs if len(paragraph) > 0] # 3D list
+        # input paragraphs =  [[  line_1,      line_2,   ...], ..., [[  line_i,      line_j,   ...]
+        paragraphs = [[ line_tokenize_simple(line) for line in paragraph if len(line) > 0 ] for paragraph in paragraphs if len(paragraph) > 0] # 3D list
+        # output paragraphs = [[ [tok seq1], [tok seq2], ...], ..., [[ [tok seq i], [tok seq j], ...]
+        
         # 为了建立vocab, 需要传入一个2D list
         sentences = [line for paragraph in paragraphs for line in paragraph]
         # 建立vocab

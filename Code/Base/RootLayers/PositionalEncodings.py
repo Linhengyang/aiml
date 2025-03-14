@@ -23,7 +23,7 @@ class TrigonoAbsPosEnc(nn.Module):
     def __init__(self, num_hiddens, dropout, max_len=1000):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
-        self.P = torch.zeros((1, max_len, num_hiddens)) # create a long enough P with same d as input X
+        self.P = torch.zeros((1, max_len, num_hiddens)) # create a long enough P with same d as input
         # X 2-D tensor, 行idx是0到max_len-1, 列idx是0到num_hiddens-1之内的偶数
         X = torch.arange(max_len, dtype=torch.float32).reshape(-1, 1) / torch.pow(10000,
             torch.arange(0, num_hiddens, 2, dtype=torch.float32).reshape(1, -1) / num_hiddens)

@@ -33,6 +33,11 @@ the online working space must contain following directories:
 * `model`: consisting directory named by the `proj_name` -- save trained params
 * `logs`: consisting directory named by the `proj_name`  -- save logs
 * `aiml`: `git clone https://github.com/Linhengyang/aiml.git`
+
+also recommend to have:
+* `tmp`: -- temporary results to be deleted safely
+* `cache`: -- to save files may be saved or not
+
 ---
     model
     ├── mlp
@@ -73,10 +78,12 @@ the online working space must contain following directories:
     │   │   ├── Common
     │   │   │   ├── DataAssemble.py
     │   │   │   ├── DataTransform.py
+    │   │   │   ├── Mask.py
     │   │   │   └── SeqOperation.py
     │   │   ├── Text
-    │   │   │   └── BytePairEncoding.py
+    │   │   │   ├── BytePairEncoding.py
     │   │   │   ├── TextPreprocess.py
+    │   │   │   ├── Tokenize.py
     │   │       └── Vocabulize.py
     │   │   └── image
     │   │       └── PatchOperation.py
@@ -86,12 +93,14 @@ the online working space must contain following directories:
     │   └── projs
     │       ├── _demo
     │       ├── bert
+    │       ├── gan
     │       ├── recsys
     │       ├── transformer
     │       ├── vit
     │       └── word2vec
     ├── README.md
     ├── experiment.ipynb
+    ├── learn.py
     ├── main.py
     └── test.py
 ---

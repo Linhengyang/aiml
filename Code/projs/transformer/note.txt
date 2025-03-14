@@ -11,7 +11,7 @@ encoder-decoder结构的不同:
 
 rnn: 
     train: 
-    单步: 从time 0到i-1生成 time i，具体方法是: MLP(time i-1, state extracted from time 0到i-2)), 伴随生成了 state extracted from time 0到i-1
+    单步: 从time 0到i-1生成 time i，具体方法是: MLP(time i-1, state extracted from time 0到i-2), 伴随生成了 state extracted from time 0到i-1
     T步(「生成一个length为T的decode过程」): 重复单步T次, i从1到T
     decode过程中, 存在时间前后依赖关系. 具体是因为前后的MLP之间在传递state, state从前一个MLP出来, 输入后一个MLP
     state在其中按时间步更新, 必须要做完前一时间步的生成, 才能用它的state去做下一时间步的生成.
@@ -27,6 +27,7 @@ transformer's self-att层
     也就是说, 使用masked self-att的decode过程中, 内部不存在时间前后依赖关系, 没有参数在时间步上传递, 一次前向计算, 就得到了hat_sequence
     infer:
     但是在infer时, 没办法并行化这个操作
-    单步: 输入当前(指time i-1)token(上一步输出的or初始的), 作为QUERY; 其他信息(指time 0到i-2的所有token, 预测的or初始的), 作为KEYS&VALUES, 输出time i的token
-    T步: 重复单步T次, i从1到T. 和train不一样, train时可以直接输入time 0到t-1的sequence作为X, 而infer时只能输入当前time i-1 token作为X.
-    需要在一个独立的外部变量中, 输入time 0到t-2的token sequence.
+    单步: 输入 time i-1 的 token(上一步输出的or原始的), 作为QUERY; time 0 到 i-1 的所有token(输出的+原始的), 作为KEYS&VALUES, 输出time i的token
+
+    T步: 重复单步T次, i从1到T. 和train不一样, train时可以直接输入time 0到t-1的sequence作为X, 而infer时只能输入 time i-1 token作为X.
+    需要在一个独立的外部变量中, 输入time 0 到 t-1 的token sequence.

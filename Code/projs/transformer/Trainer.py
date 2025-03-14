@@ -31,22 +31,43 @@ class transformerTrainer(easyTrainer):
         self.net.to(self.device)
 
     def set_data_iter(self, train_set, valid_set=None, test_set=None):
-        ''' 输入train_set(必须), valid_set(可选), test_set(可选, 用于resolve网络), 依次得到train_iter, valid_iter, test_iter'''
-        assert hasattr(self, 'device'), "Device not set. Please set trainer's device before setting data_iters"
-        def transfer(x):
-            result = []
-            for x_ in default_collate(x):
-                res_ = tuple()
-                for t in x_:
-                    res_ += (t.to(self.device),)
-                result.append(res_)
-            return tuple(result)
-        self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=transfer)
+        ''' 
+        输入train_set(必须), valid_set(可选), test_set(可选, 用于resolve网络), 依次得到train_iter, valid_iter, test_iter
+
+        原dataset中的__getitem__ 返回 datapoint of index:
+            (tuple(tensor[index] for tensor in [X, dec_X, X_valid_lens]), tuple(tensor[index] for tensor in [Y, Y_valid_lens]))
+            即:
+            (X[index], dec_X[index], X_valid_lens[index]), (Y[index], Y_valid_lens[index])
+        经过 default_collate(batch_list), 返回 batch data:
+            (tuple(tensor[batch::] for tensor in [X, dec_X, X_valid_lens]), tuple(tensor[batch::] for tensor in [Y, Y_valid_lens]))
+            即:
+            (X[batch::], dec_X[batch::], X_valid_lens[batch::]), (Y[batch::], Y_valid_lens[batch::])
+
+        逐一move到cuda上
+        '''
+
+        assert hasattr(self, 'device'), f"Device not set. Please set trainer's device before setting data_iters"
+
+        def move_to_cuda(batch_list):
+            (X_batch, Y_frontshift1_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch) = default_collate(batch_list)
+
+            X_batch = X_batch.to(self.device)
+            Y_frontshift1_batch = Y_frontshift1_batch.to(self.device)
+            X_valid_lens_batch = X_valid_lens_batch.to(self.device)
+            Y_batch = Y_batch.to(self.device)
+            Y_valid_lens_batch = Y_valid_lens_batch.to(self.device)
+
+            return (X_batch, Y_frontshift1_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch)
+        
+        self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=move_to_cuda)
+
         if valid_set:
-            self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False, collate_fn=transfer)
+            self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False, collate_fn=move_to_cuda)
+
         if test_set:
-            self.test_iter = torch.utils.data.DataLoader(test_set, self.batch_size, False, collate_fn=transfer)
+            self.test_iter = torch.utils.data.DataLoader(test_set, self.batch_size, False, collate_fn=move_to_cuda)
     
+
     def resolve_net(self, need_resolve=False):
         '''
         用test_data_iter的first batch对net作一次forward计算, 使得所有lazyLayer被确定(resolve).随后检查整个前向过程和loss计算(check).
@@ -55,6 +76,7 @@ class transformerTrainer(easyTrainer):
         if need_resolve:
             assert hasattr(self, 'test_iter'), 'Please input test_set when deploying .set_data_iter()'
             self.net.train()
+            # 取 inputs
             for net_inputs_batch, loss_inputs_batch in self.test_iter:
                 break
             try:
@@ -65,6 +87,7 @@ class transformerTrainer(easyTrainer):
                 return True
             except:
                 raise AssertionError('Net or Loss has problems. Please check code before fit')
+        
         print('Net unresolved. Net & Loss unchecked. Ready to skip init_params and fit')
         return False
     
@@ -73,7 +96,8 @@ class transformerTrainer(easyTrainer):
         def xavier_init_weights(m):
             if type(m) == nn.Linear:
                 nn.init.xavier_uniform_(m.weight)
-        self.net.apply(xavier_init_weights)
+        
+        self.net.apply(xavier_init_weights) # net.apply 递归式地调用 fn 到 inner object
     
     def set_optimizer(self, lr, optim_type='adam'):
         '''set the optimizer at attribute optimizer'''
@@ -92,6 +116,7 @@ class transformerTrainer(easyTrainer):
     def save_model(self, fname, models_dir=online_model_save_dir):
         '''save the model to online model directory'''
         save_path = os.path.join(models_dir, proj_name, fname)
+        
         torch.save(self.net.state_dict(), save_path)
 
     def fit(self):
@@ -103,6 +128,8 @@ class transformerTrainer(easyTrainer):
             self.net.train()
             self.epoch_evaluator.epoch_judge(epoch)
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
+                # net_inputs_batch = (X_batch, Y_frontshift1_batch, X_valid_lens_batch)
+                # loss_inputs_batch = (Y_batch, Y_valid_lens_batch)
                 self.optimizer.zero_grad()
                 Y_hat, _ = self.net(*net_inputs_batch)
                 l = self.loss(Y_hat, *loss_inputs_batch)
