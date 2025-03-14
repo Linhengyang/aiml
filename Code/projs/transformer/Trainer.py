@@ -58,15 +58,15 @@ class transformerTrainer(easyTrainer):
         #     return tuple(result)
 
         def move_to_cuda(batch_list):
-            (X_batch, dec_X_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch) = default_collate(batch_list)
+            (X_batch, Y_frontshift1_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch) = default_collate(batch_list)
 
             X_batch = X_batch.to(self.device)
-            dec_X_batch = dec_X_batch.to(self.device)
+            Y_frontshift1_batch = Y_frontshift1_batch.to(self.device)
             X_valid_lens_batch = X_valid_lens_batch.to(self.device)
             Y_batch = Y_batch.to(self.device)
             Y_valid_lens_batch = Y_valid_lens_batch.to(self.device)
 
-            return (X_batch, dec_X_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch)
+            return (X_batch, Y_frontshift1_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch)
         
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=move_to_cuda)
 
@@ -133,6 +133,8 @@ class transformerTrainer(easyTrainer):
             self.net.train()
             self.epoch_evaluator.epoch_judge(epoch)
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
+                # net_inputs_batch = (X_batch, Y_frontshift1_batch, X_valid_lens_batch)
+                # loss_inputs_batch = (Y_batch, Y_valid_lens_batch)
                 self.optimizer.zero_grad()
                 Y_hat, _ = self.net(*net_inputs_batch)
                 l = self.loss(Y_hat, *loss_inputs_batch)
