@@ -48,15 +48,6 @@ class transformerTrainer(easyTrainer):
 
         assert hasattr(self, 'device'), f"Device not set. Please set trainer's device before setting data_iters"
 
-        # def transfer(x):
-        #     result = []
-        #     for x_ in default_collate(x):
-        #         res_ = tuple()
-        #         for t in x_:
-        #             res_ += (t.to(self.device),)
-        #         result.append(res_)
-        #     return tuple(result)
-
         def move_to_cuda(batch_list):
             (X_batch, Y_frontshift1_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch) = default_collate(batch_list)
 
@@ -85,6 +76,7 @@ class transformerTrainer(easyTrainer):
         if need_resolve:
             assert hasattr(self, 'test_iter'), 'Please input test_set when deploying .set_data_iter()'
             self.net.train()
+            # 取 inputs
             for net_inputs_batch, loss_inputs_batch in self.test_iter:
                 break
             try:
@@ -95,6 +87,7 @@ class transformerTrainer(easyTrainer):
                 return True
             except:
                 raise AssertionError('Net or Loss has problems. Please check code before fit')
+        
         print('Net unresolved. Net & Loss unchecked. Ready to skip init_params and fit')
         return False
     
@@ -103,7 +96,8 @@ class transformerTrainer(easyTrainer):
         def xavier_init_weights(m):
             if type(m) == nn.Linear:
                 nn.init.xavier_uniform_(m.weight)
-        self.net.apply(xavier_init_weights)
+        
+        self.net.apply(xavier_init_weights) # net.apply 递归式地调用 fn 到 inner object
     
     def set_optimizer(self, lr, optim_type='adam'):
         '''set the optimizer at attribute optimizer'''
@@ -122,6 +116,7 @@ class transformerTrainer(easyTrainer):
     def save_model(self, fname, models_dir=online_model_save_dir):
         '''save the model to online model directory'''
         save_path = os.path.join(models_dir, proj_name, fname)
+        
         torch.save(self.net.state_dict(), save_path)
 
     def fit(self):
