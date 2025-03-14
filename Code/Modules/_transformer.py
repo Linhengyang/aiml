@@ -161,4 +161,4 @@ class TransformerDecoderBlock(nn.Module):
         # target info 和 source info 信息交合
         Z = self.addlnorm2(Y, self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens))
 
-        return self.addlnorm3(Z, self.PosFFN(Z)), KV_Caches
+        return self.addlnorm3(Z, self.PosFFN(Z)), KV_Caches # 第一个输出的 shape 和 tgt_query 相同
