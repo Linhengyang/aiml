@@ -33,6 +33,11 @@ the online working space must contain following directories:
 * `model`: consisting directory named by the `proj_name` -- save trained params
 * `logs`: consisting directory named by the `proj_name`  -- save logs
 * `aiml`: `git clone https://github.com/Linhengyang/aiml.git`
+
+also recommend to have:
+* `tmp`: -- temporary results to be deleted safely
+* `cache`: -- to save files may be saved or not
+
 ---
     model
     ├── mlp
