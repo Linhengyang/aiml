@@ -68,8 +68,8 @@ def build_tensorDataset(lines, vocab, num_steps):
         将输入的词元序列lines映射成数字序列, 并设定num_steps(sequence length)序列长度
     """
     lines = [vocab[l] + [vocab['<eos>']] for l in lines] # id映射: lines 2D list, l & vocab[l] list. 在每个 line 末尾添加 vocab['<eos>']. 注意这里不能用append
-    array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines]) # tensor化 truncate_pad之后的token序列, int64
-    valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数, int32
+    array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines], dtype=torch.int64) # tensor化 truncate_pad之后的token序列, 默认就是int64
+    valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数, int32节省空间
     return array, valid_len
 
 def build_dataset_vocab(path, num_steps, num_examples=None):
