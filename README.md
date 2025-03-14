@@ -73,10 +73,12 @@ the online working space must contain following directories:
     │   │   ├── Common
     │   │   │   ├── DataAssemble.py
     │   │   │   ├── DataTransform.py
+    │   │   │   ├── Mask.py
     │   │   │   └── SeqOperation.py
     │   │   ├── Text
-    │   │   │   └── BytePairEncoding.py
+    │   │   │   ├── BytePairEncoding.py
     │   │   │   ├── TextPreprocess.py
+    │   │   │   ├── Tokenize.py
     │   │       └── Vocabulize.py
     │   │   └── image
     │   │       └── PatchOperation.py
@@ -86,12 +88,14 @@ the online working space must contain following directories:
     │   └── projs
     │       ├── _demo
     │       ├── bert
+    │       ├── gan
     │       ├── recsys
     │       ├── transformer
     │       ├── vit
     │       └── word2vec
     ├── README.md
     ├── experiment.ipynb
+    ├── learn.py
     ├── main.py
     └── test.py
 ---
