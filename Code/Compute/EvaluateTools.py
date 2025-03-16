@@ -54,7 +54,6 @@ class Accumulator:  #@save
 
 
 
-
 class epochEvaluator(object):
     '''
     train过程中的epoch评价器, 记录每一个epoch的:
