@@ -28,6 +28,7 @@ class transformerTrainer(easyTrainer):
         else:
             print('Using cpu as device')
             self.device = torch.device('cpu')
+            
         self.net.to(self.device)
 
     def set_data_iter(self, train_set, valid_set=None, test_set=None):
@@ -35,13 +36,13 @@ class transformerTrainer(easyTrainer):
         输入train_set(必须), valid_set(可选), test_set(可选, 用于resolve网络), 依次得到train_iter, valid_iter, test_iter
 
         原dataset中的__getitem__ 返回 datapoint of index:
-            (tuple(tensor[index] for tensor in [X, dec_X, X_valid_lens]), tuple(tensor[index] for tensor in [Y, Y_valid_lens]))
+            (tuple(tensor[index] for tensor in [X, Y_frontshift1, X_valid_lens]), tuple(tensor[index] for tensor in [Y, Y_valid_lens]))
             即:
-            (X[index], dec_X[index], X_valid_lens[index]), (Y[index], Y_valid_lens[index])
+            (X[index], Y_frontshift1[index], X_valid_lens[index]), (Y[index], Y_valid_lens[index])
         经过 default_collate(batch_list), 返回 batch data:
-            (tuple(tensor[batch::] for tensor in [X, dec_X, X_valid_lens]), tuple(tensor[batch::] for tensor in [Y, Y_valid_lens]))
+            (tuple(tensor[batch::] for tensor in [X, Y_frontshift1, X_valid_lens]), tuple(tensor[batch::] for tensor in [Y, Y_valid_lens]))
             即:
-            (X[batch::], dec_X[batch::], X_valid_lens[batch::]), (Y[batch::], Y_valid_lens[batch::])
+            (X[batch::], Y_frontshift1[batch::], X_valid_lens[batch::]), (Y[batch::], Y_valid_lens[batch::])
 
         逐一move到cuda上
         '''
@@ -105,7 +106,7 @@ class transformerTrainer(easyTrainer):
         if optim_type == 'adam':
             self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
     
-    def set_grad_clipping(self, grad_clip_val=None):
+    def set_grad_clipping(self, grad_clip_val:None|float = None):
         '''set the grad_clip_val at attribute grad_clip_val if input a float'''
         self.grad_clip_val = grad_clip_val
 
@@ -116,30 +117,40 @@ class transformerTrainer(easyTrainer):
     def save_model(self, fname, models_dir=online_model_save_dir):
         '''save the model to online model directory'''
         save_path = os.path.join(models_dir, proj_name, fname)
-        
+
         torch.save(self.net.state_dict(), save_path)
 
     def fit(self):
         assert hasattr(self, 'device'), 'device is not specified'
         assert hasattr(self, 'optimizer'), 'optimizer missing'
         assert hasattr(self, 'train_iter'), 'data_iter missing'
-        assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator(train log file) missing'
+        assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator missing'
+
         for epoch in range(self.num_epochs):
+            # model set to train
             self.net.train()
+            # evaluator determine if this epoch to reveal train situation /  evaluate current network
             self.epoch_evaluator.epoch_judge(epoch)
+
+
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
                 # net_inputs_batch = (X_batch, Y_frontshift1_batch, X_valid_lens_batch)
                 # loss_inputs_batch = (Y_batch, Y_valid_lens_batch)
                 self.optimizer.zero_grad()
-                Y_hat, _ = self.net(*net_inputs_batch)
+                Y_hat, _ = self.net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
                 l = self.loss(Y_hat, *loss_inputs_batch)
                 l.sum().backward()
+
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
+
                 self.optimizer.step()
+
                 with torch.no_grad():
                     self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, Y_hat, l)
+
             with torch.no_grad():
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter)
                 self.epoch_evaluator.epoch_metric_cast()
+        
         print('Fitting finished successfully')
