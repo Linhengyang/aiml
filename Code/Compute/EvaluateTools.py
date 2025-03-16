@@ -4,6 +4,7 @@ import collections
 import math
 import torch
 from torch import Tensor
+import typing as t
 
 class Timer:  #@save
     """Record multiple running times."""
@@ -32,6 +33,10 @@ class Timer:  #@save
         """Return the accumulated time."""
         return np.array(self.times).cumsum().tolist()
 
+
+
+
+
 class Accumulator:  #@save
     """在n个变量上累加"""
     def __init__(self, n):
@@ -45,6 +50,10 @@ class Accumulator:  #@save
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+
+
+
 
 class epochEvaluator(object):
     '''
@@ -70,6 +79,27 @@ class epochEvaluator(object):
     def epoch_metric_cast(self, *args, **kwargs):
         raise NotImplementedError
 
+
+def metric_summary(
+        values, 
+        metric_names:t.List[str], 
+        unit_names:t.List[str], 
+        round_ndigits:t.List[int|None], 
+        separator='/t'
+        ) -> str:
+
+    names = [metric + "(" + unit + "): " for metric, unit in zip(metric_names, unit_names)]
+
+    vals = [round(value, round_ndigit) if round_ndigit else value for value, round_ndigit in zip(values, round_ndigits)]
+
+    name_value_pairs = [name+str(val) for name, val in zip(names, vals)]
+
+    return separator.join(name_value_pairs)
+
+
+
+
+
 def bleu(pred_seq, label_seq, k):
     """计算BLEU. 可以处理pred_seq为空字符串的情况
     inputs:
@@ -92,6 +122,11 @@ def bleu(pred_seq, label_seq, k):
         score *= math.pow(num_matches / (len_pred - n + 1), math.pow(0.5, n))
     return score
 
+
+
+
+
+
 def accuracy(y_hat: Tensor, y: Tensor):
     """
     计算预测正确的数量, 类似nn.CrossEntropyLoss
@@ -103,6 +138,11 @@ def accuracy(y_hat: Tensor, y: Tensor):
         y_hat = y_hat.argmax(dim=1)
     cmp = y_hat.type(y.dtype) == y
     return float(cmp.type(y.dtype).sum())
+
+
+
+
+
 
 def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
     """
@@ -121,6 +161,10 @@ def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
 # True Negative: 正确地判别成0, 即Truth为0的元素, 预测为0
 # False Positive: 错误地判别成1, 即Truth为0的元素, 预测为1
 
+
+
+
+
 def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
     '''
     y_hat & y shape: (*), same shape
@@ -135,6 +179,10 @@ def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
     assert TN + FP == y[~truth_p_mask].numel()
     return {'TP':TP, 'FN':FN, 'TN':TN, 'FP':FP}
 
+
+
+
+
 def binary_classify_eval_rates(y_hat: Tensor, y: Tensor, threshold=0.5):
     '''
     y_hat & y shape: (*), same shape
@@ -146,6 +194,11 @@ def binary_classify_eval_rates(y_hat: Tensor, y: Tensor, threshold=0.5):
     FPR = FP/(FP+TN)
     return {'acc_rt':acc_rt, 'precision':precision, 'recall':recall, 'TPR':recall, 'FPR':FPR}
 
+
+
+
+
+
 # ROC曲线: 给定一个二分类器和阈值, 作用在样本V中, 关注预测为Positive的样本, 可得到TPR和FPR
 # TPR = TP/(TP+FN), 所有真实为P的样本中, 预测为P的比例, 就是recall
 # FPR = FP/(FP+TN), 所有真实为N的样本中, 预测为P的比例
@@ -156,6 +209,12 @@ def binary_classify_eval_rates(y_hat: Tensor, y: Tensor, threshold=0.5):
 # 当阈值从1到0时, 由于标准放低, 更多样本被预测为1, FN和TN都会减小或持平(二者之和会减小), 所以TPR和FPR都会变大或持平
 def roc_curve(net, sample):
     raise NotImplementedError
+
+
+
+
+
+
 
 # AUC指标: ROC曲线下面的面积, 代表「随机给定一对正负样本, 存在一个阈值可用在该分类器上将二者分开」的概率, 即「随机给定一对正负样本, 二者的预测序正确」的概率
 def auc(preds :Tensor, labels: Tensor) -> tuple:
