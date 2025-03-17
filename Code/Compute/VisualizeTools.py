@@ -60,7 +60,9 @@ def plot(X, Y=None, xlabel=None, ylabel=None, legend=None, xlim=None,
         else:
             axes.plot(y, fmt)
     set_axes(axes, xlabel, ylabel, xlim, ylim, xscale, yscale, legend)
-    
+
+
+
 class Animator:  #@save
     """在动画中绘制数据"""
     def __init__(self, xlabel=None, ylabel=None, legend=None, xlim=None,
@@ -101,6 +103,8 @@ class Animator:  #@save
         display.display(self.fig)
         display.clear_output(wait=True)
 
+
+
 def show_heatmaps(matrices, xlabel, ylabel, titles=None, figsize=(2.5, 2.5),
                   cmap='Reds'):
     """Show heatmaps of matrices."""
@@ -118,6 +122,8 @@ def show_heatmaps(matrices, xlabel, ylabel, titles=None, figsize=(2.5, 2.5),
             if titles:
                 ax.set_title(titles[j])
     fig.colorbar(pcm, ax=axes, shrink=0.6)
+
+
 
 
 def show_images(imgs, num_rows, num_cols, titles=None, scale=1.5):  #@save
