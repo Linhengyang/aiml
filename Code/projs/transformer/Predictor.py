@@ -113,7 +113,7 @@ class sentenceTranslator(easyPredictor):
         return self.pred_sentence
 
     def evaluate(self, tgt_sentence):
-        assert hasattr(self, 'pred_sentence'), 'pred target sentence not found'
+        assert hasattr(self, 'pred_sentence'), 'predicted target sentence not found'
         self.tgt_sentence = preprocess_space(tgt_sentence, need_lower=True, separate_puncs=',.!?')
         return self.eval_fn(self.pred_sentence, self.tgt_sentence, self.bleu_k)
 

@@ -100,7 +100,7 @@ def infer_job():
     device = torch.device('cpu')
 
     # construct model
-    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.0, False, 64
+    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
                  "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     
@@ -115,7 +115,7 @@ def infer_job():
 
     # set predictor
     search_mode = 'beam'
-    if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用train mode网络
+    if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用 train mode 网络. 而 train mode 的网络在每次推理时会产生随机性
         search_mode = 'greedy'
     
     translator = sentenceTranslator(search_mode=search_mode, device=device, alpha=5) #加大对长句的奖励
