@@ -93,15 +93,21 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
         返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
     """
     raw_text = read_text2str(path) # read text
-    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?', normalize_whitespace=False) # 小写化,并替换其他空格为单空格, 保证文字和,.!?符号之间有空格
+
+    # 预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格. 因为 src 和 tgt 之间由 \t 分隔, 所以不能 normalize 空白字符
+    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?', normalize_whitespace=False)
+
     # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer。symbols 为 None
     source, target = tokenize_seq2seq(text, line_tokenize_simple, None, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
+
     # 制作 vocab
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
     tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作tgt词表
+
     # 制作 tensor dataset
     src_array, src_valid_len = build_tensorDataset(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
     tgt_array, tgt_valid_len = build_tensorDataset(target, tgt_vocab, num_steps)# all tgt data, shapes (num_examples, num_stpes), (num_examples,)
+
     return (src_array, src_valid_len, tgt_array, tgt_valid_len), (src_vocab, tgt_vocab)
 
 
@@ -111,6 +117,7 @@ class seq2seqDataset(torch.utils.data.Dataset):
         super().__init__()
         (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples)
         # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
+        
         bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
         # encoder 只对 source data 作深度表征, 故只需要 source data: X 和 X_valid_lens
         # decoder 需要结合source信息, 对 target data 作 timestep 0 -> num_steps-1 至 1 -> num_steps 的预测, 故需要

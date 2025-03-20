@@ -138,7 +138,7 @@ class TransformerDecoderBlock(nn.Module):
 
             KVs, KV_Caches = tgt_query, None # 自注意力. train过程中不需要 kv_caches
             # 用 mask 限制 kv valid 部分, 实现train过程中,
-            # 从0-T-1 T并行生成 1-T, 保证 step i 的 qkv timestepe分别是 i-1, 0至i-1, 0至i-1（限制了kv的valid len是i） 
+            # 从0-T-1 T并行生成 1-T, 保证 step i 的 qKV timestepe分别是 q:i-1, K:0至i-1, V:0至i-1（限制了kv的valid len是i） 
             mask = torch.arange(1, num_steps+1, dtype=torch.int32, device=tgt_query.device).repeat(batch_size, 1)
         
         else:

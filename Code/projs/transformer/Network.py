@@ -64,17 +64,28 @@ class TransformerDecoder(AttentionDecoder):
             self.blks.add_module("decblock"+str(i), cur_blk)
         self.dense = nn.Linear(num_hiddens, vocab_size)
 
+
     def init_state(self, enc_outputs):
-        return enc_outputs # encoder returns encoded_src, src_valid_lens
+        # encoder returns encoded_src, src_valid_lens
+
+        # train: src_enc_info = (src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)]
+        # infer: src_enc_info = (src_enc, src_valid_lens): [(1, num_stepss, d_dim), (1,)]
+        src_enc_info = enc_outputs
+
+        return src_enc_info
+
 
     def forward(self, tgt_query, src_enc_info, KV_Caches=None):
         # train: tgt_query shape: (batch_size, num_steps)int64, timestep 从 0 到 num_steps-1
         #        src_enc_info = (src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)]
         #        KV_Caches: None
 
-        # infer: tgt_query shape: (1, 1)int64, timestep 是 i (i = 1, 2, ..., num_steps)  即第i次infer
+        # infer: tgt_query shape: (1, 1)int64, 对于第i次infer, tgt_query 的 timestep 是 i-1 (i = 1, 2, ..., num_steps), 前向的output的timestep 是 i
         #        src_enc_info = (src_enc, src_valid_lens): [(1, num_stepss, d_dim), (1,)]
-        #        KV_Caches: Dict with keys: block_ind, values: tensors shape as (1, i, d_dim), timestep 0 到 i-1
+        #        input KV_Caches: 
+        #           Dict with keys: block_ind,
+        #           values: 对于第 1 次infer, KV_Caches 为 空
+        #                   对于第 i > 1 次infer, KV_Caches 是 tensors shape as (1, i-1, d_dim), i-1 维包含 timestep 0 到 i-2
 
         tgt_embd = self.embedding(tgt_query)
         tgt_query = self.pos_encoding(tgt_embd * math.sqrt(self.num_hiddens))
@@ -83,8 +94,12 @@ class TransformerDecoder(AttentionDecoder):
         for blk in self.blks:
             tgt_query, KV_Caches = blk(tgt_query, src_enc_info, KV_Caches)
         
-        #train: output[0] shape: (batch_size, num_steps, vocab_size) tensor of logits, output[2]: None
-        #infer: output[0] shape: (1, 1, vocab_size) tensor of logits, output[2]: dict of (1, cur_infer_step i, d_dim) tensor
+        #train: output[0] shape: (batch_size, num_steps, vocab_size)tensor of logits,  timestep 从 1 到 num_steps;
+        #       output[1]: None
+        #infer: output[0] shape: (1, 1, vocab_size)tensor of logits, 对于第i次infer, timestep 是 i;
+        #       output[1]: dict of 
+        #                      keys as block_indices
+        #                      values as (1, i, d_dim) tensor, i 维 包含 timestep 0-i-1, 实际上就是 input KV_Caches 添加 timestep i-1 的 tgt_query
         return self.dense(tgt_query), KV_Caches
 
 
