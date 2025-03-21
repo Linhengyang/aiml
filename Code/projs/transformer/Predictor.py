@@ -5,6 +5,7 @@ from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import bleu
 from .Dataset import build_tensorDataset
 from ...Utils.Text.TextPreprocess import preprocess_space
+import typing as t
 
 def str_to_enc_inputs(src_sentence, src_vocab, num_steps, device):
     '''
@@ -81,12 +82,21 @@ def greedy_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, *args):
 # k 个 Seq(0至t), 分别是 Seq(0至t)_1,...Seq(0至t)_k
 
 # 对于第 t 步predict
-def beam_search_single_step(net, k_seq_mat, k_cond_prob_mat, enc_info, k, vocab_size):
+def beam_search_single_step(k, k_seq_mat, k_cond_prob_mat, net, vocab_size, src_enc_info, parrallel=False, k_KV_Caches=None):
     # beam_size == k
-    # k_seq_mat: (k, t)int64, 包含 timestep 0 至 t-1, k 条 Seq(0至t-1), 每条作为行
+    # k_seq_mat: (k, t)int64, 包含 timestep 0 至 t-1, k 条 Seq(0至t-1), 每条作为行. 对于第1步predict, k_seq_mat 是 k 条  timestep=0的<bos>
     # k_cond_prob_mat: (k, t), 包含 timestep 0 至 t-1, k 条 Cond Prob序列(0至t-1), 每条作为行. timestep=0, Cond Prob=1
+    # KV_Caches: dict, 对于 第 1 次predict, 为空 {}
+    #   对于第 t > 1 次predict, keys 是 block_inds, values 是 tensors shape as (1, t-1, d_dim), i-1 维包含 timestep 0 到 i-2
 
-    cond_prob_tokn_t_mat = torch.rand((k, vocab_size)) # (k, vocab_size), TODO
+    # cond_prob_tokn_t_mat = torch.rand((k, vocab_size)) # (k, vocab_size), TODO
+
+    if parrallel and net.training:
+        logits, _ = net.decoder(k_seq_mat, src_enc_info) # (k, num_steps, vocab_size)tensor of logits,  timestep 从 1 到 t;
+        logits_tokn_t = logits[:, -1, :].squeeze(1) # (k, 1, vocab_size) --> (k, vocab_size)
+        cond_prob_tokn_t_mat = nn.Softmax(dim=-1)(logits_tokn_t) # (k, vocab_size)
+    elif isinstance(KV_Caches, dict):
+
 
     prob_seqs = k_cond_prob_mat.prod(dim=1, keepdim=True) * cond_prob_tokn_t_mat # (k, vocab_size)
 
