@@ -9,7 +9,7 @@ from .Dataset import build_tensorDataset
 from ...Utils.Text.TextPreprocess import preprocess_space
 
 
-def str_to_enc_inputs(src_sentence, src_vocab, num_steps, device):
+def str_to_src_inputs(src_sentence, src_vocab, num_steps, device):
     '''
     src_sentence输入前需要预处理: lower/替换非正常空格为单空格/文字和,.?!之间需要有单空格
     因为训练集截断了num_steps之后的序列, 所以模型不能捕捉num_steps后面的序列关系.
@@ -23,8 +23,7 @@ def str_to_enc_inputs(src_sentence, src_vocab, num_steps, device):
 
 
 def greedy_predict(
-        net, tgt_vocab, num_steps, src_inputs,
-        length_factor, device,
+        net, tgt_vocab, num_steps, src_inputs, length_factor, device,
         *args, **kwargs):
     '''
     net:
@@ -166,8 +165,7 @@ def beam_search_single_step(net, vocab_size, src_enc_info, k, parrallel,
 #   记录 t 步中所有的中间结果, 在 k*t 个结果中, 计算分数, 选择最大的
 #   只记录 完成 t步后的 k 个最终结果. 在 k 个结果中, 计算分数, 选择最大的
 def beam_predict(
-        net, tgt_vocab, num_steps, src_inputs,
-        length_factor, device,
+        net, tgt_vocab, num_steps, src_inputs, length_factor, device,
         beam_size, parrallel, *args, **kwargs):
     '''
     net:
@@ -285,15 +283,19 @@ class sentenceTranslator(easyPredictor):
         # 预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格. normalize 空白字符
         self.src_sentence = preprocess_space(src_sentence, need_lower=True, separate_puncs=',.!?', normalize_whitespace=True)
 
-        enc_inputs = str_to_enc_inputs(self.src_sentence, src_vocab, num_steps, self.device)
+        src_inputs = str_to_src_inputs(self.src_sentence, src_vocab, num_steps, self.device)
         net.to(self.device)
-        self.pred_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, enc_inputs, self.device, self.length_factor, self.beam_size)
+
+        self.pred_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, src_inputs, self.device, self.length_factor,
+                                                             self.beam_size, parrallel=False)
 
         return self.pred_sentence
 
     def evaluate(self, tgt_sentence):
-        assert hasattr(self, 'pred_sentence'), 'predicted target sentence not found'
-        self.tgt_sentence = preprocess_space(tgt_sentence, need_lower=True, separate_puncs=',.!?')
+        assert hasattr(self, 'pred_sentence'), f'predicted target sentence not found'
+
+        self.tgt_sentence = preprocess_space(tgt_sentence, need_lower=True, separate_puncs=',.!?', normalize_whitespace=True)
+        
         return self.eval_fn(self.pred_sentence, self.tgt_sentence, self.bleu_k)
 
     @property
