@@ -1,11 +1,13 @@
 import torch
 from torch import nn
 import math
+from operator import itemgetter
+import typing as t
 from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import bleu
 from .Dataset import build_tensorDataset
 from ...Utils.Text.TextPreprocess import preprocess_space
-import typing as t
+
 
 def str_to_enc_inputs(src_sentence, src_vocab, num_steps, device):
     '''
@@ -20,13 +22,26 @@ def str_to_enc_inputs(src_sentence, src_vocab, num_steps, device):
 
 
 
-def greedy_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, *args):
+def greedy_predict(
+        net, tgt_vocab, num_steps, src_inputs,
+        length_factor, device,
+        *args, **kwargs):
+    '''
+    net:
+    tgt_vocab: 生成序列的vocab. 需要用到其 序列生成的 begin-of-sequence tag 和 停止生成的end-of-sequence tag, 以及 vocab_size
+    num_steps: 模型 net 能捕捉的最大 序列关系 步长. 正整数
+    src_inputs: source 序列相关信息, 应该为 (src, src_valid_lens)
+        src shape: (1, num_steps)int64, timesteps: 1 -> num_steps
+        src_valid_lens shape: (1,)int32
+    length_factor: 生成序列的长度奖励, 长度越长奖励越大
+    device: 设备
+    '''
     net.eval()
     with torch.no_grad():
         # encoder / decoder.init_state in infer mode:
-        # encoder input: enc_inputs = (src, src_valid_lens): shapes  [(1, num_stepss), (1,)]
+        # encoder input: src_inputs = (src, src_valid_lens): shapes  [(1, num_stepss), (1,)]
         # init_state output: src_enc_info = (src_enc, src_valid_lens): [(1, num_stepss, d_dim), (1,)]
-        src_enc_info = net.decoder.init_state(net.encoder(*enc_inputs))
+        src_enc_info = net.decoder.init_state(net.encoder(*src_inputs))
 
         # decoder in infer mode:
         # input: tgt_query shape: (1, 1)int64, 对于第i次infer, tgt_query 的 timestep 是 i-1 (i = 1, 2, ..., num_steps), 前向的output的timestep 是 i
@@ -39,8 +54,8 @@ def greedy_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, *args):
 
         output_tokenIDs, KV_Caches, raw_pred_score = [], {}, 0
 
-        for i in range(1, num_steps+1):
-            # 对于第 i 次 infer: 
+        for _ in range(1, num_steps+1):
+            # 对于第 i 次 infer:
             # output: tgt_next_hat shape: (1, 1, vocab_size)tensor of logits, 对于第i次infer, timestep 是 i;
             #         output KV_Caches: dict of 
             #                      keys as block_indices
@@ -55,9 +70,9 @@ def greedy_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, *args):
             output_tokenIDs.append(pred_tokenIDX)
             raw_pred_score += torch.log( nn.Softmax(dim=-1)(Y_hat).max(dim=-1).values ).item() # raw_pred_score = log(estimated probability of selected one)
             
-        long_award = math.pow(len(output_tokenIDs), -alpha) if len(output_tokenIDs) > 0 else 1
+        long_award = math.pow(len(output_tokenIDs), -length_factor)
     
-    return ' '.join(tgt_vocab.to_tokens(output_tokenIDs)), raw_pred_score * long_award
+    return ' '.join(tgt_vocab.to_tokens(output_tokenIDs)), raw_pred_score*long_award
 
 
 
@@ -81,90 +96,168 @@ def greedy_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, *args):
 # 取 seq prob mat 的 前 k 个最大值, top1, top2,...topk. 对于 j = 1,2..k, topj 的行坐标代表的前置序列, append topj 的列坐标代表的 Tok(t), 得到了 序列总概率最大的
 # k 个 Seq(0至t), 分别是 Seq(0至t)_1,...Seq(0至t)_k
 
-# 对于第 t 步predict
-def beam_search_single_step(k, k_seq_mat, k_cond_prob_mat, net, vocab_size, src_enc_info, parrallel=False, k_KV_Caches=None):
+# 对于第 t 步predict (1=1,2,...num_steps)
+def beam_search_single_step(net, vocab_size, src_enc_info, k, parrallel,
+                            k_seq_mat, k_cond_prob_mat, k_KV_Caches=None
+                            ):
     # beam_size == k
     # k_seq_mat: (k, t)int64, 包含 timestep 0 至 t-1, k 条 Seq(0至t-1), 每条作为行. 对于第1步predict, k_seq_mat 是 k 条  timestep=0的<bos>
     # k_cond_prob_mat: (k, t), 包含 timestep 0 至 t-1, k 条 Cond Prob序列(0至t-1), 每条作为行. timestep=0, Cond Prob=1
-    # KV_Caches: dict, 对于 第 1 次predict, 为空 {}
+
+    # k_KV_Caches: list of dicts, 考虑每个 dict, 
+    #   对于 第 1 次predict, 为空 {}
     #   对于第 t > 1 次predict, keys 是 block_inds, values 是 tensors shape as (1, t-1, d_dim), i-1 维包含 timestep 0 到 i-2
+    # k_KV_Caches 从原理上来说, 没有必要输入, 因为理论上, k 条 seq 对应的 decoder block caches 都可以用 seq 里的tokens 逐一重新算一遍. 但这样会造成极大的算力浪费.
 
-    # cond_prob_tokn_t_mat = torch.rand((k, vocab_size)) # (k, vocab_size), TODO
-
+    # 计算 cond_prob_tokn_t_mat shape(k, vocab_size), 即 token t 的 k 个条件概率
+    # 只有 net 设定为 training 模式, 才能作 并行前向计算. 此时也不需要 KV_Caches
     if parrallel and net.training:
-        logits, _ = net.decoder(k_seq_mat, src_enc_info) # (k, num_steps, vocab_size)tensor of logits,  timestep 从 1 到 t;
-        logits_tokn_t = logits[:, -1, :].squeeze(1) # (k, 1, vocab_size) --> (k, vocab_size)
-        cond_prob_tokn_t_mat = nn.Softmax(dim=-1)(logits_tokn_t) # (k, vocab_size)
-    elif isinstance(KV_Caches, dict):
+        with torch.no_grad():
+            logits, _ = net.decoder(k_seq_mat, src_enc_info) # (k, num_steps, vocab_size)tensor of logits,  timestep 从 1 到 t;
+            logits_tokn_t = logits[:, -1, :].squeeze(1) # (k, 1, vocab_size) --> (k, vocab_size)
+            cond_prob_tokn_t_mat = nn.Softmax(dim=-1)(logits_tokn_t) # (k, vocab_size)
 
+    elif isinstance(k_KV_Caches, list) and isinstance(k_KV_Caches[0], dict):
+        # 对应关系, k_seq_mat <行 对应 行> k_cond_prob_mat <行 对应 index> k_KV_Caches
 
+        cond_prob_tokn_t_mat = torch.zeros((k, vocab_size)) # (k, vocab_size)
+        for i in range(k):
+            # 对于 第 i 个序列, i = 0, 1, 2, ...k-1
+
+            # k_seq_mat[i:i+1, -1:] 取 i 行 最后一个元素, shape (1, 1). k_KV_Caches[i] 在第一步时, 可以为 {}
+            logits, k_KV_Caches[i] = net.decoder(k_seq_mat[i:i+1, -1:], src_enc_info, k_KV_Caches[i]) # logits(1, 1, vocab_size)
+            cond_prob_tokn_t_mat[i, :] = logits[0][0] # logits[0][0] 以 (vocab_size,) 的 1d tensor 填入 cond_prob_tokn_t_mat 第 i 行
+        
+        cond_prob_tokn_t_mat = nn.Softmax(dim=-1)(cond_prob_tokn_t_mat) # softmax on dim -1. shape (k, vocab_size)
+    
+    else:
+        raise ValueError(f'k_KV_Caches must be a list of dict')
+    
+    # beam search
     prob_seqs = k_cond_prob_mat.prod(dim=1, keepdim=True) * cond_prob_tokn_t_mat # (k, vocab_size)
 
     topk = torch.topk(prob_seqs.flatten(), k)
 
+    # 找到下一组 k 候选
     row_inds = torch.div(topk.indices, vocab_size, rounding_mode='floor') # (k, )
     col_inds = topk.indices % vocab_size # (k, )
 
+    # 下一组 k 候选的 条件概率矩阵
     k_cond_prob_tokn_t = cond_prob_tokn_t_mat[row_inds, col_inds] # (k, ), 从 timestep t 的 cond_prob_tokn_t_mat (k, vocab_size) 中选出的 top k的 条件概率
 
     # append selected top k's 条件概率 to k_cond_prob_mat
     next_k_cond_prob_mat = torch.cat([k_cond_prob_mat[row_inds], k_cond_prob_tokn_t.reshape(-1, 1)], dim=1) #(beam_size, t)
 
+    # 下一组 k 候选的 token 序列矩阵
     # append selected top k's token ID to k seqs
     next_k_seq_mat = torch.cat([k_seq_mat[row_inds], col_inds.reshape(-1,1)], dim=1) #(k, t+1)
 
-    return next_k_seq_mat.type(torch.int64), next_k_cond_prob_mat 
+    # # 下一组 k 候选的 k_KV_Caches
+    k_KV_Caches = list( itemgetter(*row_inds)(k_KV_Caches) )
+
+    return next_k_seq_mat.type(torch.int64), next_k_cond_prob_mat, k_KV_Caches
 
 
 
-def mask_before_eos(pred_tokens_matrix, eos):
-    bool_logits = pred_tokens_matrix != torch.tensor(eos)
-    prob_mask = bool_logits.type(torch.int32).cumprod(dim=1)
-    token_mask = (( prob_mask - torch.tensor(0.5) ) * 2 ).type(torch.int32)
-
-    return token_mask, prob_mask
 
 
+# 从 k 个 <bos>开始, 执行 t 步 beam search (1=1,2,...num_steps).
+# 由于最终选择的标准和 总长度 相关, 有两种寻找方案：
+#   记录 t 步中所有的中间结果, 在 k*t 个结果中, 计算分数, 选择最大的
+#   只记录 完成 t步后的 k 个最终结果. 在 k 个结果中, 计算分数, 选择最大的
+def beam_predict(
+        net, tgt_vocab, num_steps, src_inputs,
+        length_factor, device,
+        beam_size, parrallel, *args, **kwargs):
+    '''
+    net:
+    tgt_vocab: 生成序列的vocab. 需要用到其 序列生成的 begin-of-sequence tag 和 停止生成的end-of-sequence tag, 以及 vocab_size
+    num_steps: 模型 net 能捕捉的最大 序列关系 步长. 正整数
+    src_inputs: source 序列相关信息, 应该为 (src, src_valid_lens)
+        src shape: (1, num_steps)int64, timesteps: 1 -> num_steps
+        src_valid_lens shape: (1,)int32
+    length_factor: 生成序列的长度奖励, 长度越长奖励越大
+    device: 设备
+    beam_size: 束搜索 的 束宽
+    parrallel: 是否并行计算
+    '''
+    net.to(device)
+    src_inputs = [tensor.to(device) for tensor in src_inputs]
 
-def beam_predict(net, tgt_vocab, num_steps, enc_inputs, device, alpha, beam_size):
-    net.train() #in beam predict, need to predict on beam_size seqs simultaneously, so train mode is used
-    with torch.no_grad():
-        src_enc_seqs, src_valid_lens = net.decoder.init_state(net.encoder(*enc_inputs))# (1, num_steps, d_dim), (1, )
-        enc_info = (src_enc_seqs.repeat(beam_size, 1, 1), src_valid_lens.repeat(beam_size))
-        dec_X = torch.tensor( [tgt_vocab['<bos>'],], dtype=torch.int64, device=device).unsqueeze(0)
-        #first pred
-        logits, _ = net.decoder(dec_X, (src_enc_seqs, src_valid_lens)) #logits shape(batch_size=1, num_steps=1, vocab_size)
-        topk_1 = torch.topk(logits.flatten(), beam_size)
-        pred_token_mat_1 = topk_1.indices.unsqueeze(1).type(torch.int64) #(beam_size, 1)
-        cond_prob_mat_1 = nn.Softmax(dim=-1)(topk_1.values).unsqueeze(1) #(beam_size, 1)
-        all_pred_token_mat, all_cond_prob_mat = [pred_token_mat_1], [cond_prob_mat_1]
-        k_pred_token_mat, k_cond_prob_mat = pred_token_mat_1, cond_prob_mat_1
+    src_enc_info = net.decoder.init_state(net.encoder(*src_inputs))# src_enc_seqs, src_valid_lens: (1, num_steps, d_dim), (1, )
+    bos, eos, vocab_size = tgt_vocab['<bos>'], tgt_vocab['<eos>'], len(tgt_vocab)
 
-        for i in range(num_steps-1):
-            k_pred_token_mat, k_cond_prob_mat = beam_search(net, k_pred_token_mat, k_cond_prob_mat, enc_info, beam_size, len(tgt_vocab))
-            all_pred_token_mat.append(k_pred_token_mat)
-            all_cond_prob_mat.append(k_cond_prob_mat)
-        predseq_score_maps = {}
+    # 初始的 k_seq_mat 和 k_cond_prob_mat
+    if parrallel and net.training:
+        # enc_info = (src_enc_seqs.repeat(beam_size, 1, 1), src_valid_lens.repeat(beam_size))
+        # dec_X = torch.tensor( [tgt_vocab['<bos>'],], dtype=torch.int64, device=device).unsqueeze(0)
+        # #first pred
+        # logits, _ = net.decoder(dec_X, (src_enc_seqs, src_valid_lens)) #logits shape(batch_size=1, num_steps=1, vocab_size)
+        # topk_1 = torch.topk(logits.flatten(), beam_size)
+        # pred_token_mat_1 = topk_1.indices.unsqueeze(1).type(torch.int64) #(beam_size, 1)
+        # cond_prob_mat_1 = nn.Softmax(dim=-1)(topk_1.values).unsqueeze(1) #(beam_size, 1)
+        # all_pred_token_mat, all_cond_prob_mat = [pred_token_mat_1], [cond_prob_mat_1]
+        # k_pred_token_mat, k_cond_prob_mat = pred_token_mat_1, cond_prob_mat_1
+        raise NotImplementedError(f'parrallel mode not implemented')
+    else:
+        # init k_seq_mat:  (k, 1)int64, all bos
+        k_seq_mat = torch.tensor( [bos,]*beam_size, dtype=torch.int64, device=device).reshape(beam_size, 1)
+        # init k_cond_prob_mat:  (k, 1)float, all 1.
+        k_cond_prob_mat = torch.tensor( [1.,]*beam_size,  device=device).reshape(beam_size, 1)
+        # init k_KV_Caches:  (k, )list of dict, all {}
+        k_KV_Caches = [{},]*beam_size
+    
+    for _ in range(1, num_steps+1):
+        # 对于第 t 次 infer:
+        # k_seq_mat: (k, t)int64, 包含 timestep 0 至 t-1, k 条 Seq(0至t-1), 每条作为行. 对于第1步predict, k_seq_mat 是 k 条  timestep=0的<bos>
+        # k_cond_prob_mat: (k, t), 包含 timestep 0 至 t-1, k 条 Cond Prob序列(0至t-1), 每条作为行. timestep=0, Cond Prob=1
 
-        for i in range(num_steps):
-            k_pred_tokens = all_pred_token_mat[i] # k_pred_tokens shape: (k, i+1)
-            related_cond_probs = all_cond_prob_mat[i] # related_cond_probs shape: (k, i+1)
-            token_mask, prob_mask = mask_before_eos(k_pred_tokens, eos=tgt_vocab['<eos>'])
-            k_pred_tokens = (k_pred_tokens * token_mask).type(torch.int64)
-            log_cond_probs = (torch.log(related_cond_probs) * prob_mask)
-            for j in range(beam_size):
-                pred_seq = ' '.join(tgt_vocab.to_tokens([token for token in k_pred_tokens[j, :] if token >= 0]))
-                valid_length = prob_mask[j, :].sum().item()
-                if valid_length == 0:
-                    continue
-                predseq_score_maps[pred_seq] = log_cond_probs[j, :].sum().item() * math.pow(valid_length, -alpha)
+        # k_KV_Caches: list of dicts, 考虑每个 dict, 
+        #   对于 第 1 次predict, 为空 {}
+        #   对于第 t > 1 次predict, keys 是 block_inds, values 是 tensors shape as (1, t-1, d_dim), i-1 维包含 timestep 0 到 i-2
 
-    return max(predseq_score_maps, key= lambda x: predseq_score_maps[x]), predseq_score_maps
+        k_seq_mat, k_cond_prob_mat, k_KV_Caches = beam_search_single_step(
+            net, vocab_size, src_enc_info,
+            beam_size, parrallel,
+            k_seq_mat, k_cond_prob_mat, k_KV_Caches)
+        
+    # k_seq_mat: (k, num_steps+1)int64, 包含 timestep 0 至 num_steps
+    # k_cond_prob_mat: (k, num_steps+1), 包含 timestep 0 至 num_steps, k 条 Cond Prob序列(0至num_steps)
+
+    # 对于 k_seq_mat 中的每一行, 找到 <eos>. 其前面的 tokens 才是 valid output. 如果没有 <eos>, 那么所有 都是 valid output
+    eos_bool_mat = k_seq_mat == eos # (k, num_steps+1)bool, 等于 eos 的地方为 True, 其余为 False
+    eos_exist_arr = eos_bool_mat.any(dim=1) # (k,), 每行序列中是否有 eos 得到的 bool array
+
+    eos_indices = eos_bool_mat.int().argmax(dim=1) # (k,) 每行而言, eos处在哪个位置. 不存在 eos 的行, 该值是 0.
+
+    # 由于开头有 bos 存在, 故这个值-1 等于 该行valid token个数（不包括bos和eos）
+    valid_lens = eos_indices - 1 # (k,)
+    valid_lens[~eos_exist_arr] = num_steps # (k,) 对于 不存在 eos 的行, valid token 数量就是 num_steps
+
+    # 计算每行序列的 score = sum of {log conditional probs on valid area} / (valid_length^length_factor)
+    k_seq_mat = k_seq_mat[:, 1:] # (k, num_steps)
+    log_cond_probs = torch.log(k_cond_prob_mat[:, 1:]) # (k, num_steps)
+
+    valid_area_mask = torch.arange(0, num_steps, device=device).unsqueeze(0) < valid_lens.unsqueeze(1) # (k, num_steps)
+    valid_area = valid_area_mask.int() # (k, num_steps), 1 for valid area, 0 for invalid
+    
+    scores = (log_cond_probs * valid_area).sum(dim=1) / torch.pow(valid_lens, length_factor) # (k, ) / (k, )
+
+    # 选择分数最大的
+    max_ind = scores.argmax()
+
+    output_tokenIDs = k_seq_mat[max_ind, :valid_lens[max_ind]].tolist() # 取 k_seq_mat 分数最高的 行, 以及该行 前 valid_lens[mx_ind] 部分(即valid 部分)
+
+    return ' '.join(tgt_vocab.to_tokens(output_tokenIDs)), scores[max_ind]
+
+
+
+
 
 
 
 class sentenceTranslator(easyPredictor):
-    def __init__(self, search_mode='greedy', bleu_k=2, device=None, beam_size=3, alpha=0.75):
+    def __init__(self, search_mode='greedy', bleu_k=2, device=None, beam_size=3, length_factor=0.75):
         super().__init__()
         if device is not None and torch.cuda.is_available():
             self.device = device
@@ -182,7 +275,7 @@ class sentenceTranslator(easyPredictor):
                 f'search_mode {search_mode} not implemented. Should be one of "greedy" or "beam"'
                 )
         
-        self.alpha = alpha # alpha越大, 输出越偏好长序列
+        self.length_factor = length_factor # length_factor 越大, 输出越偏好长序列
         self.eval_fn = bleu
 
     def predict(self, src_sentence, net, src_vocab, tgt_vocab, num_steps):
@@ -192,7 +285,7 @@ class sentenceTranslator(easyPredictor):
 
         enc_inputs = str_to_enc_inputs(self.src_sentence, src_vocab, num_steps, self.device)
         net.to(self.device)
-        self.pred_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, enc_inputs, self.device, self.alpha, self.beam_size)
+        self.pred_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, enc_inputs, self.device, self.length_factor, self.beam_size)
 
         return self.pred_sentence
 
