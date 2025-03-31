@@ -1,8 +1,8 @@
 
 import typing as t
 from .TextPreprocess import count_corpus
-
-
+import json
+import os
 
 
 class Vocab:
@@ -72,3 +72,35 @@ class Vocab:
     @property
     def token_freqs(self) -> t.List[t.Tuple]:
         return self._token_freqs
+    
+    def save(self, dir, format='json'):
+        # 字典分两个部分保存在文件夹 dir: idx to token 和 token to idx
+        
+        if format == 'json':
+            # idx to token 命名为 idx2token, 以 format 格式保存 一个 list 对象
+            with open(os.path.join(dir, 'idx2token.json'), 'w') as f:
+                json.dump(self.idx_to_token, f)
+
+            # token to idx 命名为 token2idx, 以 format 格式保存一个 dict 对象
+            with open(os.path.join(dir, 'token2idx.json'), 'w') as f:
+                json.dump(self.token_to_idx, f)
+
+        else:
+            raise NotImplementedError(f'format {format} not implemented')
+    
+    def load(self, dir, format='json'):
+        # 字典分两个部分保存在文件夹 dir: idx to token 和 token to idx
+
+        if format == 'json':
+            # 分别 load 到 self.idx_to_token 和 self.token_to_idx
+            with open(os.path.join(dir, 'idx2token.json'), 'r') as f:
+                self.idx_to_token = json.load(f)
+            
+            with open(os.path.join(dir, 'token2idx.json'), 'r') as f:
+                self.token_to_idx = json.load(f)
+            
+        else:
+            raise NotImplementedError(f'format {format} not implemented')
+        
+        # _token_freqs 本来该是 list of (token, frequency). 从 dir load 的vocab, 所有 frequency 初始化为 0
+        self._token_freqs = [ (token, 0) for token in self.idx_to_token]

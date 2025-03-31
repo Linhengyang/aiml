@@ -1,4 +1,3 @@
-import os
 from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator, metric_summary
 from ...Compute.VisualizeTools import Animator
 import yaml
@@ -6,7 +5,6 @@ import yaml
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
-online_log_dir, proj_name = configs['online_log_dir'], configs['proj_name']
 
 
 class transformerEpochEvaluator(epochEvaluator):
@@ -15,7 +13,7 @@ class transformerEpochEvaluator(epochEvaluator):
     reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集
     eval_cnts = eval_cnt_in_train # 评价当前model, 需要validate data或infer.避免次数太多
 
-    def __init__(self, num_epochs, log_fname, scalar_names=['loss', ], dim_accum=2,
+    def __init__(self, num_epochs, logfile_path, scalar_names=['loss', ], dim_accum=2,
                  visualizer=None, verbose=False):
 
         assert num_epochs >= max(self.reveal_cnts, self.eval_cnts), \
@@ -27,7 +25,7 @@ class transformerEpochEvaluator(epochEvaluator):
         self.reveal_accumulator, self.eval_accumulator = Accumulator(dim_accum), Accumulator(dim_accum)
 
         # 设定 日志文件 地址, 并打印 train begin
-        self.log_file = os.path.join(online_log_dir, proj_name, log_fname)
+        self.log_file = logfile_path
         with open(self.log_file, 'w') as f:
             print('train begin', file=f)
         
@@ -77,7 +75,7 @@ class transformerEpochEvaluator(epochEvaluator):
 
     # @ record values for scalars
     def evaluate_model(self, net, loss, valid_iter, num_batches=None):
-        if self.eval_flag: # 如果此次 epoch 确定要 evaluate network
+        if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
 
             for i, (net_inputs_batch, loss_inputs_batch) in enumerate(valid_iter):
                 # net_inputs_batch = (X, Y_frontshift1, X_valid_lens)
@@ -97,7 +95,7 @@ class transformerEpochEvaluator(epochEvaluator):
 
 
     def epoch_metric_cast(self):
-        '''log file path: ../logs/transformer/xxxx.txt'''
+
         loss_avg, eval_loss_avg = None, None
 
         # 若当前 epoch 需要 reveal train, 停止计时, reveal累加器二位(train loss, num_tokens)
@@ -121,6 +119,7 @@ class transformerEpochEvaluator(epochEvaluator):
             
             if self.verbose_flag:
                 print(reveal_log)
+        
         
         # 若当前 epoch 需要 evaluate model, reveal累加器二位(validation loss, num_tokens)
         if self.eval_flag:

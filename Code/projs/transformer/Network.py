@@ -3,7 +3,7 @@ from ...Base.RootLayers.PositionalEncodings import TrigonoAbsPosEnc, LearnAbsPos
 from ...Modules._transformer import TransformerEncoderBlock, TransformerDecoderBlock
 import torch.nn as nn
 import math
-
+import torch
 
 
 
@@ -24,7 +24,8 @@ class TransformerEncoder(Encoder):
         super().__init__()
         self.num_hiddens = num_hiddens
         self.embedding = nn.Embedding(vocab_size, num_hiddens)
-        self.pos_encoding = TrigonoAbsPosEnc(num_hiddens, dropout)
+        self.dropout = nn.Dropout(dropout)
+        self.pos_encoding = TrigonoAbsPosEnc(num_hiddens)
         self.blks = nn.Sequential()
         for i in range(num_blk):
             cur_blk = TransformerEncoderBlock(num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
@@ -32,9 +33,19 @@ class TransformerEncoder(Encoder):
 
     def forward(self, src, src_valid_lens):
         # src shape: (batch_size, num_steps)int64, timestep: 1 -> num_steps
+        _, num_steps = src.shape
+
         # src_valid_lens shape: (batch_size,)int32
-        src_embd = self.embedding(src)
-        src_enc = self.pos_encoding(src_embd * math.sqrt(self.num_hiddens)) # 在embed后, 位置编码前, 将embed结果scale sqrt(d)
+
+        # src_embd: shape (batch_size, num_steps, num_hiddens)
+        src_embd = self.embedding(src) * math.sqrt(self.num_hiddens) # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
+
+        # pos_embd: (1, num_steps, num_hiddens)
+        # 1 到 num_steps, 所有位置都需要position embed. 0 是给 <bos> 的. src里没有bos
+        position_ids = torch.arange(1, num_steps+1, dtype=torch.int64)
+
+        # input embeddings + position embedding
+        src_enc = self.dropout(src_embd + self.pos_encoding(position_ids))
 
         for blk in self.blks:
             src_enc = blk(src_enc, src_valid_lens)
@@ -57,34 +68,68 @@ class TransformerDecoder(AttentionDecoder):
         super().__init__()
         self.num_hiddens = num_hiddens
         self.embedding = nn.Embedding(vocab_size, num_hiddens)
-        self.pos_encoding = TrigonoAbsPosEnc(num_hiddens, dropout)
+        self.pos_encoding = TrigonoAbsPosEnc(num_hiddens)
+        self.dropout = nn.Dropout(dropout)
         self.blks = nn.Sequential()
         for i in range(num_blk):
             cur_blk = TransformerDecoderBlock(i, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
             self.blks.add_module("decblock"+str(i), cur_blk)
         self.dense = nn.Linear(num_hiddens, vocab_size)
 
-    def init_state(self, enc_outputs):
-        return enc_outputs # encoder returns encoded_src, src_valid_lens
 
-    def forward(self, tgt_query, src_enc_info, KV_Caches=None):
-        # train: tgt_query shape: (batch_size, num_steps)int64, timestep 从 0 到 num_steps-1
+    def init_state(self, enc_outputs):
+        # encoder returns encoded_src, src_valid_lens
+
+        # train: src_enc_info = (src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)]
+        # infer: src_enc_info = (src_enc, src_valid_lens): [(1, num_stepss, d_dim), (1,)]
+        src_enc_info = enc_outputs
+
+        return src_enc_info
+
+
+    def forward(self, tgt_dec_input, src_enc_info, KV_Caches=None):
+        # train: tgt_dec_input shape: (batch_size, num_steps)int64, timestep 从 0 到 num_steps-1
         #        src_enc_info = (src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)]
         #        KV_Caches: None
 
-        # infer: tgt_query shape: (1, 1)int64, timestep 是 i (i = 1, 2, ..., num_steps)  即第i次infer
-        #        src_enc_info = (src_enc, src_valid_lens): [(1, num_stepss, d_dim), (1,)]
-        #        KV_Caches: Dict with keys: block_ind, values: tensors shape as (1, i, d_dim), timestep 0 到 i-1
+        #        position_ids: 训练阶段时, position_ids 应该是 tensor([0, 1, ..., num_steps-1])
 
-        tgt_embd = self.embedding(tgt_query)
-        tgt_query = self.pos_encoding(tgt_embd * math.sqrt(self.num_hiddens))
+        # 对于第i次infer: i = 1, 2, ..., num_steps
+        #        tgt_dec_input shape: (1, 1)int64, 其 timestep 是 i-1, 前向的output的timestep 是 i
+        #        src_enc_info = (src_enc, src_valid_lens): [(1, num_stepss, d_dim), (1,)]
+        #        input KV_Caches: 
+        #           Dict with keys: block_ind,
+        #           values: 对于第 1 次infer, KV_Caches 为 空
+        #                   对于第 i > 1 次infer, KV_Caches 是 tensors shape as (1, i-1, d_dim), i-1 维包含 timestep 0 到 i-2
+
+        #        position_ids: 推理时阶段时, 对于第 1 次infer, position_ids 应该是 tensor([0]), 因为此时 tgt_dec_input 是 <bos>, KV_Caches 为 {}
+        #                      对于第 i > 1 次infer, position_ids = tensor([i-1]), 因为此时 tgt_dec_input position 是 i-1, 即 KV_Cacues 的 value 的第二维度
+        
+        # tgt_dec_input_embd: shape (batch_size, num_steps, num_hiddens)
+        tgt_dec_input_embd = self.embedding(tgt_dec_input) * math.sqrt(self.num_hiddens) # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
+
+        # 训练模式
+        if self.training:
+            _, num_steps = tgt_query.shape
+            position_ids = torch.arange(0, num_steps, dtype=torch.int64) # (num_steps,)
+        # 推理模式
+        else:
+            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].dim(1) ], dtype=torch.int64) # (1,)
+
+        # input embeddings + position embedding
+        tgt_query = self.dropout(tgt_dec_input_embd + self.pos_encoding(position_ids))
 
         # Decoder Block 的输入 tgt_query, src_enc_info, KV_Caches
         for blk in self.blks:
+            # 循环过程中, 每次循环, KV_Caches 的 values tensor 全部被更新一遍
             tgt_query, KV_Caches = blk(tgt_query, src_enc_info, KV_Caches)
         
-        #train: output[0] shape: (batch_size, num_steps, vocab_size) tensor of logits, output[2]: None
-        #infer: output[0] shape: (1, 1, vocab_size) tensor of logits, output[2]: dict of (1, cur_infer_step i, d_dim) tensor
+        #train: output[0] shape: (batch_size, num_steps, vocab_size)tensor of logits,  timestep 从 1 到 num_steps;
+        #       output[1]: None
+        #infer: output[0] shape: (1, 1, vocab_size)tensor of logits, 对于第i次infer, timestep 是 i;
+        #       output[1]: dict of 
+        #                      keys as block_indices
+        #                      values as (1, i, d_dim) tensor, i 维 包含 timestep 0-i-1, 实际上就是 input KV_Caches 添加 timestep i-1 的 tgt_query
         return self.dense(tgt_query), KV_Caches
 
 

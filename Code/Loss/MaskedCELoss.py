@@ -15,7 +15,8 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
     
     About MaskedSoftmaxCELoss
     input:
-        3. valid_lens, tensor of valid lens of label. Only losses from valid area will be considered.
+        1. 2. inheritting from nn.CrossEntropyLoss
+        3. valid_lens, tensor of valid lens of pred/label. Only losses from valid area will be considered.
            shape: (batch_size,)
     output:
 

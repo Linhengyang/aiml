@@ -29,5 +29,5 @@ transformer's self-att层
     但是在infer时, 没办法并行化这个操作
     单步: 输入 time i-1 的 token(上一步输出的or原始的), 作为QUERY; time 0 到 i-1 的所有token(输出的+原始的), 作为KEYS&VALUES, 输出time i的token
 
-    T步: 重复单步T次, i从1到T. 和train不一样, train时可以直接输入time 0到t-1的sequence作为X, 而infer时只能输入 time i-1 token作为X.
+    T步: 重复单步T次, i从1到T. 和train不一样, train时可以直接输入time 0到T-1的sequence作为X, 而infer时只能输入 time i-1 token作为X.
     需要在一个独立的外部变量中, 输入time 0 到 t-1 的token sequence.

@@ -138,14 +138,16 @@ class TransformerDecoderBlock(nn.Module):
 
             KVs, KV_Caches = tgt_query, None # 自注意力. train过程中不需要 kv_caches
             # 用 mask 限制 kv valid 部分, 实现train过程中,
-            # 从0-T-1 T并行生成 1-T, 保证 step i 的 qkv timestepe分别是 i-1, 0至i-1, 0至i-1（限制了kv的valid len是i） 
+            # 从0-T-1 T并行生成 1-T, 保证 step i 的 qKV timestepe分别是 q:i-1, K:0至i-1, V:0至i-1（限制了kv的valid len是i） 
             mask = torch.arange(1, num_steps+1, dtype=torch.int32, device=tgt_query.device).repeat(batch_size, 1)
         
         else:
             # infer过程中, tgt_query 是一个 shape 为 (1, 1, d_dim) 的tensor. 对于第i次infer, tgt_query 的时间步是 i-1
             # 代表 target sequence hat timestep i-1   以此 tgt_query 为 q, target sequence hat timestep 0 - i-1 为KV, 生成 target sequence hat timestep i
             assert type(KV_Caches) == dict, f'in infer mode, a dictionary as KV_Caches must be input'
+
             # 对于第i次infer, tgt_query 的时间步是 i-1, KV 需要 target sequence hat timestep 0 - i-1, 所以需要额外输入 target sequence hat timestep 0 - i-2
+            # 对 KV_Caches 当前 block 对应的 KV_Caches tensor 作更新
             try:
                 # i = 2, ..., num_steps
                 KV_Caches[self.blk_ind] = torch.cat([KV_Caches[self.blk_ind], tgt_query], dim=1) # (1, i-2, d_dim) + (1, 1, d_dim) = (1, i-1, d_dim)
@@ -155,10 +157,10 @@ class TransformerDecoderBlock(nn.Module):
             
             KVs, mask = KV_Caches[self.blk_ind], None # 用所有 已经保存的kv_caches 加上最新输入的信息(即 tgt_query) 作KV. infer过程中不需要mask
         
-        # target info 深度表达
+        # target info 深度表达, Y shape same with tgt_query
         Y = self.addlnorm1(tgt_query, self.attention1(tgt_query, KVs, KVs, mask))
         
-        # target info 和 source info 信息交合
+        # target info 和 source info 信息交合, Z shape same with tgt_query
         Z = self.addlnorm2(Y, self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens))
 
         return self.addlnorm3(Z, self.PosFFN(Z)), KV_Caches # 第一个输出的 shape 和 tgt_query 相同
