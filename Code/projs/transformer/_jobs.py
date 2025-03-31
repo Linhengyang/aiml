@@ -12,13 +12,57 @@ import yaml
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
+################## directories ##################
 vocabs_dir = os.path.join( [configs['cache_dir'], configs['proj_name'], '/vocabs'] )
 model_proj_dir = os.path.join( [configs['model_dir'], configs['proj_name']] )
+# set train log file path / network resolve output path / params save path / source&targe vocabs path
+log_proj_dir = os.path.join( [configs['log_dir'], configs['proj_name']] )
+# directories for vocabs
+src_vocab_dir = os.path.join([vocabs_dir, '/source'])
+tgt_vocab_dir = os.path.join([vocabs_dir, '/target'])
+
+for dir in [vocabs_dir, model_proj_dir, log_proj_dir, src_vocab_dir, tgt_vocab_dir]:
+    if not os.path.exists(dir):
+        os.makedirs( dir )
+        print(f"directory {dir} created")
+    else:
+        print(f"directory {dir} existed")
+
+
+
+################## data-params ##################
+num_steps = configs['num_steps']
+
+
+
+
+
+
+
+################## network-params ##################
+num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 3, 4, 512, 0.1, False, 128
+
+
+
+
+
+
+
+
+
+
+################## train-params ##################
+num_epochs, batch_size, lr = 200, 512, 0.0005
+
+
+
+
+
+
+
 
 
 def train_job():
-    # set train log file path / network resolve output path / params save path / source&targe vocabs path
-    log_proj_dir = os.path.join( [configs['log_dir'], configs['proj_name']] )
 
     # [timetag]
     from datetime import datetime
@@ -31,31 +75,28 @@ def train_job():
     saved_params_fpath = os.path.join( [model_proj_dir, f'saved_params_{now_minute}.txt'] )
 
     # build datasets
-    trainset = seq2seqDataset(configs['train_data'], num_steps=10)
+    trainset = seq2seqDataset(configs['train_data'], num_steps=num_steps)
 
     # save source and target vocabs
     src_vocab = trainset.src_vocab
     tgt_vocab = trainset.tgt_vocab
 
     # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
-    src_vocab.save( os.path.join([vocabs_dir, '/source']) )
-
+    src_vocab.save( src_vocab_dir )
     # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json
-    tgt_vocab.save( os.path.join([vocabs_dir, '/target']) )
+    tgt_vocab.save( tgt_vocab_dir )
 
     # design net & loss
-    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.2, False, 64
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
                  "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     
-    transenc = TransformerEncoder(vocab_size=len(trainset.src_vocab), **test_args)
-    transdec = TransformerDecoder(vocab_size=len(trainset.tgt_vocab), **test_args)
+    transenc = TransformerEncoder(vocab_size=len(src_vocab), **test_args)
+    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
 
     net = Transformer(transenc, transdec)
     loss = MaskedSoftmaxCELoss()
 
     # init trainer
-    num_epochs, batch_size, lr = 100, 128, 0.0005
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
 
     trainer.set_device(torch.device('cuda')) # set the device
@@ -84,23 +125,21 @@ def train_job():
 
 
 def infer_job():
-    num_steps = 10
+    num_steps = num_steps
 
     # load vocabs
     from ....Code.Utils.Text.Vocabulize import Vocab
     src_vocab, tgt_vocab = Vocab(), Vocab()
 
     # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
-    src_vocab.load( os.path.join([vocabs_dir, '/source']) )
-
+    src_vocab.load( src_vocab_dir )
     # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json
-    tgt_vocab.load( os.path.join([vocabs_dir, '/target']) )
+    tgt_vocab.load( tgt_vocab_dir )
 
     # set device
     device = torch.device('cpu')
 
     # construct model
-    num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
                  "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     
@@ -108,17 +147,17 @@ def infer_job():
     transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
     net = Transformer(transenc, transdec)
 
-
     # load params
     latest_trained_net_path = max( os.listdir( model_proj_dir ) )
     net.load_state_dict(torch.load(latest_trained_net_path, map_location=device))
+    net.eval()
 
     # set predictor
     search_mode = 'beam'
-    if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用 train mode 网络. 而 train mode 的网络在每次推理时会产生随机性
-        search_mode = 'greedy'
+    # if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用 train mode 网络. 而 train mode 的网络在每次推理时会产生随机性
+    #     search_mode = 'greedy'
     
-    translator = sentenceTranslator(search_mode=search_mode, device=device, alpha=5) #加大对长句的奖励
+    translator = sentenceTranslator(search_mode=search_mode, device=device, length_factor=5) #加大对长句的奖励
 
     # predict
     src_sentence = 'i\'m home .'
