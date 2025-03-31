@@ -128,7 +128,7 @@ class TransformerDecoderBlock(nn.Module):
         if self.training:
             # train 过程中, tgt_query 是一个 shape 为 (batch_size, num_steps, d_dim) 的tensor. 时间步为 0 至 num_steps-1
             # 代表 target sequence timestep 0 至 num_steps-1
-            assert tgt_query.shape[-1] == src_enc_seqs.tgt_query[-1],\
+            assert tgt_query.shape[-1] == src_enc_seqs.shape[-1],\
                 f'training: enc output & dec input block {self.blk_ind} are not in same shape'
             
             batch_size, num_steps = tgt_query.shape[:-1]
