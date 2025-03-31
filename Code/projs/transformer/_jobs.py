@@ -13,13 +13,13 @@ import yaml
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## directories ##################
-vocabs_dir = os.path.join( [configs['cache_dir'], configs['proj_name'], '/vocabs'] )
-model_proj_dir = os.path.join( [configs['model_dir'], configs['proj_name']] )
+vocabs_dir = os.path.join( configs['cache_dir'], configs['proj_name'], '/vocabs' )
+model_proj_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
-log_proj_dir = os.path.join( [configs['log_dir'], configs['proj_name']] )
+log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 # directories for vocabs
-src_vocab_dir = os.path.join([vocabs_dir, '/source'])
-tgt_vocab_dir = os.path.join([vocabs_dir, '/target'])
+src_vocab_dir = os.path.join(vocabs_dir, '/source')
+tgt_vocab_dir = os.path.join(vocabs_dir, '/target')
 
 for dir in [vocabs_dir, model_proj_dir, log_proj_dir, src_vocab_dir, tgt_vocab_dir]:
     if not os.path.exists(dir):
@@ -68,11 +68,11 @@ def train_job():
     from datetime import datetime
     now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
     # /workspace/logs/[proj_name]/train_log_[timetag].txt, defined_net_[timetag].txt
-    train_logs_fpath = os.path.join( [log_proj_dir, f'train_log_{now_minute}.txt'] )
-    defined_net_fpath = os.path.join( [log_proj_dir, f'defined_net_{now_minute}.txt'] )
+    train_logs_fpath = os.path.join( log_proj_dir, f'train_log_{now_minute}.txt' )
+    defined_net_fpath = os.path.join( log_proj_dir, f'defined_net_{now_minute}.txt' )
 
     # /workspace/model/[proj_name]/saved_params[timetag].params
-    saved_params_fpath = os.path.join( [model_proj_dir, f'saved_params_{now_minute}.txt'] )
+    saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.txt' )
 
     # build datasets
     trainset = seq2seqDataset(configs['train_data'], num_steps=num_steps)
