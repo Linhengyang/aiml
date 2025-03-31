@@ -62,7 +62,7 @@ def greedy_predict(
             #                      values as (1, i, d_dim) tensor, i 维 包含 timestep 0-i-1, 实际上就是 input KV_Caches 添加 timestep i-1 的 tgt_query
             Y_hat, KV_Caches = net.decoder(tgt_query, src_enc_info, KV_Caches)
 
-            pred_tokenIDX = Y_hat.argmax(dim=-1).item()
+            pred_tokenIDX = Y_hat.argmax(dim=-1).item() # .item() 把值从 device 移到cpu上
 
             if pred_tokenIDX == tgt_vocab['<eos>']:
                 break
@@ -120,7 +120,7 @@ def beam_search_single_step(net, vocab_size, src_enc_info, k, parrallel,
     elif isinstance(k_KV_Caches, list) and isinstance(k_KV_Caches[0], dict):
         # 对应关系, k_seq_mat <行 对应 行> k_cond_prob_mat <行 对应 index> k_KV_Caches
 
-        cond_prob_tokn_t_mat = torch.zeros((k, vocab_size)) # (k, vocab_size)
+        cond_prob_tokn_t_mat = torch.zeros((k, vocab_size), device=net.device) # (k, vocab_size)
         for i in range(k):
             # 对于 第 i 个序列, i = 0, 1, 2, ...k-1
 
@@ -204,9 +204,10 @@ def beam_predict(
         k_seq_mat = torch.tensor( [bos,]*beam_size, dtype=torch.int64, device=device).reshape(beam_size, 1)
         # init k_cond_prob_mat:  (k, 1)float, all 1.
         k_cond_prob_mat = torch.tensor( [1.,]*beam_size,  device=device).reshape(beam_size, 1)
-        # init k_KV_Caches:  (k, )list of dict, all {}
+        # init k_KV_Caches:  (k, )list of dict, all {}.
         k_KV_Caches = [{},]*beam_size
-    
+        # _transformer block在forward的时候,会将KV_Caches的tensor生成在tgt_query相同的device上
+
     for _ in range(1, num_steps+1):
         # 对于第 t 次 infer:
         # k_seq_mat: (k, t)int64, 包含 timestep 0 至 t-1, k 条 Seq(0至t-1), 每条作为行. 对于第1步predict, k_seq_mat 是 k 条  timestep=0的<bos>
@@ -244,11 +245,12 @@ def beam_predict(
     scores = (log_cond_probs * valid_area).sum(dim=1) * torch.pow(valid_lens, -length_factor) # (k, ) * (k, )
 
     # 选择分数最大的
-    max_ind = scores.argmax()
+    max_ind = scores.argmax().item() # .item() 把 max_ind 在cpu上
 
     output_tokenIDs = k_seq_mat[max_ind, :valid_lens[max_ind]].tolist() # 取 k_seq_mat 分数最高的 行, 以及该行 前 valid_lens[mx_ind] 部分(即valid 部分)
+    # .tolist() 移动数据到 cpu 上
 
-    return ' '.join(tgt_vocab.to_tokens(output_tokenIDs)), scores[max_ind]
+    return ' '.join(tgt_vocab.to_tokens(output_tokenIDs)), scores[max_ind].item()
 
 
 

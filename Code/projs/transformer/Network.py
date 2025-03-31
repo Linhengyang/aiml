@@ -115,10 +115,11 @@ class TransformerDecoder(AttentionDecoder):
         # 训练模式: input 的 timesteps 是从 0(bos) 到 num_steps-1
         if self.training:
             _, num_steps = tgt_query.shape
-            position_ids = torch.arange(0, num_steps, dtype=torch.int64) # (num_steps,)
+            position_ids = torch.arange(0, num_steps, dtype=torch.int64, device=tgt_dec_input.device) # (num_steps,)
         # 推理模式: 对于第i次infer, input 的 timestep 就是 i-1, 而这个信息可以从 KV_Caches 的values 中的第二个维度(dim=1)得到
         else:
-            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].dim(1) ], dtype=torch.int64) # (1,)
+            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].dim(1) ],
+                                        dtype=torch.int64, device=tgt_dec_input.device) # (1,)
 
         # input embeddings + position embedding
         tgt_query = self.dropout(tgt_dec_input_embd + self.pos_encoding(position_ids))
