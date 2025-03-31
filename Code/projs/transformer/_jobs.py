@@ -13,16 +13,19 @@ import yaml
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## directories ##################
-vocabs_dir = os.path.join( configs['cache_dir'], configs['proj_name'], '/vocabs' )
+vocabs_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'vocabs' )
+
 model_proj_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
 log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 # directories for vocabs
-src_vocab_dir = os.path.join(vocabs_dir, '/source')
-tgt_vocab_dir = os.path.join(vocabs_dir, '/target')
+src_vocab_dir = os.path.join(vocabs_dir, 'source')
+tgt_vocab_dir = os.path.join(vocabs_dir, 'target')
 
 for dir in [vocabs_dir, model_proj_dir, log_proj_dir, src_vocab_dir, tgt_vocab_dir]:
+    print(dir)
     if not os.path.exists(dir):
+        print(f"directory {dir} not existed")
         os.makedirs( dir )
         print(f"directory {dir} created")
     else:
