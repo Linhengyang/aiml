@@ -241,7 +241,7 @@ def beam_predict(
     valid_area_mask = torch.arange(0, num_steps, device=device).unsqueeze(0) < valid_lens.unsqueeze(1) # (k, num_steps)
     valid_area = valid_area_mask.int() # (k, num_steps), 1 for valid area, 0 for invalid
     
-    scores = (log_cond_probs * valid_area).sum(dim=1) / torch.pow(valid_lens, length_factor) # (k, ) / (k, )
+    scores = (log_cond_probs * valid_area).sum(dim=1) * torch.pow(valid_lens, -length_factor) # (k, ) * (k, )
 
     # 选择分数最大的
     max_ind = scores.argmax()
