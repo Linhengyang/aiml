@@ -109,7 +109,7 @@ def train_job():
     trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=False)) # set the epoch evaluator
 
     # set trainer
-    check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
+    check_flag = trainer.resolve_net(need_resolve=False)## check the net & loss
     if check_flag:
         trainer.log_topology(defined_net_fpath)## print the defined topology
         trainer.init_params()## init params
