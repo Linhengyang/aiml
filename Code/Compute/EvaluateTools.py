@@ -84,7 +84,7 @@ def metric_summary(
         metric_names:t.List[str], 
         unit_names:t.List[str], 
         round_ndigits:t.List[int|None], 
-        separator='/t'
+        separator='\t'
         ) -> str:
 
     names = [metric + "(" + unit + "): " for metric, unit in zip(metric_names, unit_names)]
