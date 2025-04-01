@@ -78,12 +78,16 @@ def train_job():
     saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.txt' )
 
     # build datasets
-    trainset = seq2seqDataset(configs['train_data'], num_steps=num_steps)
+    full_dataset = seq2seqDataset(configs['full_data'], num_steps=num_steps)
 
     # save source and target vocabs
-    src_vocab = trainset.src_vocab
-    tgt_vocab = trainset.tgt_vocab
+    src_vocab = full_dataset.src_vocab
+    tgt_vocab = full_dataset.tgt_vocab
 
+    # validset & testset
+    valid_dataset = seq2seqDataset(configs['valid_data'], num_steps=num_steps)
+    test_dataset = seq2seqDataset(configs['test_data'], num_steps=num_steps)
+    
     # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
     src_vocab.save( src_vocab_dir )
     # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json
@@ -103,13 +107,13 @@ def train_job():
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
 
     trainer.set_device(torch.device('cuda')) # set the device
-    trainer.set_data_iter(trainset, None, None) # set the data iters
+    trainer.set_data_iter(full_dataset, valid_dataset, test_dataset) # set the data iters
     trainer.set_optimizer(lr) # set the optimizer
     trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
     trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True)) # set the epoch evaluator
 
     # set trainer
-    check_flag = trainer.resolve_net(need_resolve=False)## check the net & loss
+    check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
     if check_flag:
         trainer.log_topology(defined_net_fpath)## print the defined topology
         trainer.init_params()## init params
