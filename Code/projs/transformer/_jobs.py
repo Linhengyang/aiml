@@ -106,7 +106,7 @@ def train_job():
     trainer.set_data_iter(trainset, None, None) # set the data iters
     trainer.set_optimizer(lr) # set the optimizer
     trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
-    trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=False)) # set the epoch evaluator
+    trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True)) # set the epoch evaluator
 
     # set trainer
     check_flag = trainer.resolve_net(need_resolve=False)## check the net & loss
