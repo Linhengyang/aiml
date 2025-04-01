@@ -16,3 +16,7 @@ def tensors2batch_iter(data_tensors: Tensor, batch_size: int, is_train=True):
     """
     dataset = data.TensorDataset(*data_tensors) # 将长度相同的tensors组装成tensorDataset, 取i操作[i]直接返回tuple of 各tensors取i操作[i]的结果
     return data.DataLoader(dataset, batch_size, shuffle=is_train) # 返回minibatch的loader, 每个循环返回batch_size个tuple of 各tensors取i操作的结果
+
+
+
+
