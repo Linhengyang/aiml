@@ -76,15 +76,17 @@ also recommend to have:
     │   │   └── _vit.py
     │   ├── Utils
     │   │   ├── Common
-    │   │   │   ├── DataAssemble.py
-    │   │   │   ├── DataTransform.py
     │   │   │   ├── Mask.py
     │   │   │   └── SeqOperation.py
+    │   │   ├── Data
+    │   │   │   ├── DataAssemble.py
+    │   │   │   ├── DataSplit.py
+    │   │   │   └── DataTransform.py
     │   │   ├── Text
     │   │   │   ├── BytePairEncoding.py
     │   │   │   ├── TextPreprocess.py
     │   │   │   ├── Tokenize.py
-    │   │       └── Vocabulize.py
+    │   │   │   └── Vocabulize.py
     │   │   └── image
     │   │       └── PatchOperation.py
     │   ├── apps
