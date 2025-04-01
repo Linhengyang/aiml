@@ -43,7 +43,7 @@ num_steps = configs['num_steps']
 
 
 ################## network-params ##################
-num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 3, 4, 512, 0.1, False, 128
+num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 3, 256, 0.1, False, 64
 
 
 
@@ -55,7 +55,7 @@ num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 3, 4, 512,
 
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 200, 512, 0.0005
+num_epochs, batch_size, lr = 100, 512, 0.0005
 
 
 
