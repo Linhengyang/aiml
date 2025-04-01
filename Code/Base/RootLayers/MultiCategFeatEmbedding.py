@@ -22,7 +22,7 @@ class MultiCategFeatEmbedding(nn.Module):
     
     If one wants to use Emebedding for different values of different categorical features(1 value per each feature), one can offset right shift values by 
     sum of number of value_sizes of previous categorical features.
-    See `offset_multifeatures` function or `onehot_concat_multifeatures` function in Utils/DataTransform
+    See `offset_multifeatures` function or `onehot_concat_multifeatures` function in Utils/Data/DataTransform
 
     args:
         num_classes (Tensor): shape (num_features, ), with elements are number of levels(classes) for every categorical feature

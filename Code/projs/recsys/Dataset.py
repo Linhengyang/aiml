@@ -1,7 +1,7 @@
 import torch
 import pandas as pd
 import numpy as np
-from ...Utils.Common.DataTransform import CategDataParser
+from ...Utils.Data.DataTransform import CategDataParser
 
 def id2index(idx):
     return int(idx) - 1
