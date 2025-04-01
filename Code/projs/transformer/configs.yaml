@@ -22,7 +22,11 @@ eval_cnt_in_train: 6 # 训练过程中模型衡量次数, valid loss/valid accur
 
 
 # data-params
-train_data: '../../data/text_translator/fra-eng/fra.txt'
+full_data: '../../data/text_translator/fra-eng/fra.txt'
+train_data: '../../data/text_translator/traindata/train.txt'
+valid_data: '../../data/text_translator/validdata/valid.txt'
+test_data: '../../data/text_translator/testdata/test.txt'
+
 num_steps: 20
 
 
