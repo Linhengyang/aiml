@@ -221,8 +221,8 @@ def get_BPE_symbols(
         ) -> t.List|t.Set:
     '''
     input:
-        text: 输入文本, 用以 构建 token symbols 集合（vocab）
-        tail_token: 用来标记每个 单词的末尾，区分从中间分割的token和结尾token。会被加入到 输出的集合中。
+        text: 输入文本, 用以 构建 token symbols 集合
+        tail_token: 用来标记每个 单词的末尾, 区分从中间分割的token和结尾token。会被加入到 输出的集合中。
         merge_times: 超参数，用来确定 生成的 token symbols集合大小
         merge_mode: 当有多个 token pair 是 最大出现频率的时候，采用什么方法选择 该合并的 token pair
             all全部都合并 / first第一个合并 / random 随机选 / shortest 最短的合并
@@ -232,7 +232,7 @@ def get_BPE_symbols(
         need_lower: 输入text是否要小写化
         separate_puncs: 作为独立视作token的标点符号
         normalize_whitespace: 是否将text中非 单空格 的连续空白字符or空白字符 统一转换为 单空格
-        attach_tail_token_init: 是否绑定 tail_token 和 末尾char。如果否，tail_token 作为独立字符 参与token生成
+        attach_tail_token_init: 是否绑定 tail_token 和 末尾char。如果否(通用做法), tail_token 作为独立字符 参与token生成
     '''
     # 输入文本中不应该存在用以分割的 tail_token. 如果存在, 报错;
     if tail_token in text:
