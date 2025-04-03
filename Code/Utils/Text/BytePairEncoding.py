@@ -143,7 +143,8 @@ def merge_maxfreq_token_pair(
         
         for i, (token_combo, freq) in enumerate(tokcombo_freqs):
             # 对于 token_combo / freq 这个 kv对，需要检测 token combo 是否需要合并。因为不需要合并的不用改
-            maxfreq_toknpair_pattern = '|'.join( [' '.join(token_pair) for token_pair in maxfreq_token_pairs] ) # tk1 tk2|...|tk3 tk4
+            maxfreq_toknpair_pattern = '|'.join( [re.escape(' '.join(token_pair))
+                                                  for token_pair in maxfreq_token_pairs] ) # tk1 tk2|...|tk3 tk4
             
             if re.search(maxfreq_toknpair_pattern, token_combo): # 如果匹配到 任意一个 maxfreq token pair
                 
@@ -173,7 +174,7 @@ def get_maxfreq_token_pair(
             if only one token pair has highest frequency, then it will be a list of length 1
         freq: the max frequency
     explains:
-        计算 adjacent token pair 的 frequency，并返回 max freq 的 adjacent token pairs, 同时返回这个 maxfreq
+        计算 adjacent token pair 的 frequency, 并返回 max freq 的 adjacent token pairs, 同时返回这个 maxfreq
     """ 
     token_pair_freq = collections.defaultdict(int)
     
