@@ -22,14 +22,14 @@ log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 src_vocab_dir = os.path.join(vocabs_dir, 'source')
 tgt_vocab_dir = os.path.join(vocabs_dir, 'target')
 
-for dir in [vocabs_dir, model_proj_dir, log_proj_dir, src_vocab_dir, tgt_vocab_dir]:
-    print(dir)
-    if not os.path.exists(dir):
-        print(f"directory {dir} not existed")
-        os.makedirs( dir )
-        print(f"directory {dir} created")
+for dir_name in [vocabs_dir, model_proj_dir, log_proj_dir, src_vocab_dir, tgt_vocab_dir]:
+    print(dir_name)
+    if not os.path.exists(dir_name):
+        print(f"directory {dir_name} not existed")
+        os.makedirs( dir_name )
+        print(f"directory {dir_name} created")
     else:
-        print(f"directory {dir} existed")
+        print(f"directory {dir_name} existed")
 
 
 
