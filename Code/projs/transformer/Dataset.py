@@ -23,6 +23,8 @@ def tokenize_seq2seq(
         text,
         sentence_tokenizer:t.Callable,
         num_examples=None,
+        src_symbols=[],
+        tgt_symbols=[],
         *args, **kwargs
         ):
     """
@@ -30,8 +32,10 @@ def tokenize_seq2seq(
         text: str object with \n to seperate lines, and each line consists of 'source_seq\ttarget_seq'
         sentence_tokenizer: callablem function, take a sentence as input, return a corresponding tokenized list of string as output
         num_examples: max sample size to read into memory
-        
-        *args, **kwargs: other params to tokenize a sentence
+        src_symbols: list of token strings, default as []
+        tgt_symbols: list of token strings, default as []
+
+        *args, **kwargs: other params for sentence_tokenizer
     
     returns: denoted as source, target
         source: 2D list, each element is a list of source token sequence
@@ -47,12 +51,14 @@ def tokenize_seq2seq(
             break
         try:
             src_sentence, tgt_sentence = line.split('\t') # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
-            source.append( sentence_tokenizer(src_sentence, *args, **kwargs)[0] ) # source list append tokenized 英文序列 token list
-            target.append( sentence_tokenizer(tgt_sentence, *args, **kwargs)[0] ) # target list append tokenized 法文序列 token list
+            source.append( sentence_tokenizer(src_sentence, src_symbols, *args, **kwargs)[0] ) # source list append tokenized 英文序列 token list
+            target.append( sentence_tokenizer(tgt_sentence, tgt_symbols, *args, **kwargs)[0] ) # target list append tokenized 法文序列 token list
         except ValueError:
             raise ValueError(f"line {i+1} of text unpack wrong")
 
     return source, target
+
+
 
 def build_tensorDataset(lines, vocab, num_steps):
     """
@@ -74,13 +80,23 @@ def build_tensorDataset(lines, vocab, num_steps):
     valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数, int32节省空间
     return array, valid_len
 
-def build_dataset_vocab(path, num_steps, tokenize_mode = 'simple', num_examples=None):
+
+
+def build_dataset_vocab(path, num_steps, num_examples=None, tokenize_mode='simple',
+                        src_symbols=[], tgt_symbols=[], EOW_token="</w>", UNK_token='<unk>', need_lower=True, separate_puncs=',.!?'):
     """
-    inputs: path, num_steps, num_examples(optional), is_train(optional)
+    inputs:
         path: seq2seq text file path
         num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
-        tokenize_mode: simple or bpe. default as simple
         num_examples: total sample size if given. None to read all
+        tokenize_mode: simple or bpe. default as simple
+
+        if tokenize_mode == 'bpe', then need:
+            symbols: 
+            EOW_token: end-of-word token
+            UNK_token: unknown token
+            need_lower:
+            separate_puncs:
 
     returns: denoted as tuple of tensors(tensor dataset), tuple of vocabs
         tensor dataset:
@@ -97,27 +113,28 @@ def build_dataset_vocab(path, num_steps, tokenize_mode = 'simple', num_examples=
     """
     raw_text = read_text2str(path) # read text
 
-    # 预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格. 因为 src 和 tgt 之间由 \t 分隔, 所以不能 normalize 空白字符
-    text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?', normalize_whitespace=False)
+    # 统一预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格. 因为 src 和 tgt 之间由 \t 分隔, 所以不能 normalize 空白字符
+    text = preprocess_space(raw_text, need_lower=need_lower, separate_puncs=separate_puncs, normalize_whitespace=False)
 
     # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
     if tokenize_mode == 'simple':
-        # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer.symbols 为 None
-        source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples)
+        
+        source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples,
+                                          # 给 line_tokenize function 的其他参数
+                                          need_preprocess = False, # 已经有统一预处理了
+                                          )
     elif tokenize_mode == 'bpe':
-        source, target = tokenize_seq2seq(text, line_tokenize_greedy, num_examples,
-                                          symbols = 1,
-                                          EOW_token = "</w>",
-                                          UNK_token = '<unk>',
-                                          need_lower = True,
-                                          flatten = True,
-                                          separate_puncs = ',.!?',
-                                          normalize_whitespace = True
+        source, target = tokenize_seq2seq(text, line_tokenize_greedy, num_examples, src_symbols, tgt_symbols,
+                                          # 给 line_tokenize function 的其他参数
+                                          need_preprocess = False, # 已经有统一预处理了
+                                          EOW_token = EOW_token,
+                                          UNK_token = UNK_token,
+                                          flatten = True, # source 和 target 是 list of strings
                                           )
 
     # 制作 vocab
-    src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
-    tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作tgt词表
+    src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'], unk_token=UNK_token) # 制作src词表
+    tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'], unk_token=UNK_token) # 制作tgt词表
 
     # 制作 tensor dataset
     src_array, src_valid_len = build_tensorDataset(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
@@ -128,9 +145,16 @@ def build_dataset_vocab(path, num_steps, tokenize_mode = 'simple', num_examples=
 
 
 class seq2seqDataset(torch.utils.data.Dataset):
-    def __init__(self, path, num_steps, num_examples=None):
+    def __init__(self, path, num_steps, UNK_token, EOW_token='', src_symbols:t.List[str]=[], tgt_symbols:t.List[str]=[], num_examples=None):
         super().__init__()
-        (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples)
+        # 只有 src 和 tgt language 都输入了 有效 的symbols, 以及有效的 EOW_token, 才使用 byte-pair-encoding
+        if len(src_symbols) != 0 and len(tgt_symbols) != 0 and EOW_token != '':
+            tokenize_mode = 'bpe'
+        else:
+            tokenize_mode = 'simple'
+        
+        (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples,
+                                                                                         tokenize_mode, src_symbols, tgt_symbols, EOW_token, UNK_token)
         # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
         
         bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
