@@ -22,14 +22,16 @@ def read_text2str(path) -> str:
 def tokenize_seq2seq(
         text,
         sentence_tokenizer:t.Callable,
-        symbols:t.List[str] | t.Set[str] | None = None,
-        num_examples=None):
+        num_examples=None,
+        *args, **kwargs
+        ):
     """
     inputs: text, num_example(optional)
         text: str object with \n to seperate lines, and each line consists of 'source_seq\ttarget_seq'
         sentence_tokenizer: callablem function, take a sentence as input, return a corresponding tokenized list of string as output
-        symbols: the token symbols vocab to tokenize text
         num_examples: max sample size to read into memory
+        
+        *args, **kwargs: other params to tokenize a sentence
     
     returns: denoted as source, target
         source: 2D list, each element is a list of source token sequence
@@ -45,8 +47,8 @@ def tokenize_seq2seq(
             break
         try:
             src_sentence, tgt_sentence = line.split('\t') # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
-            source.append( sentence_tokenizer(src_sentence, symbols) ) # source list append tokenized 英文序列 token list
-            target.append( sentence_tokenizer(tgt_sentence, symbols) ) # target list append tokenized 法文序列 token list
+            source.append( sentence_tokenizer(src_sentence, *args, **kwargs) ) # source list append tokenized 英文序列 token list
+            target.append( sentence_tokenizer(tgt_sentence, *args, **kwargs) ) # target list append tokenized 法文序列 token list
         except ValueError:
             raise ValueError(f"line {i+1} of text unpack wrong")
 

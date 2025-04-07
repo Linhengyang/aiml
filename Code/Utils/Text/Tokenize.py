@@ -14,7 +14,7 @@ from .BytePairEncoding import segment_word_BPE_greedy
 
 def line_tokenize_simple(
         sentence:str,
-        symbols:t.List[str] | t.Set[str] | None = None
+        *args, **kwargs
         ) -> t.List[str]:
     
     return sentence.split(' ')
@@ -30,6 +30,7 @@ def line_tokenize_greedy(
         flatten:bool = True,
         separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
         normalize_whitespace:bool = True,
+        *args, **kwargs
         ):
 
     # 处理空白和大小写。空白：该加单空格的地方加，该改单空格的地方改，该去单空格的地方去
