@@ -285,8 +285,8 @@ def segment_word_BPE_greedy(
         ):
     '''
     input:
-        word: 输入单词，用以拆分成多个 subword. 末尾可以已经添加 EOW_token
-        symbols: 以 EOW_token 作为 end-of-word token，且以标准BPE流程制作的词元集
+        word: 输入单词，用以拆分成多个 subword. 末尾可以已经添加 EOW_token. 也可以没有添加 EOW_token, 此时会被添加到末尾
+        symbols: 以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集
         UNK_token: unknown token, 用以替代 无法分割的片段
         EOW_token: end-of-word token, 用以标识 word 的结尾.
             当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下：
@@ -297,7 +297,7 @@ def segment_word_BPE_greedy(
                 分割不成功：    tok1, ... tokn, UNK_token
     return:
         segmented: list of string
-            word被切分成 symbols 中包含的 subwords/tokens, 以列表的方式返回
+            word被切分成 symbols 中包含的 subwords/tokens, 和 UNK_token(如果未能在symbols中找到). 以列表的方式返回
         unsegmented: string
             word中未被 symbols 切分的部分。若成功切分, 则它为 空字符串
     explain:
