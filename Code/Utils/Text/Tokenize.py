@@ -16,8 +16,8 @@ def line_tokenize_simple(
         sentence:str,
         *args, **kwargs
         ) -> t.List[str]:
-    
-    return sentence.split(' ')
+    # [] represents unsegmented part of sentence
+    return sentence.split(' '), []
 
 
 

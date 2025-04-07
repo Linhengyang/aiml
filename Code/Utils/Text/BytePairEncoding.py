@@ -212,7 +212,7 @@ def get_BPE_symbols(
         tail_token,
         merge_times: int,
         merge_mode: str = 'first',
-        min_occur_freq_merge: int = 0,
+        min_occur_freq_merge: int = 1,
         reserved_tokens: t.List[str] = [],
         symbols_type: str = 'list',
         need_lower: bool = True,
