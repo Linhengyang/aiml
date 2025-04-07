@@ -305,6 +305,10 @@ def segment_word_BPE_greedy(
         以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集 symbols, EOW_token 必然以整体参与形成 token
         那么在 greedy 的算法下, 即使EOW_token 以部分参与来分割word的过程会出现, 但这种情况不会出现在最终分割结果中
     '''
+
+    if len(symbols) == 0: # 如果 symbols 为空, 直接将 整个word作为分割好的token返回.
+        return [word], ''
+
     # start 是起始为止, end 是终结位置后一
     # 从start 位置开始
     #   从 end 为止开始，检查 start 到 end 是不是 symbols 中的 symbol

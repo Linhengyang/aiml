@@ -1,7 +1,7 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.Vocabulize import Vocab
 from ...Utils.Common.SeqOperation import truncate_pad
-from ...Utils.Text.Tokenize import line_tokenize_simple
+from ...Utils.Text.Tokenize import line_tokenize_simple, line_tokenize_greedy
 import torch
 import typing as t
 
@@ -47,8 +47,8 @@ def tokenize_seq2seq(
             break
         try:
             src_sentence, tgt_sentence = line.split('\t') # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
-            source.append( sentence_tokenizer(src_sentence, *args, **kwargs) ) # source list append tokenized 英文序列 token list
-            target.append( sentence_tokenizer(tgt_sentence, *args, **kwargs) ) # target list append tokenized 法文序列 token list
+            source.append( sentence_tokenizer(src_sentence, *args, **kwargs)[0] ) # source list append tokenized 英文序列 token list
+            target.append( sentence_tokenizer(tgt_sentence, *args, **kwargs)[0] ) # target list append tokenized 法文序列 token list
         except ValueError:
             raise ValueError(f"line {i+1} of text unpack wrong")
 
@@ -74,11 +74,12 @@ def build_tensorDataset(lines, vocab, num_steps):
     valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数, int32节省空间
     return array, valid_len
 
-def build_dataset_vocab(path, num_steps, num_examples=None):
+def build_dataset_vocab(path, num_steps, tokenize_mode = 'simple', num_examples=None):
     """
     inputs: path, num_steps, num_examples(optional), is_train(optional)
         path: seq2seq text file path
         num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
+        tokenize_mode: simple or bpe. default as simple
         num_examples: total sample size if given. None to read all
 
     returns: denoted as tuple of tensors(tensor dataset), tuple of vocabs
@@ -99,8 +100,20 @@ def build_dataset_vocab(path, num_steps, num_examples=None):
     # 预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格. 因为 src 和 tgt 之间由 \t 分隔, 所以不能 normalize 空白字符
     text = preprocess_space(raw_text, need_lower=True, separate_puncs=',.!?', normalize_whitespace=False)
 
-    # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer。symbols 为 None
-    source, target = tokenize_seq2seq(text, line_tokenize_simple, None, num_examples) # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
+    # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
+    if tokenize_mode == 'simple':
+        # 使用最简单的 line_tokenize_simple 作为 sentence tokenizer.symbols 为 None
+        source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples)
+    elif tokenize_mode == 'bpe':
+        source, target = tokenize_seq2seq(text, line_tokenize_greedy, num_examples,
+                                          symbols = 1,
+                                          EOW_token = "</w>",
+                                          UNK_token = '<unk>',
+                                          need_lower = True,
+                                          flatten = True,
+                                          separate_puncs = ',.!?',
+                                          normalize_whitespace = True
+                                          )
 
     # 制作 vocab
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>']) # 制作src词表
