@@ -9,6 +9,7 @@ from .Trainer import transformerTrainer
 from .Evaluator import transformerEpochEvaluator
 from .Predictor import sentenceTranslator
 import yaml
+import json
 from ...Utils.Text.BytePairEncoding import get_BPE_symbols, segment_word_BPE_greedy
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
@@ -54,8 +55,6 @@ num_epochs, batch_size, lr = 100, 512, 0.0005
 
 
 def prepare_job():
-
-    import json
     # generate symbols of source/target language and save them
 
     # 读取全部语料 corpus
@@ -122,16 +121,27 @@ def train_job():
     saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.txt' )
 
     # build datasets
-    full_dataset = seq2seqDataset(configs['full_data'], num_steps=num_steps)
+    # full_dataset as trainset
+    with open(os.path.join(symbols_dir, 'source.json'), 'r') as f:
+        eng_symbols = json.load( f )
+    with open(os.path.join(symbols_dir, 'target.json'), 'r') as f:
+        fra_symbols = json.load( f )
+
+    full_dataset = seq2seqDataset(configs['full_data'], num_steps=num_steps, UNK_token="<unk>", EOW_token="</w>",
+                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
+    
+    # validset & testset
+    valid_dataset = seq2seqDataset(configs['valid_data'], num_steps=num_steps, UNK_token="<unk>", EOW_token="</w>",
+                                   src_symbols=eng_symbols, tgt_symbols=fra_symbols)
+    test_dataset = seq2seqDataset(configs['test_data'], num_steps=num_steps, UNK_token="<unk>", EOW_token="</w>",
+                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
+    # release
+    del eng_symbols, fra_symbols
 
     # save source and target vocabs
     src_vocab = full_dataset.src_vocab
     tgt_vocab = full_dataset.tgt_vocab
 
-    # validset & testset
-    valid_dataset = seq2seqDataset(configs['valid_data'], num_steps=num_steps)
-    test_dataset = seq2seqDataset(configs['test_data'], num_steps=num_steps)
-    
     # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
     src_vocab.save( src_vocab_dir )
     # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json

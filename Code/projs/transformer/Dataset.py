@@ -145,7 +145,7 @@ def build_dataset_vocab(path, num_steps, num_examples=None, tokenize_mode='simpl
 
 
 class seq2seqDataset(torch.utils.data.Dataset):
-    def __init__(self, path, num_steps, UNK_token, EOW_token='', src_symbols:t.List[str]=[], tgt_symbols:t.List[str]=[], num_examples=None):
+    def __init__(self, path, num_steps, UNK_token, EOW_token='', src_symbols:t.List[str]=[], tgt_symbols:t.List[str]=[], num_examples:int|None=None):
         super().__init__()
         # 只有 src 和 tgt language 都输入了 有效 的symbols, 以及有效的 EOW_token, 才使用 byte-pair-encoding
         if len(src_symbols) != 0 and len(tgt_symbols) != 0 and EOW_token != '':
