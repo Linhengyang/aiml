@@ -17,7 +17,7 @@ def line_tokenize_simple(
         need_preprocess:bool = True,
         need_lower:bool = True, separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', normalize_whitespace:bool = True,
         *args, **kwargs
-        ) -> t.List[str]:
+        ):
     
     if need_preprocess:
         # 处理空白和大小写。空白：该加单空格的地方加，该改单空格的地方改，该去单空格的地方去
