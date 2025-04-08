@@ -4,6 +4,8 @@ from ...Utils.Common.SeqOperation import truncate_pad
 from ...Utils.Text.Tokenize import line_tokenize_simple, line_tokenize_greedy
 import torch
 import typing as t
+import re
+
 
 def read_text2str(path) -> str:
     """
@@ -19,10 +21,14 @@ def read_text2str(path) -> str:
     with open(path, 'r', encoding='utf-8') as f:
         return f.read() # 文本对象.read()方法：将整个文本对象读进一个str对象
 
+
+
 def tokenize_seq2seq(
         text,
         sentence_tokenizer:t.Callable,
         num_examples=None,
+        sample_separator:str = '\n', # 样本之间的分隔符
+        srctgt_separator:str = '\t', # source seq 和 target seq 之间的分隔符
         src_symbols=[],
         tgt_symbols=[],
         *args, **kwargs
@@ -32,6 +38,8 @@ def tokenize_seq2seq(
         text: str object with \n to seperate lines, and each line consists of 'source_seq\ttarget_seq'
         sentence_tokenizer: callablem function, take a sentence as input, return a corresponding tokenized list of string as output
         num_examples: max sample size to read into memory
+        sample_separator: separator between samples (default as \n)
+        srctgt_separator: separator inside a sample (default as \t)
         src_symbols: list of token strings, default as []
         tgt_symbols: list of token strings, default as []
 
@@ -45,12 +53,13 @@ def tokenize_seq2seq(
         process translation text data, split it into source token sequence and target token sequence
         处理翻译数据集, 返回source词元序列们和对应的target词元序列. 可以设定样本量
     """
+
     source, target = [], []
-    for i, line in enumerate(text.split('\n')): # 大文本按行分隔
+    for i, line in enumerate(text.split(sample_separator)): # 大文本按行分隔
         if num_examples and i >= num_examples: # 当有最大样本数限制, 且循环已经收集足够样本时, 跳出循环
             break
         try:
-            src_sentence, tgt_sentence = line.split('\t') # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
+            src_sentence, tgt_sentence = line.split(srctgt_separator) # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
             source.append( sentence_tokenizer(src_sentence, src_symbols, *args, **kwargs)[0] ) # source list append tokenized 英文序列 token list
             target.append( sentence_tokenizer(tgt_sentence, tgt_symbols, *args, **kwargs)[0] ) # target list append tokenized 法文序列 token list
         except ValueError:
@@ -82,7 +91,7 @@ def build_tensorDataset(lines, vocab, num_steps):
 
 
 
-def build_dataset_vocab(path, num_steps, num_examples=None, tokenize_mode='simple',
+def build_dataset_vocab(path, num_steps, num_examples=None, sample_separator:str = '\n', srctgt_separator:str = '\t', tokenize_mode='simple',
                         src_symbols=[], tgt_symbols=[], EOW_token="</w>", UNK_token='<unk>', need_lower=True, separate_puncs=',.!?'):
     """
     inputs:
@@ -113,25 +122,35 @@ def build_dataset_vocab(path, num_steps, num_examples=None, tokenize_mode='simpl
     """
     raw_text = read_text2str(path) # read text
 
-    # 统一预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格. 因为 src 和 tgt 之间由 \t 分隔, 所以不能 normalize 空白字符
-    text = preprocess_space(raw_text, need_lower=need_lower, separate_puncs=separate_puncs, normalize_whitespace=False)
+    # 统一预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格, 然后 normalize 空白 到 单字符
+    # 因为 src 和 tgt 之间由 \t 分隔, 行之间由 \n 分隔, 所以在 normalize 空白字符之前, 要先替换它们为 特殊字符串
+    assert '<#line_separator#>' not in raw_text, f'temp sample separator exists in raw text. change code'
+    assert '<#seq_separator#>' not in raw_text, f'temp feature/label separator exists in raw text. change code'
+
+    raw_text = re.sub(sample_separator, '<#line_separator#>', raw_text)
+    raw_text = re.sub(srctgt_separator, '<#seq_separator#>', raw_text)
+
+    text = preprocess_space(raw_text, need_lower=need_lower, separate_puncs=separate_puncs, normalize_whitespace=True)
+
 
     # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
     if tokenize_mode == 'simple':
         
-        source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples,
+        source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples, '<#line_separator#>', '<#seq_separator#>',
                                           # 给 line_tokenize function 的其他参数
-                                          need_preprocess = False, # 已经有统一预处理了
+                                          need_preprocess = False, # 已经经过统一预处理了
                                           )
     elif tokenize_mode == 'bpe':
-        source, target = tokenize_seq2seq(text, line_tokenize_greedy, num_examples, src_symbols, tgt_symbols,
+        source, target = tokenize_seq2seq(text, line_tokenize_greedy, num_examples, '<#line_separator#>', '<#seq_separator#>', src_symbols, tgt_symbols,
                                           # 给 line_tokenize function 的其他参数
-                                          need_preprocess = False, # 已经有统一预处理了
+                                          need_preprocess = False, # 已经经过统一预处理了
                                           EOW_token = EOW_token,
                                           UNK_token = UNK_token,
                                           flatten = True, # source 和 target 是 list of strings
                                           )
-
+    else:
+        raise NotImplementedError(f'tokenization mode {tokenize_mode} not implemented. must be one of bpe/simple')
+    
     # 制作 vocab
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'], unk_token=UNK_token) # 制作src词表
     tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'], unk_token=UNK_token) # 制作tgt词表
@@ -145,7 +164,9 @@ def build_dataset_vocab(path, num_steps, num_examples=None, tokenize_mode='simpl
 
 
 class seq2seqDataset(torch.utils.data.Dataset):
-    def __init__(self, path, num_steps, UNK_token, EOW_token='', src_symbols:t.List[str]=[], tgt_symbols:t.List[str]=[], num_examples:int|None=None):
+    def __init__(self, path, num_steps,
+                 UNK_token='<unk>', EOW_token='', src_symbols:t.List[str]=[], tgt_symbols:t.List[str]=[], num_examples:int|None=None):
+        
         super().__init__()
         # 只有 src 和 tgt language 都输入了 有效 的symbols, 以及有效的 EOW_token, 才使用 byte-pair-encoding
         if len(src_symbols) != 0 and len(tgt_symbols) != 0 and EOW_token != '':
@@ -153,8 +174,10 @@ class seq2seqDataset(torch.utils.data.Dataset):
         else:
             tokenize_mode = 'simple'
         
-        (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples,
-                                                                                         tokenize_mode, src_symbols, tgt_symbols, EOW_token, UNK_token)
+        (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples, '\n', '\t',
+                                                                                         tokenize_mode, src_symbols, tgt_symbols, EOW_token, UNK_token,
+                                                                                         need_lower=True, separate_puncs=',.!?')
+        
         # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
         
         bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
