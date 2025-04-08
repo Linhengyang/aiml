@@ -58,7 +58,7 @@ def preprocess_space(
         text
         need_lower: Bool, default as True. If true, then input str will be lowered
         separate_puncs: punctuations that shall be seen as independent tokens, such as ,.!?
-        normalize_whitespace: False -> 制表符换行符等其他种类空白字符保留，连续空格保留；True -> 以上全部转换为 单个单空格
+        normalize_whitespace: False -> 制表符换行符等其他种类空白字符保留, 连续空格保留; True -> 以上全部转换为 单个单空格
 
     returns: A str obejct
         whose spaces are normal single space ' ', and single space is inserted before every independent token. left/right space trimed
@@ -71,7 +71,8 @@ def preprocess_space(
             当 它为 False时，诸如制表符和换行符之类的空白字符，以及连续单空格都被保留（副作用：当使用单空格来分割时，非单空格的空白字符和空字符也被视作token）
         text的左右空白都会被trim
     '''
-    text = text.replace('\u202f', ' ').replace('\xa0', ' ').strip() #替换不间断空格为单空格, 并trim首尾空格
+    # 替换不间断特殊空格为单空格, 消除零宽度空白, 并trim首尾空格
+    text = text.replace('\u202f', ' ').replace('\xa0', ' ').replace('\u2060', '').replace('\ufeff', '').strip()
 
     if need_lower:
         text = text.lower()
@@ -87,11 +88,12 @@ def preprocess_space(
     # out_str = "".join(out)
 
     out_str = add_space_around_puncs(text, separate_puncs)
-
+    
     # 如果 normalize_whitespace = True, 那么把 所有其他种类的空白字符(\t \n)以及多个连续的单空格 转换为 单个单空格 
     if normalize_whitespace:
         out_str = re.sub(r'\s+', ' ', out_str)
     
+    out_str = re.sub(r' +', ' ', out_str) # 把可能出现的多个连续单空格 转换成 单个单空格
     return out_str
 
 
