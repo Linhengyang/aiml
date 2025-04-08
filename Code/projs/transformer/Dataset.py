@@ -149,7 +149,8 @@ def build_dataset_vocab(path, num_steps, num_examples=None, sample_separator:str
                                           flatten = True, # source 和 target 是 list of strings
                                           )
     else:
-        raise NotImplementedError(f'tokenization mode {tokenize_mode} not implemented. must be one of bpe/simple')
+        raise NotImplementedError(
+            f'tokenization mode {tokenize_mode} not implemented. must be one of bpe/simple')
     
     # 制作 vocab
     src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'], unk_token=UNK_token) # 制作src词表
