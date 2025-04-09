@@ -72,7 +72,7 @@ def tokenize_seq2seq(
 def build_tensorDataset(lines, vocab, num_steps):
     """
     inputs: lines, vocab, num_steps
-        lines: 2D list of token(word, char) sequences
+        lines: 2D list of token sequences
         vocab: the Vocab of input lines who can map token(word, char) to index
         num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
 
@@ -82,7 +82,7 @@ def build_tensorDataset(lines, vocab, num_steps):
     
     explains:
         map tokens of input lines into indices according to input vocab, and set the sequence length
-        将输入的词元序列lines映射成数字序列, 并设定num_steps(sequence length)序列长度
+        将输入的词元序列lines映射成数字序列, 并设定num_steps(sequence length)序列长度. 不足num_steps的pad, 超出的剪掉. 
     """
     lines = [vocab[l] + [vocab['<eos>']] for l in lines] # id映射: lines 2D list, l & vocab[l] list. 在每个 line 末尾添加 vocab['<eos>']. 注意这里不能用append
     array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines], dtype=torch.int64) # tensor化 truncate_pad之后的token序列, 默认就是int64
