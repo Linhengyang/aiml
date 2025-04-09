@@ -1,25 +1,14 @@
 import torch
 from torch import nn
 import math
+import re
 from operator import itemgetter
 import typing as t
 from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import bleu
 from .Dataset import build_tensorDataset
 from ...Utils.Text.TextPreprocess import preprocess_space
-
-
-def str_to_src_inputs(src_sentence, src_vocab, num_steps, device):
-    '''
-    src_sentence输入前需要预处理: lower/替换非正常空格为单空格/文字和,.?!之间需要有单空格
-    因为训练集截断了num_steps之后的序列, 所以模型不能捕捉num_steps后面的序列关系.
-    所以也需要对src_sentence作: 1预处理, 2加eos, 3长度控制在num_steps
-    '''
-    src_tokens = [src_sentence.split(' '), ] # 2D list, (1, seq_length)
-    src_array, src_valid_len = build_tensorDataset(src_tokens, src_vocab, num_steps)# shape (1, num_steps), (1,)
-
-    return src_array.to(device), src_valid_len.to(device)
-
+from ...Utils.Text.Tokenize import line_tokenize_simple, line_tokenize_greedy
 
 
 def greedy_predict(
@@ -34,6 +23,9 @@ def greedy_predict(
         src_valid_lens shape: (1,)int32
     length_factor: 生成序列的长度奖励, 长度越长奖励越大
     device: 设备
+
+    output:
+        predicted tokens(eos not included), along with its score
     '''
     net.eval()
     with torch.no_grad():
@@ -71,7 +63,8 @@ def greedy_predict(
             
         long_award = math.pow(len(output_tokenIDs), -length_factor)
     
-    return ' '.join(tgt_vocab.to_tokens(output_tokenIDs)), raw_pred_score*long_award
+    # return [pred_tokn1, .., pred_toknN], score
+    return tgt_vocab.to_tokens(output_tokenIDs), raw_pred_score*long_award
 
 
 
@@ -178,6 +171,9 @@ def beam_predict(
     device: 设备
     beam_size: 束搜索 的 束宽
     parrallel: 是否并行计算
+
+    output:
+    predicted tokens(eos not included), along with its score
     '''
     net.to(device)
     src_inputs = [tensor.to(device) for tensor in src_inputs]
@@ -234,8 +230,8 @@ def beam_predict(
     valid_lens[~eos_exist_arr] = num_steps # (k,) 对于 不存在 eos 的行, valid token 数量就是 num_steps
 
     # 计算每行序列的 score = sum of {log conditional probs on valid area} / (valid_length^length_factor)
-    k_seq_mat = k_seq_mat[:, 1:] # (k, num_steps)
-    log_cond_probs = torch.log(k_cond_prob_mat[:, 1:]) # (k, num_steps)
+    k_seq_mat = k_seq_mat[:, 1:] # (k, num_steps) 去掉了 bos
+    log_cond_probs = torch.log(k_cond_prob_mat[:, 1:]) # (k, num_steps) 去掉了 bos
 
     valid_area_mask = torch.arange(0, num_steps, device=device).unsqueeze(0) < valid_lens.unsqueeze(1) # (k, num_steps)
     valid_area = valid_area_mask.int() # (k, num_steps), 1 for valid area, 0 for invalid
@@ -248,7 +244,14 @@ def beam_predict(
     output_tokenIDs = k_seq_mat[max_ind, :valid_lens[max_ind]].tolist() # 取 k_seq_mat 分数最高的 行, 以及该行 前 valid_lens[mx_ind] 部分(即valid 部分)
     # .tolist() 移动数据到 cpu 上
 
-    return ' '.join(tgt_vocab.to_tokens(output_tokenIDs)), scores[max_ind].item()
+    # return [pred_tokn1, .., pred_toknN], score
+    return tgt_vocab.to_tokens(output_tokenIDs), scores[max_ind].item()
+
+
+
+
+
+
 
 
 
@@ -257,12 +260,21 @@ def beam_predict(
 
 
 class sentenceTranslator(easyPredictor):
-    def __init__(self, search_mode='greedy', bleu_k=2, device=None, beam_size=3, length_factor=0.75):
+    def __init__(self,
+                 src_vocab, tgt_vocab,
+                 net, num_steps,
+                 search_mode='greedy', bleu_k=2, device=None, beam_size=3, length_factor=0.75):
+        
         super().__init__()
+
+        self.src_vocab = src_vocab
+        self.tgt_vocab = tgt_vocab
+
         if device is not None and torch.cuda.is_available():
             self.device = device
         else:
             self.device = torch.device('cpu')
+        
         self.bleu_k = bleu_k
         if search_mode == 'greedy':
             self.pred_fn = greedy_predict
@@ -278,25 +290,69 @@ class sentenceTranslator(easyPredictor):
         self.length_factor = length_factor # length_factor 越大, 输出越偏好长序列
         self.eval_fn = bleu
 
-    def predict(self, src_sentence, net, src_vocab, tgt_vocab, num_steps):
+        self.net = net
+        self.net.to(self.device) # relocate net 到 device 上
+        self.num_steps = num_steps
 
-        # 预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格. normalize 空白字符
+
+
+    def predict(self, src_sentence, src_symbols:t.List[str], EOW_token:str):
+        
+        # determine the tokenize mode
+        if len(src_symbols) == 0 or EOW_token == '': # 空 src_symbols/空EOW_token 说明 使用 simple tokenize
+            tokenize_mode = 'simple'
+        else:
+            tokenize_mode = 'bpe'
+
+        # 和训练相同的预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格, 然后 normalize 空白 到 单字符
         self.src_sentence = preprocess_space(src_sentence, need_lower=True, separate_puncs=',.!?', normalize_whitespace=True)
 
-        src_inputs = str_to_src_inputs(self.src_sentence, src_vocab, num_steps, self.device)
-        net.to(self.device)
-
-        self.pred_sentence, self._pred_scores = self.pred_fn(net, tgt_vocab, num_steps, src_inputs, self.device, self.length_factor,
-                                                             self.beam_size, parrallel=False)
+        # 从 text 转换成 input data
+        # tokenize
+        if tokenize_mode == 'simple':
+            source, _ = line_tokenize_simple(self.src_sentence, need_preprocess=False, # 已经经过统一预处理了
+                                             )
+        elif tokenize_mode == 'bpe':
+            source, _ = line_tokenize_greedy(self.src_sentence,
+                                             need_preprocess = False, # 已经经过统一预处理了
+                                             symbols = src_symbols,
+                                             EOW_token = EOW_token,
+                                             UNK_token = self.src_vocab.to_tokens(self.src_vocab.unk)[0], # 从 vocab 中可以得到 UNK_token
+                                             flatten=True)
+        # tensorize
+        src_arry, src_valid_len = build_tensorDataset([source,], self.src_vocab, self.num_steps) # src_arry:(1, num_steps)int64, valid_length:(1,)int32
+        src_arry.to(self.device), src_valid_len.to(self.device)
+        
+        # infer
+        # net:,
+        # tgt_vocab:,
+        # num_steps:,
+        # src_inputs:,
+        # length_factor:,
+        # device:,
+        # other
+        output_tokens, self._pred_scores = self.pred_fn(
+            self.net, self.tgt_vocab, self.num_steps, (src_arry, src_valid_len), self.length_factor, self.device,
+            self.beam_size, parrallel=False)
+        
+        if tokenize_mode == 'simple':
+            self.pred_sentence = ' '.join(output_tokens)
+        elif tokenize_mode == 'bpe':
+            self.pred_sentence = re.sub(EOW_token, ' ', ''.join(output_tokens))
 
         return self.pred_sentence
+
+
 
     def evaluate(self, tgt_sentence):
         assert hasattr(self, 'pred_sentence'), f'predicted target sentence not found'
 
+        # 和训练相同的预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格, 然后 normalize 空白 到 单字符
         self.tgt_sentence = preprocess_space(tgt_sentence, need_lower=True, separate_puncs=',.!?', normalize_whitespace=True)
         
         return self.eval_fn(self.pred_sentence, self.tgt_sentence, self.bleu_k)
+
+
 
     @property
     def pred_scores(self):
