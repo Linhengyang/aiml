@@ -103,22 +103,32 @@ def bleu(pred_seq, label_seq, k):
     """计算BLEU. 可以处理pred_seq为空字符串的情况
     inputs:
         1. pred_seq和label_seq: 输入前需要lower/替换非正常空格为单空格/文字和,.?!之间需要有单空格
-        2. k: 用于匹配的n-gram的最大长度, k <= min(len(pred_seq), len(label_seq))
+        2. k: 用于匹配的n-gram的最大长度, k <= min(len(pred_seq), len(label_seq)). k 通常取 1-4
+
+    explain:
+
     """
     pred_tokens, label_tokens = pred_seq.split(' '), label_seq.split(' ')
     len_pred, len_label = len(pred_tokens), len(label_tokens)
+
     if k > min(len_pred, len_label): # 如果k超出了pred_seq和label_seq的其中之一的长度, 限定k
         k = min(len_pred, len_label)
+
     score = math.exp(min(0, 1 - len_label / len_pred))
+
     for n in range(1, k + 1):
+        # 对于 n-gram, (n=1,..,k)
         num_matches, label_subs = 0, collections.defaultdict(int)
+        # 统计 label sequence 中, 各个 n-gram 的出现次数
         for i in range(len_label - n + 1):
             label_subs[' '.join(label_tokens[i: i + n])] += 1
+        # 统计 pred sequence 中, 每个 n-gram 在 label sequence 中的匹配次数. 每个 n-gram 若存在在 label sequence 中, 那么就匹配数量+1, 待匹配总数-1
         for i in range(len_pred - n + 1):
             if label_subs[' '.join(pred_tokens[i: i + n])] > 0:
                 num_matches += 1
                 label_subs[' '.join(pred_tokens[i: i + n])] -= 1
         score *= math.pow(num_matches / (len_pred - n + 1), math.pow(0.5, n))
+    
     return score
 
 
