@@ -4,6 +4,7 @@ import math
 import re
 from operator import itemgetter
 import typing as t
+import json
 from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import bleu
 from .Dataset import build_tensorDataset
@@ -296,13 +297,15 @@ class sentenceTranslator(easyPredictor):
 
 
 
-    def predict(self, src_sentence, src_symbols:t.List[str], EOW_token:str):
+    def predict(self, src_sentence, src_symbols_path:str|None=None, EOW_token:str|None=None):
         
         # determine the tokenize mode
-        if len(src_symbols) == 0 or EOW_token == '': # 空 src_symbols/空EOW_token 说明 使用 simple tokenize
+        if src_symbols_path is None or EOW_token is None: # 空 src_symbols 或 空EOW_token 说明 使用 simple tokenize
             tokenize_mode = 'simple'
         else:
             tokenize_mode = 'bpe'
+            with open(src_symbols_path, 'r') as f:
+                src_symbols = json.load(f)
 
         # 和训练相同的预处理: 小写化, 替换不间断空格为单空格, 并trim首尾空格, 保证文字和,.!?符号之间有 单空格, 然后 normalize 空白 到 单字符
         self.src_sentence = preprocess_space(src_sentence, need_lower=True, separate_puncs=',.!?', normalize_whitespace=True)
