@@ -55,7 +55,7 @@ num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 3, 256,
 
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 100, 512, 0.0005
+num_epochs, batch_size, lr = 50, 512, 0.00005
 
 
 
@@ -67,6 +67,7 @@ num_epochs, batch_size, lr = 100, 512, 0.0005
 
 # 生产 source corpus 和 target corpus 的symbols
 def prepare_job():
+    print('prepare job begin')
     # generate symbols of source/target language and save them
 
     # 读取全部语料 corpus
@@ -122,7 +123,7 @@ def prepare_job():
         with open(fra_symbols_path, 'w') as f:
             json.dump(fra_symbols, f)
 
-    
+    print('prepare job complete')
     return eng_symbols_path, fra_symbols_path
 
 
@@ -130,7 +131,7 @@ def prepare_job():
 
 
 def train_job(src_symbols_path, tgt_symbols_path):
-
+    print('train job begin')
     # [timetag]
     from datetime import datetime
     now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
@@ -204,6 +205,7 @@ def train_job(src_symbols_path, tgt_symbols_path):
     # save
     trainer.save_model(saved_params_fpath)
 
+    print('train job complete')
     return saved_params_fpath
 
 
@@ -214,7 +216,8 @@ def train_job(src_symbols_path, tgt_symbols_path):
 
 
 def infer_job(saved_params_fpath, src_symbols_path):
-    
+    print('infer job begin')
+
     # load vocabs
     from ....Code.Utils.Text.Vocabulize import Vocab
     src_vocab, tgt_vocab = Vocab(), Vocab()
@@ -254,3 +257,6 @@ def infer_job(saved_params_fpath, src_symbols_path):
     # evaluate output
     print('bleu score: ', translator.evaluate('je suis chez moi .'))
     print('pred score: ', translator.pred_scores)
+
+    print('infer job complete')
+    return
