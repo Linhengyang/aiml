@@ -113,7 +113,7 @@ def beam_search_single_step(net, vocab_size, src_enc_info, k, parrallel,
     elif isinstance(k_KV_Caches, list) and isinstance(k_KV_Caches[0], dict):
         # 对应关系, k_seq_mat <行 对应 行> k_cond_prob_mat <行 对应 index> k_KV_Caches
 
-        cond_prob_tokn_t_mat = torch.zeros((k, vocab_size), device=net.device) # (k, vocab_size)
+        cond_prob_tokn_t_mat = torch.zeros((k, vocab_size), device=k_seq_mat.device) # (k, vocab_size)
         for i in range(k):
             # 对于 第 i 个序列, i = 0, 1, 2, ...k-1
 
@@ -237,7 +237,7 @@ def beam_predict(
     valid_area_mask = torch.arange(0, num_steps, device=device).unsqueeze(0) < valid_lens.unsqueeze(1) # (k, num_steps)
     valid_area = valid_area_mask.int() # (k, num_steps), 1 for valid area, 0 for invalid
     
-    scores = (log_cond_probs * valid_area).sum(dim=1) * torch.pow(valid_lens, -length_factor) # (k, ) * (k, )
+    scores = (log_cond_probs * valid_area).sum(dim=1) * torch.pow(valid_lens.to(torch.float), -length_factor) # (k, ) * (k, )
 
     # 选择分数最大的
     max_ind = scores.argmax().item() # .item() 把 max_ind 在cpu上

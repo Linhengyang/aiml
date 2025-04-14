@@ -118,7 +118,7 @@ class TransformerDecoder(AttentionDecoder):
             position_ids = torch.arange(0, num_steps, dtype=torch.int64, device=tgt_dec_input.device) # (num_steps,)
         # 推理模式: 对于第i次infer, input 的 timestep 就是 i-1, 而这个信息可以从 KV_Caches 的values 中的第二个维度(dim=1)得到
         else:
-            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].dim(1) ],
+            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].size(1) ],
                                         dtype=torch.int64, device=tgt_dec_input.device) # (1,)
 
         # input embeddings + position embedding

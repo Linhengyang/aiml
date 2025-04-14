@@ -14,7 +14,7 @@ from .BytePairEncoding import segment_word_BPE_greedy
 
 def line_tokenize_simple(
         sentence:str,
-        need_preprocess:bool = True,
+        need_preprocess:bool,
         need_lower:bool = True, separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', normalize_whitespace:bool = True,
         *args, **kwargs
         ):
@@ -32,7 +32,7 @@ def line_tokenize_simple(
 
 def line_tokenize_greedy(
         sentence:str,
-        need_preprocess:bool = True,
+        need_preprocess:bool,
         need_lower:bool = True, separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', normalize_whitespace:bool = True,
         symbols:t.List[str] | t.Set[str] = [],
         EOW_token:str = "</w>",
