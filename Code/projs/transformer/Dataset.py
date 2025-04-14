@@ -29,9 +29,7 @@ def tokenize_seq2seq(
         num_examples=None,
         sample_separator:str = '\n', # 样本之间的分隔符
         srctgt_separator:str = '\t', # source seq 和 target seq 之间的分隔符
-        src_symbols=[],
-        tgt_symbols=[],
-        *args, **kwargs
+        **kwargs, # other params for sentence_tokenizer, including src_symbols & tgt_symbols
         ):
     """
     inputs: text, num_example(optional)
@@ -40,10 +38,8 @@ def tokenize_seq2seq(
         num_examples: max sample size to read into memory
         sample_separator: separator between samples (default as \n)
         srctgt_separator: separator inside a sample (default as \t)
-        src_symbols: list of token strings, default as []
-        tgt_symbols: list of token strings, default as []
 
-        *args, **kwargs: other params for sentence_tokenizer
+        **kwargs: other params for sentence_tokenizer, including src_symbols & tgt_symbols
     
     returns: denoted as source, target
         source: 2D list, each element is a list of source token sequence
@@ -56,14 +52,14 @@ def tokenize_seq2seq(
 
     source, target = [], []
     for i, line in enumerate(text.split(sample_separator)): # 大文本按行分隔
-        if num_examples and i >= num_examples: # 当有最大样本数限制, 且循环已经收集足够样本时, 跳出循环
+        if (num_examples and i >= num_examples) or (line == ''): # 当有最大样本数限制, 且循环已经收集足够样本时, 抑或是读到空行时, 跳出循环
             break
         try:
             src_sentence, tgt_sentence = line.split(srctgt_separator) # 每一行按制表符分成两部分, 前半是 source sentence，后半是 target sentence
-            source.append( sentence_tokenizer(src_sentence, src_symbols, *args, **kwargs)[0] ) # source list append tokenized 英文序列 token list
-            target.append( sentence_tokenizer(tgt_sentence, tgt_symbols, *args, **kwargs)[0] ) # target list append tokenized 法文序列 token list
+            source.append( sentence_tokenizer(src_sentence, **kwargs)[0] ) # source list append tokenized 英文序列 token list
+            target.append( sentence_tokenizer(tgt_sentence, **kwargs)[0] ) # target list append tokenized 法文序列 token list
         except ValueError:
-            raise ValueError(f"line {i+1} of text unpack wrong")
+            raise ValueError(f"line {i+1} of text unpack wrong. line text as {line}")
 
     return source, target
 
@@ -136,12 +132,22 @@ def build_dataset_vocab(path, num_steps, num_examples=None, sample_separator:str
     # tokenize src / tgt sentence. source 和 target 是 2D list of tokens
     if tokenize_mode == 'simple':
         
-        source, target = tokenize_seq2seq(text, line_tokenize_simple, num_examples, '<#line_separator#>', '<#seq_separator#>',
+        source, target = tokenize_seq2seq(text=text,
+                                          sentence_tokenize=line_tokenize_simple,
+                                          num_examples=num_examples,
+                                          sample_separator='<#line_separator#>',
+                                          srctgt_separator='<#seq_separator#>',
                                           # 给 line_tokenize function 的其他参数
                                           need_preprocess = False, # 已经经过统一预处理了
                                           )
     elif tokenize_mode == 'bpe':
-        source, target = tokenize_seq2seq(text, line_tokenize_greedy, num_examples, '<#line_separator#>', '<#seq_separator#>', src_symbols, tgt_symbols,
+        source, target = tokenize_seq2seq(text=text,
+                                          sentence_tokenizer=line_tokenize_greedy,
+                                          num_examples=num_examples,
+                                          sample_separator='<#line_separator#>',
+                                          srctgt_separator='<#seq_separator#>',
+                                          src_symbols=src_symbols,
+                                          tgt_symbols=tgt_symbols,
                                           # 给 line_tokenize function 的其他参数
                                           need_preprocess = False, # 已经经过统一预处理了
                                           EOW_token = EOW_token,
