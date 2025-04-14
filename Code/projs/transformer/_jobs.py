@@ -46,7 +46,7 @@ num_steps = configs['num_steps']
 
 
 ################## network-params ##################
-num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 3, 256, 0.1, False, 64
+num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
 
 
 
@@ -141,7 +141,7 @@ def train_job(src_symbols_path, tgt_symbols_path):
     defined_net_fpath = os.path.join( log_proj_dir, f'defined_net_{now_minute}.txt' )
 
     # /workspace/model/[proj_name]/saved_params[timetag].params
-    saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.txt' )
+    saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.pth' )
 
     # build datasets
     # full_dataset as trainset
@@ -219,7 +219,7 @@ def infer_job(saved_params_fpath, src_symbols_path):
     print('infer job begin')
 
     # load vocabs
-    from ....Code.Utils.Text.Vocabulize import Vocab
+    from ...Utils.Text.Vocabulize import Vocab
     src_vocab, tgt_vocab = Vocab(), Vocab()
 
     # source and target language vocabs
