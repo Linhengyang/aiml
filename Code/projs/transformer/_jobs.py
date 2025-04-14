@@ -61,6 +61,9 @@ num_epochs, batch_size, lr = 50, 512, 0.00005
 
 
 
+# num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
+# batch_size
+# ---------------------> 4GB 显存
 
 
 
