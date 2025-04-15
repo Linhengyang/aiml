@@ -6,7 +6,7 @@ import torch.nn as nn
 import yaml
 
 
-configs = yaml.load(open('Code/projs/_demo/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## directories ##################
 # set train log file path / network resolve output path / params save path / source&targe vocabs path

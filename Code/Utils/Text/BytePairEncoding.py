@@ -143,7 +143,8 @@ def merge_maxfreq_token_pair(
         
         for i, (token_combo, freq) in enumerate(tokcombo_freqs):
             # 对于 token_combo / freq 这个 kv对，需要检测 token combo 是否需要合并。因为不需要合并的不用改
-            maxfreq_toknpair_pattern = '|'.join( [' '.join(token_pair) for token_pair in maxfreq_token_pairs] ) # tk1 tk2|...|tk3 tk4
+            maxfreq_toknpair_pattern = '|'.join( [re.escape(' '.join(token_pair))
+                                                  for token_pair in maxfreq_token_pairs] ) # tk1 tk2|...|tk3 tk4
             
             if re.search(maxfreq_toknpair_pattern, token_combo): # 如果匹配到 任意一个 maxfreq token pair
                 
@@ -173,7 +174,7 @@ def get_maxfreq_token_pair(
             if only one token pair has highest frequency, then it will be a list of length 1
         freq: the max frequency
     explains:
-        计算 adjacent token pair 的 frequency，并返回 max freq 的 adjacent token pairs, 同时返回这个 maxfreq
+        计算 adjacent token pair 的 frequency, 并返回 max freq 的 adjacent token pairs, 同时返回这个 maxfreq
     """ 
     token_pair_freq = collections.defaultdict(int)
     
@@ -211,7 +212,7 @@ def get_BPE_symbols(
         tail_token,
         merge_times: int,
         merge_mode: str = 'first',
-        min_occur_freq_merge: int = 0,
+        min_occur_freq_merge: int = 1,
         reserved_tokens: t.List[str] = [],
         symbols_type: str = 'list',
         need_lower: bool = True,
@@ -221,8 +222,8 @@ def get_BPE_symbols(
         ) -> t.List|t.Set:
     '''
     input:
-        text: 输入文本, 用以 构建 token symbols 集合（vocab）
-        tail_token: 用来标记每个 单词的末尾，区分从中间分割的token和结尾token。会被加入到 输出的集合中。
+        text: 输入文本, 用以 构建 token symbols 集合
+        tail_token: 用来标记每个 单词的末尾, 区分从中间分割的token和结尾token。会被加入到 输出的集合中。
         merge_times: 超参数，用来确定 生成的 token symbols集合大小
         merge_mode: 当有多个 token pair 是 最大出现频率的时候，采用什么方法选择 该合并的 token pair
             all全部都合并 / first第一个合并 / random 随机选 / shortest 最短的合并
@@ -232,7 +233,7 @@ def get_BPE_symbols(
         need_lower: 输入text是否要小写化
         separate_puncs: 作为独立视作token的标点符号
         normalize_whitespace: 是否将text中非 单空格 的连续空白字符or空白字符 统一转换为 单空格
-        attach_tail_token_init: 是否绑定 tail_token 和 末尾char。如果否，tail_token 作为独立字符 参与token生成
+        attach_tail_token_init: 是否绑定 tail_token 和 末尾char。如果否(通用做法), tail_token 作为独立字符 参与token生成
     '''
     # 输入文本中不应该存在用以分割的 tail_token. 如果存在, 报错;
     if tail_token in text:
@@ -284,8 +285,8 @@ def segment_word_BPE_greedy(
         ):
     '''
     input:
-        word: 输入单词，用以拆分成多个 subword. 末尾可以已经添加 EOW_token
-        symbols: 以 EOW_token 作为 end-of-word token，且以标准BPE流程制作的词元集
+        word: 输入单词，用以拆分成多个 subword. 末尾可以已经添加 EOW_token. 也可以没有添加 EOW_token, 此时会被添加到末尾
+        symbols: 以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集
         UNK_token: unknown token, 用以替代 无法分割的片段
         EOW_token: end-of-word token, 用以标识 word 的结尾.
             当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下：
@@ -296,7 +297,7 @@ def segment_word_BPE_greedy(
                 分割不成功：    tok1, ... tokn, UNK_token
     return:
         segmented: list of string
-            word被切分成 symbols 中包含的 subwords/tokens, 以列表的方式返回
+            word被切分成 symbols 中包含的 subwords/tokens, 和 UNK_token(如果未能在symbols中找到). 以列表的方式返回
         unsegmented: string
             word中未被 symbols 切分的部分。若成功切分, 则它为 空字符串
     explain:
@@ -304,6 +305,10 @@ def segment_word_BPE_greedy(
         以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集 symbols, EOW_token 必然以整体参与形成 token
         那么在 greedy 的算法下, 即使EOW_token 以部分参与来分割word的过程会出现, 但这种情况不会出现在最终分割结果中
     '''
+
+    if len(symbols) == 0: # 如果 symbols 为空, 直接将 整个word作为分割好的token返回.
+        return [word], ''
+
     # start 是起始为止, end 是终结位置后一
     # 从start 位置开始
     #   从 end 为止开始，检查 start 到 end 是不是 symbols 中的 symbol

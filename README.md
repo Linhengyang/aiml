@@ -40,13 +40,13 @@ also recommend to have:
 
 ---
     model
-    ├── mlp
-    ├── transformer
-    ├── vit
+    ├── proj1
+    ├── proj2
+    ├── proj3
     logs
-    ├── mlp
-    ├── transformer
-    ├── vit
+    ├── proj1
+    ├── proj2
+    ├── proj3
     aiml
     ├── Code
     │   ├── Base
@@ -76,15 +76,17 @@ also recommend to have:
     │   │   └── _vit.py
     │   ├── Utils
     │   │   ├── Common
-    │   │   │   ├── DataAssemble.py
-    │   │   │   ├── DataTransform.py
     │   │   │   ├── Mask.py
     │   │   │   └── SeqOperation.py
+    │   │   ├── Data
+    │   │   │   ├── DataAssemble.py
+    │   │   │   ├── DataSplit.py
+    │   │   │   └── DataTransform.py
     │   │   ├── Text
     │   │   │   ├── BytePairEncoding.py
     │   │   │   ├── TextPreprocess.py
     │   │   │   ├── Tokenize.py
-    │   │       └── Vocabulize.py
+    │   │   │   └── Vocabulize.py
     │   │   └── image
     │   │       └── PatchOperation.py
     │   ├── apps
@@ -94,6 +96,7 @@ also recommend to have:
     │       ├── _demo
     │       ├── bert
     │       ├── gan
+    │       ├── gpt
     │       ├── recsys
     │       ├── transformer
     │       ├── vit

@@ -14,28 +14,38 @@ from .BytePairEncoding import segment_word_BPE_greedy
 
 def line_tokenize_simple(
         sentence:str,
-        symbols:t.List[str] | t.Set[str] | None = None
-        ) -> t.List[str]:
+        need_preprocess:bool,
+        need_lower:bool = True, separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', normalize_whitespace:bool = True,
+        *args, **kwargs
+        ):
     
-    return sentence.split(' ')
+    if need_preprocess:
+        # 处理空白和大小写。空白：该加单空格的地方加，该改单空格的地方改，该去单空格的地方去
+        # separate_puncs 确认了当作 独立token 的标点符号
+        # normalize_whitespace 确认了 单空格之外的 空白字符（包括单空格之间的空字符）是否是 独立token
+        sentence = preprocess_space(sentence, need_lower, separate_puncs, normalize_whitespace)
+        
+    # [] represents unsegmented part of sentence
+    return sentence.split(' '), []
 
 
 
 def line_tokenize_greedy(
         sentence:str,
-        symbols:t.List[str] | t.Set[str],
-        EOW_token:str,
+        need_preprocess:bool,
+        need_lower:bool = True, separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', normalize_whitespace:bool = True,
+        symbols:t.List[str] | t.Set[str] = [],
+        EOW_token:str = "</w>",
         UNK_token:str = "<unk>",
-        need_lower:bool = True,
         flatten:bool = True,
-        separate_puncs:str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-        normalize_whitespace:bool = True,
+        *args, **kwargs
         ):
 
-    # 处理空白和大小写。空白：该加单空格的地方加，该改单空格的地方改，该去单空格的地方去
-    # separate_puncs 确认了当作 独立token 的标点符号
-    # normalize_whitespace 确认了 单空格之外的 空白字符（包括单空格之间的空字符）是否是 独立token
-    sentence = preprocess_space(sentence, need_lower, separate_puncs, normalize_whitespace)
+    if need_preprocess:
+        # 处理空白和大小写。空白：该加单空格的地方加，该改单空格的地方改，该去单空格的地方去
+        # separate_puncs 确认了当作 独立token 的标点符号
+        # normalize_whitespace 确认了 单空格之外的 空白字符（包括单空格之间的空字符）是否是 独立token
+        sentence = preprocess_space(sentence, need_lower, separate_puncs, normalize_whitespace)
 
     # 给每个 word和 独立token 后面添加 eow_token
     sentence = attach_EOW_token(sentence, EOW_token)

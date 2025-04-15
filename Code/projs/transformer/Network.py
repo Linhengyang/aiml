@@ -37,9 +37,11 @@ class TransformerEncoder(Encoder):
 
         # src_valid_lens shape: (batch_size,)int32
 
+        # source input data embedding
         # src_embd: shape (batch_size, num_steps, num_hiddens)
         src_embd = self.embedding(src) * math.sqrt(self.num_hiddens) # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
+        # source position embedding: 没有 bos, 从 1 开始到 num_steps
         # pos_embd: (1, num_steps, num_hiddens)
         # 1 到 num_steps, 所有位置都需要position embed. 0 是给 <bos> 的. src里没有bos
         position_ids = torch.arange(1, num_steps+1, dtype=torch.int64)
@@ -105,25 +107,30 @@ class TransformerDecoder(AttentionDecoder):
         #        position_ids: 推理时阶段时, 对于第 1 次infer, position_ids 应该是 tensor([0]), 因为此时 tgt_dec_input 是 <bos>, KV_Caches 为 {}
         #                      对于第 i > 1 次infer, position_ids = tensor([i-1]), 因为此时 tgt_dec_input position 是 i-1, 即 KV_Cacues 的 value 的第二维度
         
+        # target input embedding
         # tgt_dec_input_embd: shape (batch_size, num_steps, num_hiddens)
         tgt_dec_input_embd = self.embedding(tgt_dec_input) * math.sqrt(self.num_hiddens) # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
-        # 训练模式
+        # target position embedding
+        # 训练模式: input 的 timesteps 是从 0(bos) 到 num_steps-1
         if self.training:
-            _, num_steps = tgt_query.shape
-            position_ids = torch.arange(0, num_steps, dtype=torch.int64) # (num_steps,)
-        # 推理模式
+            _, num_steps = tgt_dec_input.shape
+            position_ids = torch.arange(0, num_steps, dtype=torch.int64, device=tgt_dec_input.device) # (num_steps,)
+        # 推理模式: 对于第i次infer, input 的 timestep 就是 i-1, 而这个信息可以从 KV_Caches 的values 中的第二个维度(dim=1)得到
         else:
-            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].dim(1) ], dtype=torch.int64) # (1,)
+            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].size(1) ],
+                                        dtype=torch.int64, device=tgt_dec_input.device) # (1,)
 
         # input embeddings + position embedding
         tgt_query = self.dropout(tgt_dec_input_embd + self.pos_encoding(position_ids))
 
         # Decoder Block 的输入 tgt_query, src_enc_info, KV_Caches
         for blk in self.blks:
-            # 循环过程中, 每次循环, KV_Caches 的 values tensor 全部被更新一遍
+            # 循环过程中, 单次 blk 执行, 更新了 该 blk 对应的 KV_Caches 的 block-ID: tensor 的 kv对
             tgt_query, KV_Caches = blk(tgt_query, src_enc_info, KV_Caches)
         
+        # 一次 infer forward 过程, KV_Caches 中的每个 key-value pair, 都被更新, 则 整个 KV_Caches 被更新
+
         #train: output[0] shape: (batch_size, num_steps, vocab_size)tensor of logits,  timestep 从 1 到 num_steps;
         #       output[1]: None
         #infer: output[0] shape: (1, 1, vocab_size)tensor of logits, 对于第i次infer, timestep 是 i;

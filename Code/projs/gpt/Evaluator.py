@@ -4,7 +4,7 @@ from ...Compute.VisualizeTools import Animator
 import yaml
 
 
-configs = yaml.load(open('Code/projs/_demo/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
 
 

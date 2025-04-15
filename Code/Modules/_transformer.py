@@ -128,11 +128,8 @@ class TransformerDecoderBlock(nn.Module):
         if self.training:
             # train 过程中, tgt_query 是一个 shape 为 (batch_size, num_steps, d_dim) 的tensor. 时间步为 0 至 num_steps-1
             # 代表 target sequence timestep 0 至 num_steps-1
-            assert tgt_query.shape[-1] == src_enc_seqs.tgt_query[-1],\
+            assert tgt_query.shape[-1] == src_enc_seqs.shape[-1],\
                 f'training: enc output & dec input block {self.blk_ind} are not in same shape'
-            
-            # assert tgt_query.shape[0] == src_enc_seqs.shape[0] == src_valid_lens.shape[0], \
-            #     f'training: enc output & src valid lens & dec input block {self.blk_ind} differ batch_size'
             
             batch_size, num_steps = tgt_query.shape[:-1]
 
@@ -146,12 +143,14 @@ class TransformerDecoderBlock(nn.Module):
             # 代表 target sequence hat timestep i-1   以此 tgt_query 为 q, target sequence hat timestep 0 - i-1 为KV, 生成 target sequence hat timestep i
             assert type(KV_Caches) == dict, f'in infer mode, a dictionary as KV_Caches must be input'
 
-            # 对于第i次infer, tgt_query 的时间步是 i-1, KV 需要 target sequence hat timestep 0 - i-1, 所以需要额外输入 target sequence hat timestep 0 - i-2
+            # 对于第i次infer, i = 1, 2, ..., num_steps, 分别代表 生成 target sequence hat 的 timesteps 1, 2, ..., num_steps
+            # tgt_query 的时间步是 i-1, KV 需要 target sequence hat timestep 0 - i-1, 所以需要额外输入 target sequence hat timestep 0 - i-2
             # 对 KV_Caches 当前 block 对应的 KV_Caches tensor 作更新
             try:
                 # i = 2, ..., num_steps
-                KV_Caches[self.blk_ind] = torch.cat([KV_Caches[self.blk_ind], tgt_query], dim=1) # (1, i-2, d_dim) + (1, 1, d_dim) = (1, i-1, d_dim)
-            except KeyError: # 从<bos> infer第一个token时, KV_Caches 于 当前 block 没有 target sequence hat 存档
+                KV_Caches[self.blk_ind] = torch.cat([KV_Caches[self.blk_ind], tgt_query], dim=1) # shape (1, i-1, d_dim) + (1, 1, d_dim) = (1, i, d_dim)
+                # timesteps 是 0 至 i-2 append i-1, 得到 0 至 i-1
+            except KeyError: # 从<bos> infer第一个token时, KV_Caches 于 当前 block id, 没有 target sequence hat cache
                 # i = 1
                 KV_Caches[self.blk_ind] = tgt_query
             

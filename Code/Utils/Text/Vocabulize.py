@@ -66,7 +66,11 @@ class Vocab:
     def to_tokens(self, indices):
         '''提供数字to文字映射, 对给定的idx, 返回其对应的token. 如果输入有hierarchy结构, 则以相同的结构返回'''
         if not isinstance(indices, (list, tuple)):
-            return self.idx_to_token[indices]
+            try:
+                return self.idx_to_token[indices]
+            except IndexError:
+                return self.idx_to_token[ self.unk ] # 如果出现indexerror, 返回 UNK_token
+        
         return [self.to_tokens(index) for index in indices]
     
     @property

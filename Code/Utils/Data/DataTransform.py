@@ -48,6 +48,8 @@ def onehot_concat_multifeatures(input_tensor: Tensor, num_classes: Tensor) -> Te
     offsets = torch.cat([torch.zeros(1,), torch.cumsum(num_classes, dim=0)[:-1]], dim=0).type(num_classes.dtype).to(input_tensor.device)
     return nn.functional.one_hot(input_tensor + offsets, num_classes.sum()).sum(dim=-2)
 
+
+
 def offset_multifeatures(input_tensor: Tensor, num_classes: Tensor) -> Tensor:
     '''
     此函数将多个categorical features根据num_classes作offset变换. offset变换指: feat1不变, feat2 = feat2_level + feat1_size, feat3 = feat3_level + feat1&2_size
@@ -57,6 +59,8 @@ def offset_multifeatures(input_tensor: Tensor, num_classes: Tensor) -> Tensor:
     assert torch.all(input_tensor < num_classes), 'index number exceeds or be equal to num_classes. Index number must be smaller than corresponding num_class'
     offsets = torch.cat([torch.zeros(1,), torch.cumsum(num_classes, dim=0)[:-1]], dim=0).type(num_classes.dtype).to(input_tensor.device)
     return (input_tensor + offsets).type(input_tensor.dtype)
+
+
 
 def _check_adjust_for_label_mapper(value_mappers, set_label_mappers=None):
     _new_mappers = {}
@@ -80,6 +84,8 @@ def _check_adjust_for_label_mapper(value_mappers, set_label_mappers=None):
     else: # 不需要更改
         pass
     return value_mappers
+
+
 
 class CategDataParser:
     '''

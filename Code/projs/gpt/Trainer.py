@@ -4,7 +4,7 @@ from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
 from ...Compute.TrainTools import easyTrainer
 import yaml
-configs = yaml.load(open('Code/projs/_demo/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('Code/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 online_log_dir, online_model_save_dir, proj_name = \
     configs['online_log_dir'], configs['online_model_save_dir'], configs['proj_name']
 
