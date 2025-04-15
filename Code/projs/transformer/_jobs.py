@@ -232,7 +232,7 @@ def infer_job(saved_params_fpath, src_symbols_path):
     tgt_vocab.load( tgt_vocab_dir )
 
     # set device
-    device = torch.device('cpu')
+    device = torch.device('cuda')
 
     # construct model
     test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
@@ -254,11 +254,14 @@ def infer_job(saved_params_fpath, src_symbols_path):
     translator = sentenceTranslator(src_vocab, tgt_vocab, net, num_steps, search_mode, device=device, beam_size=3, length_factor=5) #加大对长句的奖励
 
     # predict
-    src_sentence = 'i\'m home .'
+    # src_sentence = 'i\'m home .'
+    src_sentence = 'Please come into the room.'
     print(translator.predict(src_sentence, src_symbols_path, '</w>'))
 
     # evaluate output
-    print('bleu score: ', translator.evaluate('je suis chez moi .'))
+    # print('bleu score: ', translator.evaluate('je suis chez moi .'))
+    print('bleu score: ', translator.evaluate('Entre dans la pièce, je te prie.'))
+    
     print('pred score: ', translator.pred_scores)
 
     print('infer job complete')
