@@ -4,14 +4,18 @@ import math
 from ...Compute.PredictTools import easyPredictor
 
 class projPredictor(easyPredictor):
-    def __init__(self, device=None):
-        pass
 
-    def predict(self):
+    def __init__(self, device=None, *args, **kwargs):
         pass
+    
 
-    def evaluate(self):
+    def predict(self, *args, **kwargs):
         pass
+    
+
+    def evaluate(self, *args, **kwargs):
+        pass
+    
 
     @property
     def pred_scores(self):
