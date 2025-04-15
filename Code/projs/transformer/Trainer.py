@@ -97,8 +97,24 @@ class transformerTrainer(easyTrainer):
             for net_inputs_batch, loss_inputs_batch in self.test_iter:
                 break
             try:
-                Y_hat, _ = self.net(*net_inputs_batch)
-                l = self.loss(Y_hat, *loss_inputs_batch).sum()
+                # Y_label_batch: (batch_size, num_steps)
+                # Y_valid_lens_batch: (batch_size,)
+                Y_label_batch, Y_valid_lens_batch = loss_inputs_batch
+
+                self.optimizer.zero_grad()
+                Y_hat, _ = self.net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
+                Y_hat = Y_hat.permute(0,2,1) # (batch_size, num_steps, vocab_size) --> (batch_size, vocab_size, num_steps)
+
+                # generate T/F or 0/1 mask tensor with shape (batch_size, num_steps)
+                num_steps = Y_label_batch.size(1)
+
+                # [[0,1,2,...,num_steps-1]] ?<? [ [valid_len_sample1], [valid_len_sample2],...,[valid_len_sampleN] ]
+                # ----> T/F mask tensor shape as (N, num_steps)
+                valid_area_mask = torch.arange(num_steps, dtype=torch.int32, device=self.device).unsqueeze(0) < Y_valid_lens_batch.unsqueeze(1)
+
+                # get loss
+                l = self.loss(Y_hat, Y_label_batch, valid_area_mask)
+                
                 del Y_hat, l
 
                 self.net_resolved = True
@@ -180,11 +196,26 @@ class transformerTrainer(easyTrainer):
 
 
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
-                # net_inputs_batch = (X_batch, Y_frontshift1_batch, X_valid_lens_batch)
-                # loss_inputs_batch = (Y_batch, Y_valid_lens_batch)
+
+                # Y_label_batch: (batch_size, num_steps)
+                # Y_valid_lens_batch: (batch_size,)
+                Y_label_batch, Y_valid_lens_batch = loss_inputs_batch
+
                 self.optimizer.zero_grad()
                 Y_hat, _ = self.net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
-                l = self.loss(Y_hat, *loss_inputs_batch)
+                Y_hat = Y_hat.permute(0,2,1) # (batch_size, num_steps, vocab_size) --> (batch_size, vocab_size, num_steps)
+
+                # generate T/F or 0/1 mask tensor with shape (batch_size, num_steps)
+                num_steps = Y_label_batch.size(1)
+
+                # [[0,1,2,...,num_steps-1]] ?<? [ [valid_len_sample1], [valid_len_sample2],...,[valid_len_sampleN] ]
+                # ----> T/F mask tensor shape as (N, num_steps)
+                valid_area_mask = torch.arange(num_steps, dtype=torch.int32, device=self.device).unsqueeze(0) < Y_valid_lens_batch.unsqueeze(1)
+
+                # get loss
+                l = self.loss(Y_hat, Y_label_batch, valid_area_mask)
+
+                # bp
                 l.sum().backward()
 
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
