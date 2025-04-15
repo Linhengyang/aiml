@@ -40,13 +40,13 @@ also recommend to have:
 
 ---
     model
-    ├── mlp
-    ├── transformer
-    ├── vit
+    ├── proj1
+    ├── proj2
+    ├── proj3
     logs
-    ├── mlp
-    ├── transformer
-    ├── vit
+    ├── proj1
+    ├── proj2
+    ├── proj3
     aiml
     ├── Code
     │   ├── Base
@@ -96,6 +96,7 @@ also recommend to have:
     │       ├── _demo
     │       ├── bert
     │       ├── gan
+    │       ├── gpt
     │       ├── recsys
     │       ├── transformer
     │       ├── vit
