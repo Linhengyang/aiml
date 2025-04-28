@@ -59,7 +59,7 @@ def patchify(img_batch, patch_size):
     '''
     input:
         1. img_batch: tensor with shape (batch_size, num_channels, h, w)
-        2. patch_size: 2-D size of patch, (p_h, p_w)
+        2. patch_size: 2-D size of patch, (patch_height, patch_width)
 
     output:
         batch of sequence of patches, with shape:
@@ -68,7 +68,7 @@ def patchify(img_batch, patch_size):
     '''
     # img_batch shape:(batch_size, num_channels, h, w)
     padImgBatch = minpad_to_divide(img_batch, patch_size) # padImgBatch shape: (batch_size, num_channels, height+pad_num_h, width+pad_num_w)
-
+    
     batch_size, num_chnls, _, _ = img_batch.shape
     p_h, p_w = patch_size
 
