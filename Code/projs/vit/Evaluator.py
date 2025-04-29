@@ -6,6 +6,8 @@ configs = yaml.load(open('Code/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullL
 reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
 online_log_dir, proj_name = configs['online_log_dir'], configs['proj_name']
 
+
+
 class vitEpochEvaluator(epochEvaluator):
     reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集
     eval_cnts = eval_cnt_in_train # 评价当前model, 需要validate data或infer.避免次数太多

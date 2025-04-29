@@ -24,6 +24,8 @@ class FMNISTDatasetOnline(torch.utils.data.Dataset):
     def img_shape(self):
         return self._img_shape
 
+
+
 def decode_idx3_ubyte(file):
     '''
     解析idx3数据文件: 图像, 返回(num_examples, 1, 28, 28)float的tensor
@@ -46,6 +48,8 @@ def decode_idx3_ubyte(file):
     data = torch.tensor(struct.unpack_from(fmt_image, bin_data, offset)).reshape(numImgs, 1, numRows, numCols)
     return data
 
+
+
 def decode_idx1_ubyte(file):
     """
     解析idx1数据文件: 标签, 返回(num_examples, )int64的tensor
@@ -67,6 +71,8 @@ def decode_idx1_ubyte(file):
     fmt_image = '>'+str(numImgs)+'B'
     data = torch.tensor(struct.unpack_from(fmt_image, bin_data, offset))
     return data
+
+
 
 class FMNISTDatasetLocal(torch.utils.data.Dataset):
     def __init__(self, idx3fpath, idx1fpath):
