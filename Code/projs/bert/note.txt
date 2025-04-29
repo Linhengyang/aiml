@@ -16,7 +16,7 @@ Large-Scale Pretrain
 
 3. fine-tune BERT 
     将pretrain bert model的token representions作为下游任务(scratch)的输入, 直至输出scratch任务的label, 组建成一个完整的模型.
-    用scratch任务的数据(input和label)来train scratch layers, 以及update bert modules.
+    用scratch任务的数据(input和label)来train scratch layers, 以及update bert modules(即pretain部分和fine-tune部分被一起更新).
     有一种下游任务叫text pair classification, 两个sequence是否配对. 这是因为bert的预训练任务中, 还有一个loss, 是预测1个sentence是否
     直接连接另1个. 然而在一些bert变种模型中(RoBERTa), 研究者发现这个任务的loss是无用的. bert的变种很多, 有结构上的变化, 更有预训练任务的变化.
 

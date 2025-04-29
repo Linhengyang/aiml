@@ -6,7 +6,18 @@ import torch.nn as nn
 import torch
 
 class ViTEncoder(Encoder):
-    def __init__(self, img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens, num_classes=10, use_bias=False):
+    def __init__(self,
+                 img_shape,
+                 patch_size,
+                 num_blks,
+                 num_heads,
+                 num_hiddens,
+                 emb_dropout,
+                 blk_dropout,
+                 mlp_num_hiddens,
+                 num_classes=10,
+                 use_bias=False):
+        
         super().__init__()
         self.patchify = Patchify(img_shape, patch_size)
         self.dense1 = nn.Linear(self.patchify.patch_flatlen, num_hiddens)
