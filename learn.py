@@ -257,9 +257,9 @@ if __name__ == "__main__":
 
             if valid_lens:
                 # 如果有 valid_lens, 需要用 mask 确保只有 valid logits 参与生成 概率分布
-                from workspace.aiml.Code.Base.Functions.Mask import valid_slice_mask, frontValidMask
+                from workspace.aiml.Code.Base.Functions.Mask import mask_first_n_valid
 
-                mask = valid_slice_mask(logits.shape, valid_lens)
+                mask = mask_first_n_valid(logits.shape, valid_lens)
                 logits[~mask] = -1e20 # invalid logits 用 负无穷 slice-reset. 此操作梯度可反传
 
             # 如果没有 valid_lens, 直接使用 softmax 生成 概率分布 weights
