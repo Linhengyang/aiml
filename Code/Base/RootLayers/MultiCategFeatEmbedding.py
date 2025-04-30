@@ -27,10 +27,12 @@ class MultiCategFeatEmbedding(nn.Module):
     Embedding layer for multiple categorical features which had already been index-preprocessed.
     Compare with vanilla nn.Embedding:
         Embedding: embeds different values of the same categorical feature into different vectors
-        MultiCategFeatEmbedding: embeds different values of different categorical features(1 value per each feature) into different independent vectors
+        MultiCategFeatEmbedding:
+            embeds different values of different categorical features(1 value per each feature) into different independent vectors
     
-    If one wants to use Emebedding for different values of different categorical features(1 value per each feature), one can offset right shift values by 
-    sum of number of value_sizes of previous categorical features.
+    If one wants to use Emebedding for different values of different categorical features(1 value per each feature),
+    one can offset right shift values by sum of number of value_sizes of previous categorical features.
+    
     See `offset_multifeatures` function or `onehot_concat_multifeatures` function in Utils/Data/DataTransform
 
     args:
