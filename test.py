@@ -1,6 +1,6 @@
 # test.py
 
-from Code.Utils.image.PatchOperation import patchify
+from workspace.aiml.Code.Base.Functions.PatchOperation import patchify
 import torch
 import torchvision
 from torchvision.io import read_image, ImageReadMode
