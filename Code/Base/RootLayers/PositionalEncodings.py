@@ -21,24 +21,24 @@ class TrigonoAbsPosEnc(nn.Module):
     def __init__(self, num_hiddens, max_len=1000):
         super().__init__()
 
-        # PosInfo: a long enough matrix with same d(d_dim) as input, (max_len, d_dim)
-        PosInfo = torch.zeros((1, max_len, num_hiddens))
+        # PosEnc: a long enough matrix with same d(d_dim) as input, (max_len, d_dim)
+        PosEnc = torch.zeros((1, max_len, num_hiddens))
         # X 2-D tensor, 行idx是0到max_len-1, 列idx是0到num_hiddens-1之内的偶数
         X = torch.arange(max_len, dtype=torch.float32).reshape(-1, 1) / \
             torch.pow(10000, torch.arange(0, num_hiddens, 2, dtype=torch.float32).reshape(1, -1) / num_hiddens)
         
-        PosInfo[0, :, 0::2] = torch.sin(X) # P的偶数列填入sin(X)
+        PosEnc[0, :, 0::2] = torch.sin(X) # P的偶数列填入sin(X)
         try:
-            PosInfo[0, :, 1::2] = torch.cos(X) # P的奇数列填入cos(X). 当最后一列idx=num_hiddens-1是奇数时,正好填入
+            PosEnc[0, :, 1::2] = torch.cos(X) # P的奇数列填入cos(X). 当最后一列idx=num_hiddens-1是奇数时,正好填入
         except:
-            PosInfo[0, :, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx=num_hiddens-1是偶数时,去掉X的最后一列再填入
+            PosEnc[0, :, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx=num_hiddens-1是偶数时,去掉X的最后一列再填入
 
-        self.register_buffer('P', PosInfo)
+        self.register_buffer('PosEnc', PosEnc)
 
     def forward(self, position_ids):
         # position_ids: 1D tensors of int64, shall be inside [0, max_len-1]
         
-        return self.P[:, position_ids, :] # shape as (1, len(position_ids), num_hiddens)
+        return self.PosEnc[:, position_ids, :] # shape as (1, len(position_ids), num_hiddens)
 
 
 
