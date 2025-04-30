@@ -83,23 +83,24 @@ def patchify(img_batch, patch_size, pad_mode="constant", pad_value=0):
 
     # unfold(dim=3, p_w, p_w):
     # shape (B, _, height_paded, width_paded) -vanilla-> (B, _, height_paded, width_paded//p_w, p_w)
-    # stride (B, _, width_paded, 1) -vanilla-> (B, _, width_paded, p_w, 1)
+    # stride (_, _, width_paded, 1) -vanilla-> (_, _, width_paded, p_w, 1)
 
     # reshape to fusion dim2 and dim3
     # shape (B, _, height_paded, width_paded//p_w, p_w) --collapse dim2 and dim3--> (B, _, height_paded*width_paded//p_w, p_w)
-    # stride (B, _, width_paded, p_w, 1) --collapse dim2 and dim3--> (B, _, p_w, 1)
+    # stride (_, _, width_paded, p_w, 1) --collapse dim2 and dim3--> (_, _, p_w, 1)
     
 
     # continue to unfold(dim=2, p_h, p_h):
     # shape (B, _, height_paded*width_paded//p_w, p_w) -vanilla-> (B, _, height_paded//p_h*width_paded//p_w, p_h, p_w)
     #       -permute-> (B, _, height_paded//p_h*width_paded//p_w, p_w, p_h)
 
-    # stride (B, _, p_w, 1) -vanilla-> (B, _, p_h*p_w, p_w, 1)
-    #       -permute-> (B, _, p_h*p_w, 1, p_w)
+    # stride (_, _, p_w, 1) -vanilla-> (_, _, p_h*p_w, p_w, 1)
+    #       -permute-> (_, _, p_h*p_w, 1, p_w)
 
     # permute(0, 2, 1, 4, 3):
     # shape(B, _, height_paded//p_h*width_paded//p_w, p_w, p_h) --> (B, height_paded//p_h*width_paded//p_w, _, p_h, p_w)
-    # stride(B, _, p_h*p_w, 1, p_w) --> (B, p_h*p_w, _, p_w, 1)
+    # stride(_, _, p_h*p_w, 1, p_w) --> (_, p_h*p_w, _, p_w, 1)
+    
 
     return padImgBatch.unfold(3, p_w, p_w).reshape(batch_size, num_chnls, -1, p_w).unfold(2, p_h, p_h).permute(0, 2, 1, 4, 3)
 

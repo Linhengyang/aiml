@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     print(img_batch.shape)
 
-    patch_size = (100, 100)
+    patch_size = (100, 150)
 
     patches_tensor = patchify(img_batch, patch_size).squeeze(0) # (num_patches, num_channels, patch_height, patch_width)
 
