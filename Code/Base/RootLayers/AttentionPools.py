@@ -1,76 +1,75 @@
-import numpy as np
 import torch
 from torch import nn
-from torch.nn import functional as F
 import math
+from ..Functions.Mask import mask_first_n_valid
+
+
+
+
+
+    
+# 将S打分矩阵的部分元素换成无穷小(index-set, or slice-copy), 然后再作softmax操作.
+# 在torch框架下,这两个操作都是梯度可传的, grad_fn 分别是 CopySlice 和 softmax
+
+# 1. 保证了invalid位置的元素, 不会参与计算下一层valid位置的元素.(因为softmax操作. softmax(无穷小)=0, 使得invalid位置元素的权重为0)
+# 2. 保证了invalid位置的元素, 不论结果如何, 都不会在BP中贡献更新组成运算它们的参数.(因为 slice-copy 操作)
+
+# masked_softmax是为了完成两个目标:
+#     1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征.
+#     2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens生成
+
+# masked_softmax 生成了 shape 为(batch_size, n_queries, n_kvpairs) 的 W, 和 V (batch_size, n_kvpairs, v_size) 作 bmm 乘法, 即 batch_size 个
+# (n_queries, n_kvpairs) @ (n_kvpairs, v_size) 矩阵乘法, 结果是 n_queries 个 V 行向量的凸线性组合, shape 为 (n_queries, v_size)
+
+# 从单条 query 的结果来看, Q (batch_size, n_queries, qk_size) 中的单条query (1, 1, qk_size) 与 K (batch_size, n_kvpairs, qk_size) 转置的 单样本
+# (1, qk_size, n_kvpairs) 生成 单条logits (1, 1, n_kvpairs)。经过mask_softmax操作后, 前 valid 部分形成 单条凸组合分布权重，后 invalid 部分权重为 0
+
+# 即: n_queries 次(1, 1, qk_size) @ (1, qk_size, n_kvpairs) --> n_queries 条凸组合分布权重 (1, 1, n_kvpairs)
+# mask_softmax只保留了 n_kvpairs 中前valid部分, 所以 K的单样本 (1, n_kvpairs, qk_size) 中只有前 valid 部分参与运算, 后 invalid 部分被舍弃
+# 单条凸组合分布权重 (1, 1, n_kvpairs) @ V的单样本 (1, n_kvpairs, v_size)，得到的 (1, 1, v_size) 中只包含了 V 的单样本中 前 valid 部分.
+
+# 综上, scaled-dot-production with masked-softmax, 即 masked_softmax(Q @ K', valid_lens) @ V 操作中, 
+# Q: (batch_size, n_queries, qk_size) @ K: (batch_size, n_kvpairs, qk_size)  --transpose_matprod--> S: (batch_size, n_queries, n_kvpairs)
+# --masked_softmax_with_valid_lens(batch_size, n_queries)--> W:  (batch_size, n_queries, n_kvpairs) @ V: (batch_size, n_kvpairs, v_size)
+# = output: (batch_size, n_queries, v_size)
+# Q中 所有 query 分别和 K中 valid 部分 得到了 W中 valid 部分, 然后和 V中 valid 部分 得到了结果。简而言之, valid_lens 作用在 K 和 V 的 n_kvpairs 维度
+# mased_softmax with valid_lens 使得 在 QkV attention 计算中, K 和 V 只有 valid 部分参与了运算.
+# Q: (batch_size, n_queries, qk_size) 代表了 (batch_size, n_queries)次 (1,1, qk_size) 查询. 查询结果output: (batch_size, n_queries, v_size)
+# valid_lens 不能作用在 Q 和 output 中 的 n_queries 维度.
+
 
 def masked_softmax(S, valid_lens):
     '''
     inputs: S, valid_lens
-        S: 3-Dtensor, shape: (batch_size, n_queries, n_kvpairs);
-        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_queries)
+        S: 3-Dtensor, shape: (batch_size, n_query, n_kv);
+        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_query)
         (if len=0 in valid_lens, it means average all Vs in QKV pool)
     
-    returns: convex weight tensor with shape (batch_size, n_queries, n_kvpairs), denoted as W
+    returns: convex weight tensor with shape (batch_size, n_query, n_kv), denoted as W
         W[sample_idx, query_idx, :] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
 
     explains:
         for sample i,
             if valid_lens is 1-D tensor, W[i][:, k] are zeros when k > valid_lens[i]
             if valid_lens is 2-D tensor, W[i][j, k] are zeros when k > valid_lens[i, j], here j is query_idx
-    
-    将S打分矩阵的部分元素换成无穷小(index-set, or slice-copy), 然后再作softmax操作.
-    在torch框架下,这两个操作都是梯度可传的, grad_fn 分别是 CopySlice 和 softmax
-
-    1. 保证了invalid位置的元素, 不会参与计算下一层valid位置的元素.(因为softmax操作. softmax(无穷小)=0, 使得invalid位置元素的权重为0)
-    2. 保证了invalid位置的元素, 不论结果如何, 都不会在BP中贡献更新组成运算它们的参数.(因为 slice-copy 操作)
-    
-    masked_softmax是为了完成两个目标:
-        1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征.
-        2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens生成
-    
-    masked_softmax 生成了 shape 为(batch_size, n_queries, n_kvpairs) 的 W, 和 V (batch_size, n_kvpairs, v_size) 作 bmm 乘法, 即 batch_size 个
-    (n_queries, n_kvpairs) @ (n_kvpairs, v_size) 矩阵乘法, 结果是 n_queries 个 V 行向量的凸线性组合, shape 为 (n_queries, v_size)
-
-    从单条 query 的结果来看, Q (batch_size, n_queries, qk_size) 中的单条query (1, 1, qk_size) 与 K (batch_size, n_kvpairs, qk_size) 转置的 单样本
-    (1, qk_size, n_kvpairs) 生成 单条logits (1, 1, n_kvpairs)。经过mask_softmax操作后, 前 valid 部分形成 单条凸组合分布权重，后 invalid 部分权重为 0
-
-    即: n_queries 次(1, 1, qk_size) @ (1, qk_size, n_kvpairs) --> n_queries 条凸组合分布权重 (1, 1, n_kvpairs)
-    mask_softmax只保留了 n_kvpairs 中前valid部分, 所以 K的单样本 (1, n_kvpairs, qk_size) 中只有前 valid 部分参与运算, 后 invalid 部分被舍弃
-    单条凸组合分布权重 (1, 1, n_kvpairs) @ V的单样本 (1, n_kvpairs, v_size)，得到的 (1, 1, v_size) 中只包含了 V 的单样本中 前 valid 部分.
-
-    综上, scaled-dot-production with masked-softmax, 即 masked_softmax(Q @ K', valid_lens) @ V 操作中, 
-    Q: (batch_size, n_queries, qk_size) @ K: (batch_size, n_kvpairs, qk_size)  --transpose_matprod--> S: (batch_size, n_queries, n_kvpairs)
-    --masked_softmax_with_valid_lens(batch_size, n_queries)--> W:  (batch_size, n_queries, n_kvpairs) @ V: (batch_size, n_kvpairs, v_size)
-    = output: (batch_size, n_queries, v_size)
-    Q中 所有 query 分别和 K中 valid 部分 得到了 W中 valid 部分, 然后和 V中 valid 部分 得到了结果。简而言之, valid_lens 作用在 K 和 V 的 n_kvpairs 维度
-    mased_softmax with valid_lens 使得 在 QkV attention 计算中, K 和 V 只有 valid 部分参与了运算.
-    Q: (batch_size, n_queries, qk_size) 代表了 (batch_size, n_queries)次 (1,1, qk_size) 查询. 查询结果output: (batch_size, n_queries, v_size)
-    valid_lens 不能作用在 Q 和 output 中 的 n_queries 维度.
     '''
-
-    # 确定2-D tensor的mask操作。这里X是2-D tensor, valid_len是1-D tensor
-    def _sequence_mask(X, valid_len, value=0):
-        maxlen = X.size(1)
-        
-        mask = torch.arange(maxlen, dtype=torch.float32, device=X.device).unsqueeze(0) < valid_len.unsqueeze(1)
-        X[~mask] = value # indexput 操作是梯度可传的. 被put的位置在之后的BP反传中,将不会贡献更新组成运算它们的参数
-        return X
     
-    # 将S和valid_lens分别转化为2-D tensor和1-D tensor
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
+        return nn.functional.softmax(S, dim=-1)
+    
+    elif valid_lens.dim() == 1: # valid_lens: (batch_size, ) --> (batch_size, 1) --> (batch_size, n_query)
+        valid_lens = torch.repeat_interleave(valid_lens.unsqueeze(1), repeats=S.shape[1], dim=1)
 
-        return nn.functional.softmax(S, dim=-1) # nn.f.softmax操作是梯度可传的
+    elif valid_lens.dim() == 2: # valid_lens: (batch_size, n_query)
+        assert valid_lens == S.shape[:-1], f"valid_lens {valid_lens} not match with S shape {S.shape}"
+
     else:
-        shape = S.shape # 保存S的shape
-        if valid_lens.dim() == 1:
-            valid_lens = torch.repeat_interleave(valid_lens, shape[1]) # 拉长，返回还是是1-D tensor
-        else:
-            valid_lens = valid_lens.reshape(-1) # 摊平，返回1-D tensor
-        # 将S转化为2-D tensor, last axis不变
-        S = _sequence_mask(S.reshape(-1, shape[-1]), valid_lens, value=-1e20)
+        raise ValueError(f'wrong valid_lens')
+        
+    mask = mask_first_n_valid(S.shape, valid_lens) # mask shape: (batch_size, n_quen_queryries, n_kv)
+    S[~mask] = -1e20 # non-valid 部分填入 负无穷, 这样在 softmax 操作中被消去. index-put操作梯度可传
 
-        return nn.functional.softmax(S.reshape(shape), dim=-1)
+    return nn.functional.softmax(S, dim=-1)
 
 
 
@@ -101,19 +100,28 @@ class AdditiveAttention(nn.Module):
         self.W_k = nn.LazyLinear(num_hiddens, bias=False)
         self.W_v = nn.LazyLinear(1, bias=False)
         self.dropout = nn.Dropout(dropout)
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
-        # m:n_query, q:query_size; n: n_kv, k:key_size; v:value_size
-        # Q_batch: batch of shape(m, q); K_batch: batch of shape(n, k); V_batch: batch of shape(n, v)
-        batch_size, m, q = Q_batch.shape
-        _, n, k = K_batch.shape
-        # Q_batch_tilda shape(batch_size, m, h), K_batch_tilda shape(batch_size, n, h)
-        Q_batch_tilda, K_batch_tilda = self.W_q(Q_batch), self.W_k(K_batch)
-        # S_batch shape是(batch_size, m, n, h)
-        S_batch = Q_batch_tilda.unsqueeze(2).expand(-1, -1, n, -1) + K_batch_tilda.unsqueeze(1).expand(-1, m, -1, -1)
-        Scores = self.W_v(torch.tanh(S_batch)).squeeze(-1) # shape是(batch_size, m, n, 1) --> # shape是(batch_size, m, n)
-        self.attention_weights = masked_softmax(Scores, valid_lens) # shape是(batch_size, m, n)
 
-        return torch.bmm(self.dropout(self.attention_weights), V_batch) # 返回的shape是(batch_size, m, v)
+    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
+        # Q_batch: (batch_size, n_query, q_size); K_batch: (batch_size, n_kv, k_size); V_batch: (batch_size, n_kv, v_size)
+        _, n_query, _ = Q_batch.shape
+        _, n_kv, _ = K_batch.shape
+
+        # Q_batch_tilda shape(batch_size, n_query, h), K_batch_tilda shape(batch_size, n_kv, h)
+        Q_batch, K_batch = self.W_q(Q_batch), self.W_k(K_batch)
+
+        # Q_batch: (batch_size, n_query, h) --> (batch_size, n_query, 1, h) --> (batch_size, n_query, n_kv, h)
+        # K_batch: (batch_size, n_kv, h) --> (batch_size, 1, n_kv, h) --> (batch_size, n_query, n_kv, h)
+        S_batch = Q_batch.unsqueeze(2).expand(-1, -1, n_kv, -1) + K_batch.unsqueeze(1).expand(-1, n_query, -1, -1)
+        # S_batch: (batch_size, n_query, n_kv, h)
+
+        # S_batch: (batch_size, n_query, n_kv, h) --> (batch_size, n_query, n_kv, 1) --> (batch_size, n_query, n_kv)
+        Scores = self.W_v(torch.tanh(S_batch)).squeeze(-1)
+
+        # Scores: (batch_size, n_query, n_kv), valid_lens 指定了每条 query 里的 valid area:(batch_size,) or (batch_size, n_query)
+        self.attention_weights = masked_softmax(Scores, valid_lens)
+
+        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, value_size) ->  (batch_size, n_query, value_size) 
+        return torch.bmm(self.dropout(self.attention_weights), V_batch)
 
 
 

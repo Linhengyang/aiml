@@ -20,9 +20,9 @@ from .TextPreprocess import count_corpus, preprocess_space, attach_EOW_token, te
 
 
 # corpus C 应该是个 counter, tokcombo_freq, key 是 token combo(用空格组合 token), value 是 token组成的词对应的 freq
-# corpus 会更新，要区分tokens(按照 vocab(symbols) V拆分tokens)
-# 所以就是对 counter的 keys 作更改，即 应该合并的tokens 合并成新 token. 但是, 因为要对 每个能改的 key 都作更改，所以需要循环。而在循环中，dict的key是不能变动的
-# 两个解决办法：一 每次都生成一个新的dict，把原来的dict的key-value对 都搬到新dict
+# corpus 会更新, 要区分tokens(按照 vocab(symbols) V拆分tokens)
+# 所以就是对 counter的 keys 作更改, 即 应该合并的tokens 合并成新 token. 但是, 因为要对 每个能改的 key 都作更改, 所以需要循环。而在循环中, dict的key是不能变动的
+# 两个解决办法: 一 每次都生成一个新的dict, 把原来的dict的key-value对 都搬到新dict
 # 二 counter使用 list 数据类型. list的元素是(token_combo, freq)的元组
 
 def init_tokcombo_freqs(
@@ -33,22 +33,22 @@ def init_tokcombo_freqs(
         type:str = 'list'):
     '''
     初始化一个 token combo frequency counter, 类型可以是 dict/list
-    input：
-        raw_corpus：原始的 corpus 统计器，一个 统计 word/punc 频数 的 dict. word/punc 按照原始方式组织
-        reserved_tokens：保留字符, 作为整体不可分割的 token 列表. 在初始化分割时 保留它们作为最小token
-        tail_token：标识原词末尾的符号。
-        attach_tail_token_init：True/False. if True, tail_token和它前面的字符在初始化 token combos的时候 不被分割。
-        type：类型，返回的 token combo 频数 corpus 的类型，可以是 dict / list
+    input: 
+        raw_corpus: 原始的 corpus 统计器, 一个 统计 word/punc 频数 的 dict. word/punc 按照原始方式组织
+        reserved_tokens: 保留字符, 作为整体不可分割的 token 列表. 在初始化分割时 保留它们作为最小token
+        tail_token: 标识原词末尾的符号。
+        attach_tail_token_init: True/False. if True, tail_token和它前面的字符在初始化 token combos的时候 不被分割。
+        type: 类型, 返回的 token combo 频数 corpus 的类型, 可以是 dict / list
     return:
-        一个  token combo 频数 统计器，类型是 输入参数 type
+        一个  token combo 频数 统计器, 类型是 输入参数 type
     explain:
-        token combo 频数统计器中，word/punc 被 单空格拆成了独立字符。用以迭代组合，来创造新的token。每次迭代将出现频次最高的连续token合并，生成新token
+        token combo 频数统计器中, word/punc 被 单空格拆成了独立字符。用以迭代组合, 来创造新的token。每次迭代将出现频次最高的连续token合并, 生成新token
         参数 reserved_tokens 指明了哪些 字符combo 不会被拆分, 作为独立字符
-        参数 tail_token 指明了 end-of-word token。它将被加到 每个 word/punc 的末尾，以区分 中断 和 结束。tail_token 作为 独立字符，不会被拆分
+        参数 tail_token 指明了 end-of-word token。它将被加到 每个 word/punc 的末尾, 以区分 中断 和 结束。tail_token 作为 独立字符, 不会被拆分
         参数 attach_tail_token_init 指明了 end-of-word token 是如何被加到每个 word/punc 的末尾的。
-            True: tail_token 和 末尾char 之间不分割，即 tail_token 从最开始就和末尾字符绑定。
-            False: tail_token 和 末尾char 之间分割。tail_token 作为一个独立 的 字符，参与 token 的合并生成过程
-            区别：业界通常使用 False，这样 token 生成的 灵活性更高，
+            True: tail_token 和 末尾char 之间不分割, 即 tail_token 从最开始就和末尾字符绑定。
+            False: tail_token 和 末尾char 之间分割。tail_token 作为一个独立 的 字符, 参与 token 的合并生成过程
+            区别: 业界通常使用 False, 这样 token 生成的 灵活性更高, 
     '''
     # 输入了 tail_token
 
@@ -59,7 +59,7 @@ def init_tokcombo_freqs(
     
     # 要求 tail_token和它前面的字符在初始化 token combos的时候 被分割。
     elif tail_token:
-        # tail_token 自身应该作为 独立字符，保证不被 分割
+        # tail_token 自身应该作为 独立字符, 保证不被 分割
         reserved_tokens.append( tail_token )
 
     if type == "dict":
@@ -104,7 +104,7 @@ def merge_maxfreq_token_pair(
         symbols: 最频繁出现的 连续 token pair 被合并后, 添加入symbols
     '''
     
-    if merge_mode != 'all': # 当 mode 不为 all 时，以某种方式确定 单个 token pair 以合并
+    if merge_mode != 'all': # 当 mode 不为 all 时, 以某种方式确定 单个 token pair 以合并
 
         if merge_mode == 'first': # 合并 maxfreq 的 token pair 列表中的 第一对pair
             select = 0
@@ -131,8 +131,8 @@ def merge_maxfreq_token_pair(
         new_tokcombo_freqs = {}
 
         for token_combo, freq in tokcombo_freqs.items():
-            # 对于 token_combo / freq 这个 kv对, 不必检测 token combo 是否需要合并，因为都要搬到 新 dict里
-            # 如果该 token_combo 存在 maxfreq token pair, 合并 所有maxfreq_token_pair，即去掉中间的空格; 如果不存在, 那么保持原样
+            # 对于 token_combo / freq 这个 kv对, 不必检测 token combo 是否需要合并, 因为都要搬到 新 dict里
+            # 如果该 token_combo 存在 maxfreq token pair, 合并 所有maxfreq_token_pair, 即去掉中间的空格; 如果不存在, 那么保持原样
             for token_pair in maxfreq_token_pairs:
                 token_combo = token_combo.replace(" ".join(token_pair), "".join(token_pair))
             new_tokcombo_freqs[token_combo] = freq
@@ -142,7 +142,7 @@ def merge_maxfreq_token_pair(
     elif isinstance(tokcombo_freqs, list):
         
         for i, (token_combo, freq) in enumerate(tokcombo_freqs):
-            # 对于 token_combo / freq 这个 kv对，需要检测 token combo 是否需要合并。因为不需要合并的不用改
+            # 对于 token_combo / freq 这个 kv对, 需要检测 token combo 是否需要合并。因为不需要合并的不用改
             maxfreq_toknpair_pattern = '|'.join( [re.escape(' '.join(token_pair))
                                                   for token_pair in maxfreq_token_pairs] ) # tk1 tk2|...|tk3 tk4
             
@@ -181,10 +181,10 @@ def get_maxfreq_token_pair(
     if isinstance(tokcombo_freqs, dict):
         for tokcombo, freq in tokcombo_freqs.items():
             tokens = tokcombo.split()
-            num_tok = len(tokens) # num_tok > 1, OK; num_toke = 1时，说明该 token 没有merge的可能了.
-            # 两种可能：一该 不能 merge 的token 是单个字符，那么最开始就会记录在 vocab(symbols) 里
+            num_tok = len(tokens) # num_tok > 1, OK; num_toke = 1时, 说明该 token 没有merge的可能了.
+            # 两种可能: 一该 不能 merge 的token 是单个字符, 那么最开始就会记录在 vocab(symbols) 里
             # 二该 不能 merge 的token是 merge的结果. 那么 merge 的过程就会记录 该token到 vocab(symbols) 里
-            # 故 若 num_tok = 1，直接不跑 for chunk 是 ok 的
+            # 故 若 num_tok = 1, 直接不跑 for chunk 是 ok 的
             for i in range(num_tok-1):
                 token_pair_freq[(tokens[i], tokens[i+1])] += freq
     
@@ -195,7 +195,7 @@ def get_maxfreq_token_pair(
             for i in range(num_tok-1):
                 token_pair_freq[(tokens[i], tokens[i+1])] += freq
     
-    # 处理 token_pair_freq 为空的极端情况：当且仅当 tokcombo_freqs 为空，又或者 tokcombo_freqs 中所有 tokcombo 都是单token, 即无可合并
+    # 处理 token_pair_freq 为空的极端情况: 当且仅当 tokcombo_freqs 为空, 又或者 tokcombo_freqs 中所有 tokcombo 都是单token, 即无可合并
     if not token_pair_freq:
         return (), 0
 
@@ -224,8 +224,8 @@ def get_BPE_symbols(
     input:
         text: 输入文本, 用以 构建 token symbols 集合
         tail_token: 用来标记每个 单词的末尾, 区分从中间分割的token和结尾token。会被加入到 输出的集合中。
-        merge_times: 超参数，用来确定 生成的 token symbols集合大小
-        merge_mode: 当有多个 token pair 是 最大出现频率的时候，采用什么方法选择 该合并的 token pair
+        merge_times: 超参数, 用来确定 生成的 token symbols集合大小
+        merge_mode: 当有多个 token pair 是 最大出现频率的时候, 采用什么方法选择 该合并的 token pair
             all全部都合并 / first第一个合并 / random 随机选 / shortest 最短的合并
         min_occur_freq_merge: 最低要合并的token pair 出现频率。出现频率小于这个值的 token pair 不再合并添加到集合中
         reserved_tokens: 保留token组合. 列表中的tokens将被作为最小单元保留, 不会被分割。会出现在 输出的集合中
@@ -248,10 +248,10 @@ def get_BPE_symbols(
     # 原始的 corpus counter
     raw_corpus = count_corpus(text_normspace_appdtail.split(" "))
 
-    # 初始化 tokcombo_freqs：用单空格 分割 corpus 中的key，至不可分割粒度。参数 reserved_tokens 是不可分割token
+    # 初始化 tokcombo_freqs: 用单空格 分割 corpus 中的key, 至不可分割粒度。参数 reserved_tokens 是不可分割token
     tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, tail_token, attach_tail_token_init)
     
-    # 初始化 symbols：包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens、tail_token
+    # 初始化 symbols: 包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens、tail_token
     symbols = set(text_normspace) | set(reserved_tokens) | set([tail_token])
     
     # 这里也可以不 union reserved_tokens.
@@ -264,7 +264,7 @@ def get_BPE_symbols(
 
         token_pairs_w_maxfreq, maxfreq = get_maxfreq_token_pair(tokcombo_freqs) # 得到 max freq token pairs
         
-        # 当 token pair occurrence freq >= min_freq 且 maxfreq > 0 时，才进行 merge 操作
+        # 当 token pair occurrence freq >= min_freq 且 maxfreq > 0 时, 才进行 merge 操作
         if maxfreq > 0 and maxfreq >= min_occur_freq_merge:
             # merge maxfreq token pair(s) : update vocab(symbols), tokcombo_freqs, 
             tokcombo_freqs, symbols = merge_maxfreq_token_pair(token_pairs_w_maxfreq, tokcombo_freqs, symbols, merge_mode)
@@ -285,16 +285,16 @@ def segment_word_BPE_greedy(
         ):
     '''
     input:
-        word: 输入单词，用以拆分成多个 subword. 末尾可以已经添加 EOW_token. 也可以没有添加 EOW_token, 此时会被添加到末尾
+        word: 输入单词, 用以拆分成多个 subword. 末尾可以已经添加 EOW_token. 也可以没有添加 EOW_token, 此时会被添加到末尾
         symbols: 以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集
         UNK_token: unknown token, 用以替代 无法分割的片段
         EOW_token: end-of-word token, 用以标识 word 的结尾.
-            当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下：
-                分割成功：      tok1, ... tokn  
-                分割不成功：    tok1, ... tokn, UNK_token, EOW_token
+            当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下: 
+                分割成功:       tok1, ... tokn  
+                分割不成功:     tok1, ... tokn, UNK_token, EOW_token
             当不输入时, 无视 EOW_token
-                分割成功：      tok1, ... tokn  
-                分割不成功：    tok1, ... tokn, UNK_token
+                分割成功:       tok1, ... tokn  
+                分割不成功:     tok1, ... tokn, UNK_token
     return:
         segmented: list of string
             word被切分成 symbols 中包含的 subwords/tokens, 和 UNK_token(如果未能在symbols中找到). 以列表的方式返回
@@ -311,13 +311,13 @@ def segment_word_BPE_greedy(
 
     # start 是起始为止, end 是终结位置后一
     # 从start 位置开始
-    #   从 end 为止开始，检查 start 到 end 是不是 symbols 中的 symbol
-    #       如果不是，end 指针 往前 移 一位，重新判断
-    #       如果是，记录该 symbol，同时 start 移动到 end(即终结位置后一)，end 回到末尾后一
+    #   从 end 为止开始, 检查 start 到 end 是不是 symbols 中的 symbol
+    #       如果不是, end 指针 往前 移 一位, 重新判断
+    #       如果是, 记录该 symbol, 同时 start 移动到 end(即终结位置后一), end 回到末尾后一
     # 重复这个过程直到 start 等于 end
-    #   start 等于 end 有两种可能：
+    #   start 等于 end 有两种可能: 
     #       可能1: end = length 被赋值给 start. 此时即start 和 end 都处于末尾后一 位置。这意味着 word 被切割完毕
-    #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始，往右的每一个字符组合都不是symbols中的symbol，
+    #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始, 往右的每一个字符组合都不是symbols中的symbol, 
     #       说明 word的start位置的字符 不存在于 symbols 中
 
     if EOW_token and not word.endswith(EOW_token): # 如果输入了 EOW_token 且 word 不是以 EOW_token 结尾
