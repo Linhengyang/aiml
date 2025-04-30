@@ -50,12 +50,15 @@ also recommend to have:
     aiml
     ├── Code
     │   ├── Base
+    │   │   ├── Functions
+    │   │   │   ├── Mask.py
+    │   │   │   └── PatchOperation.py
     │   │   ├── MetaFrames
-    │   │   │   ├── Architectures.py
-    │   │   │   └── __init__.py
+    │   │   │   ├── __init__.py
+    │   │   │   └── Architectures.py
     │   │   ├── RootLayers
     │   │   │   ├── AttentionPools.py
-    │   │       ├── MultiCategFeatEmbedding.py
+    │   │   │   ├── MultiCategFeatEmbedding.py
     │   │   │   └── PositionalEncodings.py
     │   │   └── SubModules
     │   │       ├── AddLNorm.py
@@ -76,19 +79,19 @@ also recommend to have:
     │   │   └── _vit.py
     │   ├── Utils
     │   │   ├── Common
-    │   │   │   ├── Mask.py
     │   │   │   └── SeqOperation.py
     │   │   ├── Data
     │   │   │   ├── DataAssemble.py
     │   │   │   ├── DataSplit.py
     │   │   │   └── DataTransform.py
+    │   │   ├── System
+    │   │   │   └── pathCreate.py
     │   │   ├── Text
     │   │   │   ├── BytePairEncoding.py
     │   │   │   ├── TextPreprocess.py
     │   │   │   ├── Tokenize.py
     │   │   │   └── Vocabulize.py
     │   │   └── image
-    │   │       └── PatchOperation.py
     │   ├── apps
     │   │   ├── semantic_segmentation
     │   │   └── sentiment_analysis
