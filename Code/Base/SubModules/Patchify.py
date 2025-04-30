@@ -15,7 +15,12 @@ class Patchify(nn.Module):
 
     returns: batch of sequence of patches, with shape:
         (batch_size, num_batches=seq_length, num_channels, patch_height, patch_width)
-        the order of the sequence is first upper 'left to right', then move down 'left to right'
+
+        the order of the sequence is first move down, then move right, 
+        which is 1 -> 4 -> 7 -> 2 -> 5 -> 8 -> 3 -> 6 -> 9
+        for  1  2  3
+             4  5  6
+             7  8  9
     
     attributes:
         patch_size

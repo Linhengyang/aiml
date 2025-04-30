@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-
+from PIL import Image
 
 
 def minpad_to_divide(img_batch, patch_size, mode='constant', value=0):
@@ -62,47 +62,66 @@ def patchify(img_batch, patch_size, pad_mode="constant", pad_value=0):
         batch of sequence of patches, with shape:
         (batch_size, num_batches=seq_length, num_channels, patch_height, patch_width)
 
-        the order of the sequence is first upper 'left to right', then move down 'left to right'
+        the order of the sequence is first move down, then move right, 
+        which is 1 -> 4 -> 7 -> 2 -> 5 -> 8 -> 3 -> 6 -> 9
+        for  1  2  3
+             4  5  6
+             7  8  9
     '''
     # img_batch shape:(batch_size, num_channels, h, w)
     padImgBatch = minpad_to_divide(img_batch, patch_size, pad_mode, pad_value)
     # padImgBatch shape: (batch_size, num_channels, height+pad_num_h, width+pad_num_w)
     
-    batch_size, num_chnls, _, _ = img_batch.shape
+    batch_size, num_chnls, H, W = padImgBatch.shape
     p_h, p_w = patch_size
 
-    # unfold padImgBatch: 当前 height+pad_num_h = height_paded 保证 整除 p_h, width+pad_num_w = width_paded 保证 整除 p_w
+    # unfold padImgBatch: 当前 height+pad_num_h = height_paded = H 保证 整除 p_h, width+pad_num_w = width_paded = W 保证 整除 p_w
     # padImgBatch 
-    #   shape: (B, _, height_paded, width_paded)
-    #   stride: (B, _, width_paded, 1)
-
-    # final result should be with 
-    #   shape (B, height_paded//p_h * width_paded//p_w, _, , p_h, p_w)
-    #   stride (B, p_h*p_w, _, , p_w, 1)
+    #   shape: (B, 3, H, W)
+    #   stride: (_ = 3*H*W, __ = H*W, W, 1)
 
 
     # unfold(dim=3, p_w, p_w):
-    # shape (B, _, height_paded, width_paded) -vanilla-> (B, _, height_paded, width_paded//p_w, p_w)
-    # stride (_, _, width_paded, 1) -vanilla-> (_, _, width_paded, p_w, 1)
+    # shape (B, 3, H, W) -vanilla-> (B, 3, H, W//p_w, p_w)
+    # stride (3*H*W, H*W, W, 1) -vanilla-> (3*H*W, H*W, W, p_w, 1)
+    padImgBatch_unfold_W = padImgBatch.unfold(3, p_w, p_w)
 
-    # reshape to fusion dim2 and dim3
-    # shape (B, _, height_paded, width_paded//p_w, p_w) --collapse dim2 and dim3--> (B, _, height_paded*width_paded//p_w, p_w)
-    # stride (_, _, width_paded, p_w, 1) --collapse dim2 and dim3--> (_, _, p_w, 1)
-    
 
-    # continue to unfold(dim=2, p_h, p_h):
-    # shape (B, _, height_paded*width_paded//p_w, p_w) -vanilla-> (B, _, height_paded//p_h*width_paded//p_w, p_h, p_w)
-    #       -permute-> (B, _, height_paded//p_h*width_paded//p_w, p_w, p_h)
+    # switch unfolded dim(width) forward
+    padImgBatch_unfold_W = padImgBatch_unfold_W.permute(0, 1, 3, 2, 4)
+    # shape(B, 3, W//p_w, H, p_w), stride(3*H*W, H*W, p_w, W, 1)
 
-    # stride (_, _, p_w, 1) -vanilla-> (_, _, p_h*p_w, p_w, 1)
-    #       -permute-> (_, _, p_h*p_w, 1, p_w)
+    # continue to unfold(dim=3, p_h, p_h):
+    # shape (B, 3, W//p_w, H, p_w) -vanilla-> (B, 3, W//p_w, H//p_h, p_h, p_w)
+    #       -permute-> (B, 3, W//p_w, H//p_h, p_w, p_h)
+    # stride (3*H*W, H*W, p_w, W, 1) -vanilla-> (3*H*W, H*W, p_w, W*p_h, W, 1)
+    #       -permute-> (3*H*W, H*W, p_w, W*p_h, 1, W)
+    padImgBatch_unfold_W_H = padImgBatch_unfold_W.unfold(3, p_h, p_h)
 
-    # permute(0, 2, 1, 4, 3):
-    # shape(B, _, height_paded//p_h*width_paded//p_w, p_w, p_h) --> (B, height_paded//p_h*width_paded//p_w, _, p_h, p_w)
-    # stride(_, _, p_h*p_w, 1, p_w) --> (_, p_h*p_w, _, p_w, 1)
-    
+    # permute(0, 1, 2, 3, 5, 4):
+    # shape (B, 3, W//p_w, H//p_h, p_w, p_h) --> (B, 3, W//p_w, H//p_h, p_h, p_w)
+    # stride (3*H*W, H*W, p_w, W*p_h, 1, W) --> (_, __, p_w, W*p_h, W, 1)
+    padImgBatch_unfold_W_H = padImgBatch_unfold_W_H.permute(0,1,2,3,5,4)
 
-    return padImgBatch.unfold(3, p_w, p_w).reshape(batch_size, num_chnls, -1, p_w).unfold(2, p_h, p_h).permute(0, 2, 1, 4, 3)
+    # permute(0, 2, 3, 1, 4, 5):
+    # shape (B, 3, W//p_w, H//p_h, p_h, p_w) --> (B, W//p_w, H//p_h, 3, p_h, p_w)
+    # stride (3*H*W, H*W, p_w, W*p_h, W, 1) --> (3*H*W, p_w, W*p_h, H*W, W, 1)
+    padImgBatch_unfold_W_H = padImgBatch_unfold_W_H.permute(0,2,3,1,4,5)
+
+    # reshape(B, W//p_w * H//p_h, 3, p_h, p_w):
+    # shape (B, W//p_w, H//p_h, 3, p_h, p_w) --> (batch_size, W//p_w * H//p_h, 3, p_h, p_w)
+    # stride (3*H*W, p_w, W*p_h, H*W, W, 1) --> (3*H*W, W*p_h, H*W, W, 1)
+
+    # 省略了 width 分割之间的 stride(因为 width 之间的分割，跨度为 p_w)
+    # 不能用 view, 因为 view 不支持 stride 交错. 不能用 as_strided(), 它也不满足交错. reshape 可以正确摊平 W 和 H 分割创造的维度
+    padImgBatch_unfold_output = padImgBatch_unfold_W_H.reshape(batch_size, W//p_w * H//p_h, num_chnls, p_h, p_w)
+
+    # output
+    # shape: (batch_size, W//p_w * H//p_h, 3, p_h, p_w)
+    # stride: (3*H*W, W*p_h, H*W, W, 1)
+    # (batch之间要跨越所有像素, patch之间要跨越总行像素*patch行数, chnl之间要跨越总2D像素, patch内部跨行要跨越总行像素, patch行内跨域是连续的)
+
+    return padImgBatch_unfold_output
 
 
 
