@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import math
+from ..Functions.Mask import mask_first_n_valid
 
 
 
@@ -40,11 +41,11 @@ import math
 def masked_softmax(S, valid_lens):
     '''
     inputs: S, valid_lens
-        S: 3-Dtensor, shape: (batch_size, n_queries, n_kvpairs);
-        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_queries)
+        S: 3-Dtensor, shape: (batch_size, n_query, n_kv);
+        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_query)
         (if len=0 in valid_lens, it means average all Vs in QKV pool)
     
-    returns: convex weight tensor with shape (batch_size, n_queries, n_kvpairs), denoted as W
+    returns: convex weight tensor with shape (batch_size, n_query, n_kv), denoted as W
         W[sample_idx, query_idx, :] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
 
     explains:
@@ -52,30 +53,23 @@ def masked_softmax(S, valid_lens):
             if valid_lens is 1-D tensor, W[i][:, k] are zeros when k > valid_lens[i]
             if valid_lens is 2-D tensor, W[i][j, k] are zeros when k > valid_lens[i, j], here j is query_idx
     '''
-
-    # 确定2-D tensor的mask操作。这里X是2-D tensor, valid_len是1-D tensor
-    def _sequence_mask(X, valid_len, value=0):
-        maxlen = X.size(1)
-        
-        mask = torch.arange(maxlen, dtype=torch.float32, device=X.device).unsqueeze(0) < valid_len.unsqueeze(1)
-        X[~mask] = value # indexput 操作是梯度可传的. 被put的位置在之后的BP反传中,将不会贡献更新组成运算它们的参数
-        return X
     
-    # 将S和valid_lens分别转化为2-D tensor和1-D tensor
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
+        return nn.functional.softmax(S, dim=-1)
+    
+    elif valid_lens.dim() == 1: # valid_lens: (batch_size, ) --> (batch_size, 1) --> (batch_size, n_query)
+        valid_lens = torch.repeat_interleave(valid_lens.unsqueeze(1), repeats=S.shape[1], dim=1)
 
-        return nn.functional.softmax(S, dim=-1) # nn.f.softmax操作是梯度可传的
+    elif valid_lens.dim() == 2: # valid_lens: (batch_size, n_query)
+        assert valid_lens == S.shape[:-1], f"valid_lens {valid_lens} not match with S shape {S.shape}"
+
     else:
-        shape = S.shape # 保存S的shape
-        if valid_lens.dim() == 1:
-            valid_lens = torch.repeat_interleave(valid_lens, shape[1]) # 拉长，返回还是是1-D tensor
-        else:
-            valid_lens = valid_lens.reshape(-1) # 摊平，返回1-D tensor
+        raise ValueError(f'wrong valid_lens')
+        
+    mask = mask_first_n_valid(S.shape, valid_lens) # mask shape: (batch_size, n_quen_queryries, n_kv)
+    S[~mask] = -1e20 # non-valid 部分填入 负无穷, 这样在 softmax 操作中被消去. index-put操作梯度可传
 
-        # 将S转化为2-D tensor, last axis不变
-        S = _sequence_mask(S.reshape(-1, shape[-1]), valid_lens, value=-1e20)
-
-        return nn.functional.softmax(S.reshape(shape), dim=-1)
+    return nn.functional.softmax(S, dim=-1)
 
 
 
@@ -126,7 +120,8 @@ class AdditiveAttention(nn.Module):
         # Scores: (batch_size, n_query, n_kv), valid_lens 指定了每条 query 里的 valid area:(batch_size,) or (batch_size, n_query)
         self.attention_weights = masked_softmax(Scores, valid_lens)
 
-        return torch.bmm(self.dropout(self.attention_weights), V_batch) # 返回的shape是(batch_size, m, v)
+        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, value_size) ->  (batch_size, n_query, value_size) 
+        return torch.bmm(self.dropout(self.attention_weights), V_batch)
 
 
 
