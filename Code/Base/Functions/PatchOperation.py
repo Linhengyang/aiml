@@ -30,10 +30,8 @@ def minpad_to_divide(img_batch, patch_size, mode='constant', value=0):
     # pad 的方式是 四周 均匀 pad: 
     # 上下总共pad pad_num_h, 上面 pad 数量 pad_num_h // 2
     # 左右总共pad pad_num_w, 左边 pad 数量 pad_num_w // 2
-    pad_num_u = pad_num_h // 2
-    pad_num_d = pad_num_h - pad_num_u
-    pad_num_l = pad_num_w // 2
-    pad_num_r = pad_num_w - pad_num_l
+    pad_num_u, pad_num_l = pad_num_h // 2, pad_num_w // 2
+    pad_num_d, pad_num_r = pad_num_h - pad_num_u, pad_num_w - pad_num_l
 
     return nn.functional.pad(img_batch, pad=(pad_num_l, pad_num_r, pad_num_u, pad_num_d), mode=mode, value=value)
 
@@ -54,7 +52,7 @@ def calc_patchifed_sizes(img_shape, patch_size):
 
 
 
-def patchify(img_batch, patch_size):
+def patchify(img_batch, patch_size, pad_mode="constant", pad_value=0):
     '''
     input:
         1. img_batch: tensor with shape (batch_size, num_channels, h, w)
@@ -66,7 +64,8 @@ def patchify(img_batch, patch_size):
         the order of the sequence is first upper 'left to right', then move down 'left to right'
     '''
     # img_batch shape:(batch_size, num_channels, h, w)
-    padImgBatch = minpad_to_divide(img_batch, patch_size) # padImgBatch shape: (batch_size, num_channels, height+pad_num_h, width+pad_num_w)
+    padImgBatch = minpad_to_divide(img_batch, patch_size, pad_mode, pad_value)
+    # padImgBatch shape: (batch_size, num_channels, height+pad_num_h, width+pad_num_w)
     
     batch_size, num_chnls, _, _ = img_batch.shape
     p_h, p_w = patch_size

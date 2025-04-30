@@ -1,15 +1,14 @@
-import math
-import torch
 import numbers
 from torch import nn
+from ..Functions.PatchOperation import patchify, calc_patchifed_sizes
 
 class Patchify(nn.Module):
     '''
     args: img_shape, patch_size, pad_mode, pad_value
         img_shape: (num_channels, h, w)
         patch_size: Integral or tuple of two integrals
-        pad_mode: 'constant'
-        pad_value: 0
+        pad_mode: default 'constant'
+        pad_value: default 0
     
     inputs: img_batch
         img_batch: (batch_size, num_channels, h, w)
@@ -28,74 +27,21 @@ class Patchify(nn.Module):
         super().__init__()
         if isinstance(patch_size, numbers.Integral):
             patch_size = (patch_size, patch_size)
+        
+        self.img_shape = img_shape
 
-        self._patch_size = patch_size
-        self.pad_mode, self.pad_value = pad_mode, pad_value
+        self._patch_size, self.pad_mode, self.pad_value = patch_size, pad_mode, pad_value
 
-        k_h, k_w = patch_size
+        self._num_patches, self._patch_flatlen = calc_patchifed_sizes(img_shape, patch_size)
 
-        assert len(img_shape) == 3, 'image shape should be (num_channels, h, w)'
-        c, h, w = img_shape
-
-        # 若 img height 不能整除 kernel height, 那么 pad img 的 height 到 h+pad_num_h, 这里 pad_num_h = kernel_h - h % kernel_h, 保证可整除
-        # 若 img width 不能整除 kernel width, 那么 pad img 的 width 到 w+pad_num_w, 这里 pad_num_w = kernel_w - w  % kernel_w, 保证可整除
-        pad_num_h, pad_num_w = 0 if h % k_h == 0 else k_h - h % k_h, 0 if w % k_w == 0 else k_w - w % k_w
-
-        self._num_patches = int( (h+pad_num_h)*(w+pad_num_w)/(k_h * k_w) ) # patch 数量
-
-        self._patch_flatlen = int( c * k_h * k_w ) # patch 总像素 数量
-
-        # pad 的方式是 四周 均匀 pad: 
-        # 上下总共pad pad_num_h, 上面 pad 数量 pad_num_h // 2
-        # 左右总共pad pad_num_w, 左边 pad 数量 pad_num_w // 2
-        self.pad_num_u, self.pad_num_l = pad_num_h // 2, pad_num_w // 2
-        self.pad_num_d, self.pad_num_r = pad_num_h - self.pad_num_u, pad_num_w - self.pad_num_l
 
 
     def forward(self, img_batch):
-
-        # img_batch shape: (batch_size, num_channels, height, width)
-        padImgBatch = nn.functional.pad(img_batch,
-                                        # 左pad: pad_num_l, 右pad: pad_num_r, 上pad: pad_num_u, 下pad: pad_num_d
-                                        pad=(self.pad_num_l, self.pad_num_r, self.pad_num_u, self.pad_num_d),
-                                        mode=self.pad_mode,
-                                        value=self.pad_value)
-        # padImgBatch shape: (batch_size, num_channels, height+pad_num_h, width+pad_num_w)
-        # 这里 pad_num_h = pad_num_u + pad_num_d, pad_num_w = pad_num_l + pad_num_r
-        batch_size, num_chnls, _, _ = img_batch.shape
-        p_h, p_w = self._patch_size
-
-        # unfold padImgBatch: 当前 height+pad_num_h = height_paded 保证 整除 p_h, width+pad_num_w = width_paded 保证 整除 p_w
-        # padImgBatch 
-        #   shape: (B, _, height_paded, width_paded)
-        #   stride: (B, _, width_paded, 1)
-
-        # final result should be with 
-        #   shape (B, height_paded//p_h * width_paded//p_w, _, , p_h, p_w)
-        #   stride (B, p_h*p_w, _, , p_w, 1)
-
-
-        # unfold(dim=3, p_w, p_w):
-        # shape (B, _, height_paded, width_paded) -vanilla-> (B, _, height_paded, width_paded//p_w, p_w)
-        # stride (B, _, width_paded, 1) -vanilla-> (B, _, width_paded, p_w, 1)
-
-        # reshape to fusion dim2 and dim3
-        # shape (B, _, height_paded, width_paded//p_w, p_w) --collapse dim2 and dim3--> (B, _, height_paded*width_paded//p_w, p_w)
-        # stride (B, _, width_paded, p_w, 1) --collapse dim2 and dim3--> (B, _, p_w, 1)
+        # 确保 img_batch 的 shape 和 参数 img_shape 相同
+        assert img_batch.shape[1:] == self.img_shape, \
+            f"image batch shape {img_batch.shape[1:]} not match with argument img_shape {self.img_shape}"
         
-
-        # continue to unfold(dim=2, p_h, p_h):
-        # shape (B, _, height_paded*width_paded//p_w, p_w) -vanilla-> (B, _, height_paded//p_h*width_paded//p_w, p_h, p_w)
-        #       -permute-> (B, _, height_paded//p_h*width_paded//p_w, p_w, p_h)
-
-        # stride (B, _, p_w, 1) -vanilla-> (B, _, p_h*p_w, p_w, 1)
-        #       -permute-> (B, _, p_h*p_w, 1, p_w)
-
-        # permute(0, 2, 1, 4, 3):
-        # shape(B, _, height_paded//p_h*width_paded//p_w, p_w, p_h) --> (B, height_paded//p_h*width_paded//p_w, _, p_h, p_w)
-        # stride(B, _, p_h*p_w, 1, p_w) --> (B, p_h*p_w, _, p_w, 1)
-
-        return padImgBatch.unfold(3, p_w, p_w).reshape(batch_size, num_chnls, -1, p_w).unfold(2, p_h, p_h).permute(0, 2, 1, 4, 3)
+        return patchify(img_batch, self._patch_size, self.pad_mode, self.pad_value)
     
 
     @property
