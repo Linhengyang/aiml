@@ -61,6 +61,7 @@ def patchify(img_batch, patch_size, pad_mode="constant", pad_value=0):
     output:
         batch of sequence of patches, with shape:
         (batch_size, num_batches=seq_length, num_channels, patch_height, patch_width)
+
         the order of the sequence is first upper 'left to right', then move down 'left to right'
     '''
     # img_batch shape:(batch_size, num_channels, h, w)
