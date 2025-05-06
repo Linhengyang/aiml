@@ -4,7 +4,7 @@ from ..Functions.PatchOperation import patchify, calc_patchifed_sizes
 
 class Patchify(nn.Module):
     '''
-    args: img_shape, patch_size, pad_mode, pad_value
+    args:
         img_shape: (num_channels, h, w)
         patch_size: Integral or tuple of two integrals
         pad_mode: default 'constant'
@@ -14,7 +14,7 @@ class Patchify(nn.Module):
         img_batch: (batch_size, num_channels, h, w)
 
     returns: batch of sequence of patches, with shape:
-        (batch_size, num_batches=seq_length, num_channels, patch_height, patch_width)
+        (batch_size, num_patches=seq_length, num_channels, patch_height, patch_width)
 
         the order of the sequence is first move down, then move right, 
         which is 1 -> 4 -> 7 -> 2 -> 5 -> 8 -> 3 -> 6 -> 9
