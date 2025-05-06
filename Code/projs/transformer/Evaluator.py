@@ -13,7 +13,7 @@ class transformerEpochEvaluator(epochEvaluator):
     reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集
     eval_cnts = eval_cnt_in_train # 评价当前model, 需要validate data或infer.避免次数太多
 
-    def __init__(self, num_epochs, logfile_path, scalar_names=['loss', ], dim_accum=2,
+    def __init__(self, num_epochs, logfile_path, scalar_names=['loss', ], num_dims_for_accum=2,
                  visualizer=None, verbose=False):
 
         assert num_epochs >= max(self.reveal_cnts, self.eval_cnts), \
@@ -22,7 +22,7 @@ class transformerEpochEvaluator(epochEvaluator):
         super().__init__()
 
         self.num_epochs = num_epochs
-        self.reveal_accumulator, self.eval_accumulator = Accumulator(dim_accum), Accumulator(dim_accum)
+        self.reveal_accumulator, self.eval_accumulator = Accumulator(num_dims_for_accum), Accumulator(num_dims_for_accum)
 
         # 设定 日志文件 地址, 并打印 train begin
         self.log_file = logfile_path
