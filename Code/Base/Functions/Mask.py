@@ -9,14 +9,15 @@ import torch
 def mask_first_n_valid(tensor_shape, valid_lens):
     '''
     input:
-        tensor_shape: (..., n_logits)
+        tensor_shape: (..., seq_len)
         valid_lens: tensor with shape as (...,)
         
-        valid_lens的某元素靠位置(...,)确定. 在原 tensor 中有唯一的长度为 n_logtis 的 1-D tensor 与其对应.
-        valid_lens元素值代表了这个 1-D tensor 前几个是valid的. 元素值可以为 0, 这样在softmax运算之后, 得到平均分布
+        valid_lens中的单个元素靠位置(...,)确定后, 在原 tensor 中有唯一的长度为 seq_len 的 1-D tensor 与其对应, 代表了原tensor在该位置的seq的valid length
+        valid_lens元素值代表了这个 1-D tensor 前多少个 是valid的.
+        valid_lens 元素值可以为 0, 这样在softmax运算之后, 得到平均分布
     
     return:
-        mask: (..., n_logits)
+        mask: (..., seq_len)
         mask 是一个 True/False tensor, 它的shape 等于 输入参数 tensor_shape.
     '''
     # index_1dtensor: [0, 1, ..., n_logits-1]
