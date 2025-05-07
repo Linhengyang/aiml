@@ -103,7 +103,7 @@ def display_images_with_labels(
         # 添加 标签/合并的标签 作为 subplot 的标题
         if isinstance(label_data, pd.DataFrame): # 若 label_data 是 dataframe,
             # 则取 i 行作为当前图片的所有 labels, 合并成为 title
-            labels = [ f'{name}: {label}' for name, label in zip(label_names, label_data.iloc[i, :].to_list()) ]
+            labels = [ f'{name}:{label}' for name, label in zip(label_names, label_data.iloc[i, :].to_list()) ]
             title = "\n".join(labels)
         elif isinstance(label_data, list): # 若 label_data 是 list
             # 则取 元素 i 作为当前图片的 title
