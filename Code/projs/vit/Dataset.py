@@ -3,7 +3,7 @@ import torchvision
 from torchvision import transforms
 import numpy as np
 import struct
-
+from torch import Tensor
 
 
 class FMNISTDatasetOnline(torch.utils.data.Dataset):
@@ -25,7 +25,7 @@ class FMNISTDatasetOnline(torch.utils.data.Dataset):
 
 
 
-def decode_idx3_ubyte(file):
+def decode_idx3_ubyte(file) -> Tensor:
     '''
     解析idx3数据文件: 图像, 返回(num_examples, 1, 28, 28)float的tensor
     '''
@@ -45,11 +45,12 @@ def decode_idx3_ubyte(file):
     # 读取格式
     fmt_image = '>'+str(numImgs*numRows*numCols)+'B'
     data = torch.tensor(struct.unpack_from(fmt_image, bin_data, offset)).reshape(numImgs, 1, numRows, numCols)
+
     return data
 
 
 
-def decode_idx1_ubyte(file):
+def decode_idx1_ubyte(file) -> Tensor:
     """
     解析idx1数据文件: 标签, 返回(num_examples, )int64的tensor
     """
@@ -69,16 +70,18 @@ def decode_idx1_ubyte(file):
     # 读取格式
     fmt_image = '>'+str(numImgs)+'B'
     data = torch.tensor(struct.unpack_from(fmt_image, bin_data, offset))
+    
     return data
 
 
 
 class FMNISTDatasetLocal(torch.utils.data.Dataset):
-    def __init__(self, idx3fpath, idx1fpath):
+    def __init__(self, imgdata_fpath, imglabel_fpath):
         super().__init__()
-        self._imgTensor = decode_idx3_ubyte(idx3fpath).type(torch.float32) #shape: (numImgs, 1, numRows, numCols)
-        self._labelTensor = decode_idx1_ubyte(idx1fpath).type(torch.int64) #shape: (numImgs, )
+        self._imgTensor = decode_idx3_ubyte(imgdata_fpath).type(torch.float32) #shape: (numImgs, 1, numRows, numCols)
+        self._labelTensor = decode_idx1_ubyte(imglabel_fpath).type(torch.int64) #shape: (numImgs, )
         self._img_shape = self._imgTensor.shape[1:]
+        
         assert self._imgTensor.size(0) == self._labelTensor.size(0), 'sample size mismatch'
     
     def __getitem__(self, index):
