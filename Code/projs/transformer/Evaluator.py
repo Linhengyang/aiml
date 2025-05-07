@@ -62,7 +62,7 @@ class transformerEpochEvaluator(epochEvaluator):
             self.timer = Timer()
     
 
-    # @ record values for scalars
+    # @train: record values for scalars
     def batch_record(self, net_inputs_batch, loss_inputs_batch, Y_hat, l):
         # net_inputs_batch = (X, Y_frontshift1, X_valid_lens)
         # shapes: (batch_size, num_steps), (batch_size, num_steps), (batch_size,)
@@ -73,7 +73,7 @@ class transformerEpochEvaluator(epochEvaluator):
             self.reveal_accumulator.add(l.sum(), loss_inputs_batch[1].sum())
     
 
-    # @ record values for scalars
+    # @evaluation: record values for scalars
     def evaluate_model(self, net, loss, valid_iter, num_batches=None):
         if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
 
