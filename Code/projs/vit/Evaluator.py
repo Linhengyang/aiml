@@ -74,7 +74,7 @@ class vitEpochEvaluator(epochEvaluator):
     # @evaluation: record values for scalars
     def evaluate_model(self, net, loss, valid_iter, num_batches=None):
         if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
-
+            net.eval()
             for i, (X, y) in enumerate(valid_iter): # 如果 设定了 evaluate 的 batch 数量，那么在达到时，退出 eval_metric 的累积
                 if num_batches and i >= num_batches:
                     break
