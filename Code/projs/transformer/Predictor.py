@@ -23,7 +23,7 @@ def greedy_predict(
         src shape: (1, num_steps)int64, timesteps: 1 -> num_steps
         src_valid_lens shape: (1,)int32
     length_factor: 生成序列的长度奖励, 长度越长奖励越大
-    device: 设备
+    device: 手动管理设备. 应该和 net 的设备一致
 
     output:
         predicted tokens(eos not included), along with its score
@@ -169,14 +169,13 @@ def beam_predict(
         src shape: (1, num_steps)int64, timesteps: 1 -> num_steps
         src_valid_lens shape: (1,)int32
     length_factor: 生成序列的长度奖励, 长度越长奖励越大
-    device: 设备
+    device: 手动管理设备. 应该和 net 的设备一致
     beam_size: 束搜索 的 束宽
     parrallel: 是否并行计算
 
     output:
     predicted tokens(eos not included), along with its score
     '''
-    net.to(device)
     src_inputs = [tensor.to(device) for tensor in src_inputs]
 
     src_enc_info = net.decoder.init_state(net.encoder(*src_inputs))# src_enc_seqs, src_valid_lens: (1, num_steps, d_dim), (1, )
@@ -275,7 +274,9 @@ class sentenceTranslator(easyPredictor):
             self.device = device
         else:
             self.device = torch.device('cpu')
-        
+        print(f"use device {self.device} to infer")
+
+
         self.bleu_k = bleu_k
         if search_mode == 'greedy':
             self.pred_fn = greedy_predict
