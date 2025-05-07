@@ -251,7 +251,8 @@ def infer_job(saved_params_fpath, src_symbols_path):
     # if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用 train mode 网络. 而 train mode 的网络在每次推理时会产生随机性
     #     search_mode = 'greedy'
     
-    translator = sentenceTranslator(src_vocab, tgt_vocab, net, num_steps, search_mode, device=device, beam_size=3, length_factor=5) #加大对长句的奖励
+    translator = sentenceTranslator(src_vocab, tgt_vocab, net, num_steps, search_mode,
+                                    device=device, beam_size=3, length_factor=5) #加大对长句的奖励
 
     # predict
     # src_sentence = 'i\'m home .'
