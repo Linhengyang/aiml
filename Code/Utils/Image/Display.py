@@ -19,19 +19,19 @@ from ..System.Math import find_closet_2factors
 
 def display_images_with_labels(
         image_tensor: torch.Tensor,
-        grid_number_row_col:t.Tuple[int]|None = None,
         label_data: t.List|pd.DataFrame|None = None,
+        grid_number_row_col:t.Tuple[int]|None = None,
         ):
     """
     以 grid_number_row_col (p 行 q 列) 的网格形式展示图片Tensor image_tensor 及其对应的标签 label_data
 
     Args:
-        grid_number_row_col (p(int), q(int)):
-            在 p 行 q 列的 网格中展示 N 张图片
         image_tensor (torch.Tensor):
             图像数据, shape 为 (N, num_channels, height, width). 值应在 [0, 1] 或 [0, 255] 范围内
         label_data (t.List|pd.DataFrame|None):
             标签数据, 如果是 List, 则 shape 为(N,); 如果是 dataframe, 则 shape 为 (N, num_labels), 每列都是 N 张图片的某个标签
+        grid_number_row_col (p(int), q(int)):
+            在 p 行 q 列的 网格中展示 N 张图片
     """
     N = image_tensor.shape[0]
     num_channels = image_tensor.shape[1]
