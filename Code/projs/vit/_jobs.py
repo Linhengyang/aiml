@@ -19,7 +19,8 @@ configs = yaml.load(open('Code/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullL
 
 ################## image arguments in workspace/cache ##################
 # json file for image data arguments
-image_args = os.path.join( configs['cache_dir'], configs['proj_name'], 'image_args.json' )
+cache_proj_dir = os.path.join( configs['cache_dir'], configs['proj_name'] )
+image_args = os.path.join( cache_proj_dir, 'image_args.json' )
 
 
 
@@ -53,8 +54,24 @@ num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2,
 
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 10, 128, 0.0005
+num_epochs, batch_size, lr = 5, 128, 0.0005
 
+
+
+
+
+
+
+
+def prepare_job():
+    print('prepare job begin')
+
+    # create all related directories if not existed
+    for dir_name in [cache_proj_dir, model_proj_dir, log_proj_dir]:
+        os.makedirs(dir_name, exist_ok=True)
+        print(f'directory {dir_name} created')
+
+    print('prepare job complete')
 
 
 
@@ -101,7 +118,7 @@ def train_job(data_source):
     # init trainer
     trainer = vitTrainer(vit, loss, num_epochs, batch_size)
 
-    trainer.set_device(torch.device('cuda'))## set the device
+    trainer.set_device(torch.device('cpu'))## set the device
     trainer.set_data_iter(trainset, validset, testset)## set the data iters
     trainer.set_optimizer(lr)## set the optimizer
     # no grad clipper
@@ -120,7 +137,9 @@ def train_job(data_source):
     trainer.save_model(saved_params_fpath)
 
     print('train job complete')
+
     return saved_params_fpath, 
+
 
 
 

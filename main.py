@@ -19,10 +19,12 @@ if __name__ == "__main__":
 
     # vit
 
-    from Code.projs.vit._jobs import train_job, infer_job
+    from Code.projs.vit._jobs import prepare_job, train_job, infer_job
+    
+    prepare_job()
 
     saved_params_fpath = train_job("local")
-    
+
     infer_job(saved_params_fpath)
     
 
