@@ -9,84 +9,150 @@ from .Trainer import vitTrainer
 from .Evaluator import vitEpochEvaluator
 from .Predictor import fmnistClassifier
 import yaml
+import json
+
 configs = yaml.load(open('Code/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)
-local_model_save_dir = configs['local_model_save_dir']
-base_data_dir = configs['base_data_dir']
-fmnist_dir = configs['fmnist_dir']
-fmnist_train_img_fname = configs['fmnist_train_img_fname']
-fmnist_train_label_fname = configs['fmnist_train_label_fname']
-fmnist_valid_img_fname = configs['fmnist_valid_img_fname']
-fmnist_valid_label_fname = configs['fmnist_valid_label_fname']
-fmnist_test_img_fname = configs['fmnist_test_img_fname']
-fmnist_test_label_fname = configs['fmnist_test_label_fname']
 
-def train_job():
-    # # build datasets from online dataset
-    # path = '../../data'
-    # resize = (96, 96)
-    # trainset = FMNISTDatasetOnline(path, True, resize)
-    # validset = FMNISTDatasetOnline(path, False, resize)
-    # testset = FMNISTDatasetOnline(path, False, resize)
+################## directories ##################
+# set train log file path / network resolve output path / params save path / source&targe vocabs path
 
-    # build dataset from local data
-    train_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_train_img_fname)
-    train_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_train_label_fname)
-    valid_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_img_fname)
-    valid_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_label_fname)
-    test_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_test_img_fname)
-    test_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_test_label_fname)
-    trainset = FMNISTDatasetLocal(train_img_path, train_label_path)
-    validset = FMNISTDatasetLocal(valid_img_path, valid_label_path)
-    testset = FMNISTDatasetLocal(test_img_path, test_label_path)
+
+################## image arguments in workspace/cache ##################
+# json file for image data arguments
+image_args = os.path.join( configs['cache_dir'], configs['proj_name'], 'image_args.json' )
+
+
+
+################## params saved in workspace/model ##################
+model_proj_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
+
+
+
+################## log file in workspace/logs ##################
+log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
+
+
+
+
+
+
+
+
+
+
+################## data-params ##################
+patch_size = (7, 7)
+
+
+
+################## network-params ##################
+num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 64, 0.1, 0.1, 128
+
+
+
+
+
+################## train-params ##################
+num_epochs, batch_size, lr = 10, 128, 0.0005
+
+
+
+
+
+
+def train_job(data_source):
+    print('train job begin')
+    # [timetag]
+    from datetime import datetime
+    now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
+
+    # /workspace/logs/[proj_name]/train_log_[timetag].txt, defined_net_[timetag].txt
+    train_logs_fpath = os.path.join( log_proj_dir, f'train_log_{now_minute}.txt' )
+    defined_net_fpath = os.path.join( log_proj_dir, f'defined_net_{now_minute}.txt' )
+
+    # /workspace/model/[proj_name]/saved_params[timetag].params
+    saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.pth' )
+
+    
+    # # build datasets
+    if data_source == 'online': # from online dataset
+        resize = (28, 28)
+        fmnist_data_dir = configs['fmnist_data_dir']
+        trainset = FMNISTDatasetOnline(path=fmnist_data_dir, is_train=True, resize=resize)
+        validset = FMNISTDatasetOnline(path=fmnist_data_dir, is_train=False, resize=resize)
+        testset = FMNISTDatasetOnline(path=fmnist_data_dir, is_train=False, resize=resize)
+    elif data_source == 'local': # from local data
+        trainset = FMNISTDatasetLocal(configs['train_data'], configs['train_data'])
+        validset = FMNISTDatasetLocal(configs['valid_data'], configs['valid_label'])
+        testset = FMNISTDatasetLocal(configs['test_data'], configs['test_label'])
+    else:
+        raise ValueError(f'wrong data_source param {data_source}. must be one of online/local')
+
+    # cache image args
+    img_shape = trainset.img_shape
+    with open(image_args, 'w')  as f:
+        json.dump(img_shape, f)
 
     # design net & loss
-    num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 64, 0.1, 0.1, 128
-    img_shape, patch_size = trainset.img_shape, (7, 7)
     vit = ViTEncoder(img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens)
+
     loss = nn.CrossEntropyLoss(reduction='none')
-    # init trainer for num_epochs & batch_size & learning rate
-    num_epochs, batch_size, lr = 10, 128, 0.0005
+
+    # init trainer
     trainer = vitTrainer(vit, loss, num_epochs, batch_size)
+
     trainer.set_device(torch.device('cuda'))## set the device
     trainer.set_data_iter(trainset, validset, testset)## set the data iters
     trainer.set_optimizer(lr)## set the optimizer
-    trainer.set_epoch_eval(vitEpochEvaluator(num_epochs, log_fname='train_logs.txt', visualizer=True))## set the epoch evaluator
-    # start
-    trainer.log_topology('lazy_topo.txt')## print the vit topology
+    # no grad clipper
+    trainer.set_epoch_eval(vitEpochEvaluator(num_epochs, train_logs_fpath, verbose=True))## set the epoch evaluator
+
+    # set trainer
     check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
     if check_flag:
-        trainer.log_topology('def_topo.txt')## print the defined topology
+        trainer.log_topology(defined_net_fpath)## print the defined topology
         trainer.init_params()## init params
-    # fit
+
+    # fit model
     trainer.fit()
+
     # save
-    trainer.save_model('vit_v1.params')
+    trainer.save_model(saved_params_fpath)
 
-def infer_job():
-    device = torch.device('cpu')
-    # obtain pred batch from online
-    # path = '../../data'
-    # resize = (28, 28)
-    # validset = FMNISTDatasetOnline(path, False, resize)
+    print('train job complete')
+    return saved_params_fpath, 
 
-    # obtain pred batch from local
-    valid_img_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_img_fname)
-    valid_label_path = os.path.join(base_data_dir, fmnist_dir, fmnist_valid_label_fname)
-    validset = FMNISTDatasetLocal(valid_img_path, valid_label_path)
-    valid_iter = torch.utils.data.DataLoader(validset, 10, True)
-    for img_batch, labels in valid_iter:
-        break
-    # load model
-    num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 64, 0.1, 0.1, 128
-    img_shape, patch_size = (1, 28, 28), (7, 7)
+
+
+
+
+
+
+def infer_job(saved_params_fpath):
+    print('infer job begin')
+        
+    # load cached image args
+    with open(image_args, 'r') as f:
+        img_shape = json.load(f)
+
+    # set device
+    device = torch.device('cuda')
+
+    ## construct model
     net = ViTEncoder(img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens)
-    trained_net_path = os.path.join(local_model_save_dir, 'vit', 'vit_v1.params')
-    net.load_state_dict(torch.load(trained_net_path, map_location=device))
-    # init predictor
-    classifier = fmnistClassifier(device)
+    net.load_state_dict(torch.load(saved_params_fpath, map_location=device))
+    net.eval()
+
+    # set predictor
+    classifier = fmnistClassifier(net, device)
+
     # predict
-    print('truth: ', labels)
-    print('preds: ', classifier.predict(img_batch, labels, net))
-    # evaluate
-    print('accuracy: ', classifier.evaluate())
+    classifier.predict(configs['test_data'], select_size=16, view=True)
+
+    # evaluate output
+    print( 'accuracy rate: ', classifier.evaluate(configs['test_label'], view=True) )
+
     print('pred scores: ', classifier.pred_scores)
+
+    print('infer job complete')
+    return
