@@ -163,3 +163,5 @@ class TransformerDecoderBlock(nn.Module):
         Z = self.addlnorm2(Y, self.attention2(Y, src_enc_seqs, src_enc_seqs, src_valid_lens))
 
         return self.addlnorm3(Z, self.PosFFN(Z)), KV_Caches # 第一个输出的 shape 和 tgt_query 相同
+        # train 模式下第二个输出是 None, eval 模式下第二个输出 是以 block ID为key, 该 block 的 所有输入tgt_query堆叠 (timestep 0 - i-1)
+        # 只有该block对应的 kv 被更新 
