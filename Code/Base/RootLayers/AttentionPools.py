@@ -61,7 +61,7 @@ def masked_softmax(S, valid_lens):
         valid_lens = torch.repeat_interleave(valid_lens.unsqueeze(1), repeats=S.shape[1], dim=1)
 
     elif valid_lens.dim() == 2: # valid_lens: (batch_size, n_query)
-        assert valid_lens == S.shape[:-1], f"valid_lens {valid_lens} not match with S shape {S.shape}"
+        assert valid_lens.shape == S.shape[:-1], f"valid_lens.shape {valid_lens.shape} not match with S shape {S.shape}"
 
     else:
         raise ValueError(f'wrong valid_lens')
