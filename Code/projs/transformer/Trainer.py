@@ -1,5 +1,6 @@
 import torch
 from torch import nn as nn
+import typing as t
 from torch.utils.data.dataloader import default_collate
 from ...Compute.TrainTools import easyTrainer
 
@@ -78,6 +79,32 @@ class transformerTrainer(easyTrainer):
         else:
             self.test_iter = None
     
+    
+    @staticmethod
+    def FP_step(net:nn.Module, loss:nn.Module, net_inputs_batch, loss_inputs_batch):
+        # net_inputs_batch, loss_inputs_batch 从 data_iter 中生成
+
+        # Y_label_batch: (batch_size, num_steps)
+        # Y_valid_lens_batch: (batch_size,)
+        Y_label_batch, Y_valid_lens_batch = loss_inputs_batch
+
+        Y_hat, _ = net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
+        Y_hat = Y_hat.permute(0,2,1) # (batch_size, num_steps, vocab_size) --> (batch_size, vocab_size, num_steps)
+        
+        # generate T/F or 0/1 mask tensor with shape (batch_size, num_steps)
+        num_steps = Y_label_batch.size(1)
+
+        device = Y_valid_lens_batch.device
+        # [[0,1,2,...,num_steps-1]] ?<? [ [valid_len_sample1], [valid_len_sample2],...,[valid_len_sampleN] ]
+        # ----> T/F mask tensor shape as (N, num_steps)
+        valid_area_mask = torch.arange(num_steps, dtype=torch.int32, device=device).unsqueeze(0) < Y_valid_lens_batch.unsqueeze(1)
+
+        # get loss
+        l = loss(Y_hat, Y_label_batch, valid_area_mask)
+
+        return l, Y_hat
+
+
 
     def resolve_net(self, need_resolve=False):
         '''
@@ -97,25 +124,9 @@ class transformerTrainer(easyTrainer):
             for net_inputs_batch, loss_inputs_batch in self.test_iter:
                 break
             try:
-                # Y_label_batch: (batch_size, num_steps)
-                # Y_valid_lens_batch: (batch_size,)
-                Y_label_batch, Y_valid_lens_batch = loss_inputs_batch
-
                 self.optimizer.zero_grad()
-                Y_hat, _ = self.net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
-                Y_hat = Y_hat.permute(0,2,1) # (batch_size, num_steps, vocab_size) --> (batch_size, vocab_size, num_steps)
 
-                # generate T/F or 0/1 mask tensor with shape (batch_size, num_steps)
-                num_steps = Y_label_batch.size(1)
-
-                # [[0,1,2,...,num_steps-1]] ?<? [ [valid_len_sample1], [valid_len_sample2],...,[valid_len_sampleN] ]
-                # ----> T/F mask tensor shape as (N, num_steps)
-                valid_area_mask = torch.arange(num_steps, dtype=torch.int32, device=self.device).unsqueeze(0) < Y_valid_lens_batch.unsqueeze(1)
-
-                # get loss
-                l = self.loss(Y_hat, Y_label_batch, valid_area_mask)
-                
-                del Y_hat, l
+                _, _ = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
 
                 self.net_resolved = True
                 print('Net & Loss forward succeed. Net & Loss checked. Ready to fit')
@@ -197,23 +208,9 @@ class transformerTrainer(easyTrainer):
 
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
 
-                # Y_label_batch: (batch_size, num_steps)
-                # Y_valid_lens_batch: (batch_size,)
-                Y_label_batch, Y_valid_lens_batch = loss_inputs_batch
-
                 self.optimizer.zero_grad()
-                Y_hat, _ = self.net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
-                Y_hat = Y_hat.permute(0,2,1) # (batch_size, num_steps, vocab_size) --> (batch_size, vocab_size, num_steps)
 
-                # generate T/F or 0/1 mask tensor with shape (batch_size, num_steps)
-                num_steps = Y_label_batch.size(1)
-
-                # [[0,1,2,...,num_steps-1]] ?<? [ [valid_len_sample1], [valid_len_sample2],...,[valid_len_sampleN] ]
-                # ----> T/F mask tensor shape as (N, num_steps)
-                valid_area_mask = torch.arange(num_steps, dtype=torch.int32, device=self.device).unsqueeze(0) < Y_valid_lens_batch.unsqueeze(1)
-
-                # get loss
-                l = self.loss(Y_hat, Y_label_batch, valid_area_mask)
+                l, Y_hat = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
 
                 # bp
                 l.sum().backward()
@@ -228,7 +225,7 @@ class transformerTrainer(easyTrainer):
 
             with torch.no_grad():
                 # 如果 valid_iter 非 None, 那么在确定要 evaluate model 的 epoch, 将遍历 整个 valid_iter 得到 validation loss
-                self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter)
+                self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter, self.FP_step)
                 # cast metric summary
                 self.epoch_evaluator.epoch_metric_cast()
         
