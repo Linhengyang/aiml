@@ -1,4 +1,5 @@
 import torch
+import typing as t
 from torch import nn
 from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import accuracy
@@ -70,5 +71,5 @@ class fmnistClassifier(easyPredictor):
 
 
     @property
-    def pred_scores(self):
+    def pred_scores(self) -> t.List[float]:
         return self._pred_scores
