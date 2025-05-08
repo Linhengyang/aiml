@@ -1,4 +1,4 @@
-from ...Base.MetaFrames import Encoder, Decoder, AttentionDecoder, EncoderDecoder
+from ...Base.MetaFrames import Encoder, AttentionDecoder, EncoderDecoder
 from ...Base.RootLayers.PositionalEncodings import TrigonoAbsPosEnc, LearnAbsPosEnc
 from ...Modules._transformer import TransformerEncoderBlock, TransformerDecoderBlock
 import torch.nn as nn
@@ -11,14 +11,19 @@ import torch
 class TransformerEncoder(Encoder):
     '''
     Transformer的 Encoder 部分由以下组成. 各层的 shape 变化如下:
-    1. Embedding层. 输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID。输出 (batch_size, seq_length, num_hiddens)
+    1. Embedding层. 
+        输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID。输出 (batch_size, seq_length, num_hiddens)
         Embedding层相当于一个 onehot + linear-projection 的组合体,
         (batch_size, seq_length) --onehot--> (batch_size, seq_length, vocab_size) --linear_proj--> (batch_size, seq_length, num_hiddens)
-    2. PositionEncoding层. 输入 (batch_size, seq_length, num_hiddens). 输出 add position info 后的 (batch_size, seq_length, num_hiddens)
-    3. 连续的 Encoder Block. 每个 EncoderBlock 的输入 src_X (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
-        输入 valid_lens (batch_size,)
+
+    2. PositionEncoding层.
+        对 (seq_length, num_hiddens) 的 位置信息作编码. 注意 encoder 里的位置信息是 1-seq_length, timestep 0 是 BOS, 不在 src seq里
+
+    3. 连续的 Encoder Block.
+        每个 EncoderBlock 的输入 src_X (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
+        输入/输出 valid_lens (batch_size,) 作为在 Block间不会变的 mask 信息
     
-    在Encoder内部, 前后关系依赖是输入 timestep 1-seq_length, 输出 timestep 1-seq_length，作为对 input data 的深度表征
+    在Encoder内部, 前后关系依赖是输入 timestep 1-seq_length, 输出 timestep 1-seq_length, 实现对 input data 的深度表征
     '''
     def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
         super().__init__()
@@ -39,7 +44,8 @@ class TransformerEncoder(Encoder):
 
         # source input data embedding
         # src_embd: shape (batch_size, num_steps, num_hiddens)
-        src_embd = self.embedding(src) * math.sqrt(self.num_hiddens) # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
+        src_embd = self.embedding(src) * math.sqrt(self.num_hiddens)
+        # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
         # source position embedding: 没有 bos, 从 1 开始到 num_steps
         # pos_embd: (1, num_steps, num_hiddens)
@@ -62,9 +68,41 @@ class TransformerEncoder(Encoder):
 class TransformerDecoder(AttentionDecoder):
     '''
     Transformer的 Decoder 部分由以下组成. 各层的 shape 变化如下:
-    1. Embedding层. 输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID。 输出(batch_size, seq_length, num_hiddens)
-    2. pos_encoding层. 输入(batch_size, seq_length, num_hiddens), 输出(batch_size, seq_length, num_hiddens)
 
+    train 模式:
+    1. Embedding层.
+        输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID. 输出(batch_size, seq_length, num_hiddens)
+
+    2. pos_encoding层.
+        对 (1, seq_length, num_hiddens) 的 位置信息作编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
+
+    3. 连续的 decoder Block.
+        每个 DecoderBlock 的输入 tgt_embd + pos_embd (batch_size, seq_length, num_hiddens), 还有 src_enc_info
+        输出 (batch_size, seq_length, num_hiddens)
+
+        在 Block 内部, tgt_embd 先作自注意力, 再和 src_embd 作交叉注意力以获取信息
+
+        Block 之间没有传递 valid_lens of tgt seq 的信息. 这个 valid lens of tgt seq 用在了 求loss 的步骤里
+    
+    在Decoder内部, 前后关系依赖是输入 timestep 0-seq_length-1, 输出 timestep 1-seq_length, 实现对 shift1 data 的 并行单步预测
+
+    eval 模式: eval 模式下, 单次forward是生产 单个token 的过程. 总共要生成 seq_length 个token, 所以要执行forward seq_length次,
+    第 i 次 forward 生成 timestep 为 i 的token, i = 1,2,...,seq_length.    timestep = 0 的token是BOS
+
+    对于 第 i 次forward
+    1. Embedding层.
+        输入(1, 1), 元素是 timestep=i-1 的 token 的ID integer. 输出 (1, 1, num_hiddens)
+    
+    2. pos_encoding层.
+        对 (1, num_hiddens) 的 位置信息作编码. 这里这个 位置信息代表 timestep i-1. 在forward过程中如何知道自己是在第几次forward过程?
+
+    3. 连续的 decoder Block
+        每个 DecoderBlock 的输入 tgt_embd + pos_embd (1, 1, num_hiddens), 还有 src_enc_info
+        以及 KV_Caches: 记录了每个 Block 各自的 输入 tgt_tensor 在 timesteps 0 - i-2 上的堆叠.
+    
+    4. dense层.
+        输出 (1, 1, vocab_size)tensor of logits, 即对 timestep=i 的token 的预测
+        输出 KV_Caches: 记录了每个 Block 各自的 输入 tgt_tensor 在 timesteps 0 - i-1 上的堆叠.
     '''
     def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
         super().__init__()
@@ -98,18 +136,20 @@ class TransformerDecoder(AttentionDecoder):
 
         # 对于第i次infer: i = 1, 2, ..., num_steps
         #        tgt_dec_input shape: (1, 1)int64, 其 timestep 是 i-1, 前向的output的timestep 是 i
-        #        src_enc_info = (src_enc, src_valid_lens): [(1, num_stepss, d_dim), (1,)]
+        #        src_enc_info = (src_enc, src_valid_lens): [(1, num_steps, d_dim), (1,)]
         #        input KV_Caches: 
         #           Dict with keys: block_ind,
         #           values: 对于第 1 次infer, KV_Caches 为 空
         #                   对于第 i > 1 次infer, KV_Caches 是 tensors shape as (1, i-1, d_dim), i-1 维包含 timestep 0 到 i-2
 
-        #        position_ids: 推理时阶段时, 对于第 1 次infer, position_ids 应该是 tensor([0]), 因为此时 tgt_dec_input 是 <bos>, KV_Caches 为 {}
-        #                      对于第 i > 1 次infer, position_ids = tensor([i-1]), 因为此时 tgt_dec_input position 是 i-1, 即 KV_Cacues 的 value 的第二维度
+        #        position_ids:
+        #           推理时阶段时, 对于第 1 次infer, position_ids 应该是 tensor([0]), 因为此时 tgt_dec_input 是 <bos>, KV_Caches 为 {}
+        #           对于第 i > 1 次infer, position_ids = tensor([i-1]), 因为此时 tgt_dec_input position 是 i-1, 即 KV_Cacues 的 value 的第二维度
         
         # target input embedding
         # tgt_dec_input_embd: shape (batch_size, num_steps, num_hiddens)
-        tgt_dec_input_embd = self.embedding(tgt_dec_input) * math.sqrt(self.num_hiddens) # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
+        tgt_dec_input_embd = self.embedding(tgt_dec_input) * math.sqrt(self.num_hiddens) 
+        # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
         # target position embedding
         # 训练模式: input 的 timesteps 是从 0(bos) 到 num_steps-1
