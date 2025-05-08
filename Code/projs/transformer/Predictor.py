@@ -23,11 +23,14 @@ def greedy_predict(
         src shape: (1, num_steps)int64, timesteps: 1 -> num_steps
         src_valid_lens shape: (1,)int32
     length_factor: 生成序列的长度奖励, 长度越长奖励越大
-    device: 设备
+    device: 手动管理设备. 应该和 net 的设备一致
 
-    output:
+    output: @ CPU
         predicted tokens(eos not included), along with its score
     '''
+    src_inputs = [tensor.to(device) for tensor in src_inputs]
+    net.to(device)
+
     net.eval()
     with torch.no_grad():
         # encoder / decoder.init_state in infer mode:
@@ -169,15 +172,15 @@ def beam_predict(
         src shape: (1, num_steps)int64, timesteps: 1 -> num_steps
         src_valid_lens shape: (1,)int32
     length_factor: 生成序列的长度奖励, 长度越长奖励越大
-    device: 设备
+    device: 手动管理设备. 应该和 net 的设备一致
     beam_size: 束搜索 的 束宽
     parrallel: 是否并行计算
 
-    output:
+    output: @ CPU
     predicted tokens(eos not included), along with its score
     '''
-    net.to(device)
     src_inputs = [tensor.to(device) for tensor in src_inputs]
+    net.to(device)
 
     src_enc_info = net.decoder.init_state(net.encoder(*src_inputs))# src_enc_seqs, src_valid_lens: (1, num_steps, d_dim), (1, )
     bos, eos, vocab_size = tgt_vocab['<bos>'], tgt_vocab['<eos>'], len(tgt_vocab)
@@ -275,7 +278,9 @@ class sentenceTranslator(easyPredictor):
             self.device = device
         else:
             self.device = torch.device('cpu')
-        
+        print(f"use device {self.device} to infer")
+
+
         self.bleu_k = bleu_k
         if search_mode == 'greedy':
             self.pred_fn = greedy_predict
@@ -292,7 +297,6 @@ class sentenceTranslator(easyPredictor):
         self.eval_fn = bleu
 
         self.net = net
-        self.net.to(self.device) # relocate net 到 device 上
         self.num_steps = num_steps
 
 
@@ -324,7 +328,6 @@ class sentenceTranslator(easyPredictor):
                                              flatten=True)
         # tensorize
         src_arry, src_valid_len = build_tensorDataset([source,], self.src_vocab, self.num_steps) # src_arry:(1, num_steps)int64, valid_length:(1,)int32
-        src_arry.to(self.device), src_valid_len.to(self.device)
         
         # infer
         # net:,

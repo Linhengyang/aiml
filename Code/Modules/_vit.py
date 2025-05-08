@@ -14,15 +14,21 @@ class ViTMLP(nn.Module):
     def forward(self, X):
         return self.dropout2(self.dense2(self.dropout1(self.gelu(self.dense1(X)))))
 
+
+
 class ViTEncoderBlock(nn.Module):
     def __init__(self, num_heads, num_hiddens, dropout, mlp_num_hiddens, use_bias=False):
         super().__init__()
         self.norm1 = nn.LayerNorm(num_hiddens)
-        self.attention = MultiHeadAttention(num_heads, num_hiddens, dropout)
+        self.attention = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
         self.norm2 = nn.LayerNorm(num_hiddens)
         self.mlp = ViTMLP(mlp_num_hiddens, num_hiddens, dropout)
     
     def forward(self, X, valid_lens=None):
-        # X shape:(batch_size, num_seq, d_dim)
+        # X: flattened patches 
+        # train X shape:(batch_size, num_seq, d_dim)
+        # infer X shape:(batch_size, num_seq, d_dim)
         X = X + self.attention(*([self.norm1(X)]*3), valid_lens)
+        
+        # output shape:(batch_size, num_seq, d_dim)
         return X + self.mlp(self.norm2(X))

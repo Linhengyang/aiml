@@ -53,7 +53,7 @@ def masked_softmax(S, valid_lens):
             if valid_lens is 1-D tensor, W[i][:, k] are zeros when k > valid_lens[i]
             if valid_lens is 2-D tensor, W[i][j, k] are zeros when k > valid_lens[i, j], here j is query_idx
     '''
-    
+
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
         return nn.functional.softmax(S, dim=-1)
     
@@ -61,12 +61,12 @@ def masked_softmax(S, valid_lens):
         valid_lens = torch.repeat_interleave(valid_lens.unsqueeze(1), repeats=S.shape[1], dim=1)
 
     elif valid_lens.dim() == 2: # valid_lens: (batch_size, n_query)
-        assert valid_lens == S.shape[:-1], f"valid_lens {valid_lens} not match with S shape {S.shape}"
+        assert valid_lens.shape == S.shape[:-1], f"valid_lens.shape {valid_lens.shape} not match with S shape {S.shape}"
 
     else:
         raise ValueError(f'wrong valid_lens')
         
-    mask = mask_first_n_valid(S.shape, valid_lens) # mask shape: (batch_size, n_quen_queryries, n_kv)
+    mask = mask_first_n_valid(S.shape, valid_lens) # mask shape: (batch_size, n_query, n_kv)
     S[~mask] = -1e20 # non-valid 部分填入 负无穷, 这样在 softmax 操作中被消去. index-put操作梯度可传
 
     return nn.functional.softmax(S, dim=-1)

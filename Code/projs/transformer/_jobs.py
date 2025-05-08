@@ -10,7 +10,7 @@ from .Evaluator import transformerEpochEvaluator
 from .Predictor import sentenceTranslator
 import yaml
 import json
-from ...Utils.Text.BytePairEncoding import get_BPE_symbols, segment_word_BPE_greedy
+from ...Utils.Text.BytePairEncoding import get_BPE_symbols
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -55,7 +55,7 @@ num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256,
 
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 50, 512, 0.00005
+num_epochs, batch_size, lr = 5, 512, 0.00005
 
 
 
@@ -71,6 +71,12 @@ num_epochs, batch_size, lr = 50, 512, 0.00005
 # 生产 source corpus 和 target corpus 的symbols
 def prepare_job():
     print('prepare job begin')
+
+    # create all related directories if not existed
+    for dir_name in [symbols_dir, vocabs_dir, src_vocab_dir, tgt_vocab_dir, model_proj_dir, log_proj_dir]:
+        os.makedirs(dir_name, exist_ok=True)
+        print(f'directory {dir_name} created')
+
     # generate symbols of source/target language and save them
 
     # 读取全部语料 corpus
@@ -94,7 +100,7 @@ def prepare_job():
 
     print(f'eng_uniq_size:{eng_uniq_size}\nfra_uniq_size:{fra_uniq_size}')
 
-    # 当 eng_symbols_path 文件不存在时, 保存 eng_symbols 到 symbols_dir/source.json
+    # 当 eng_symbols_path 文件不存在时, 生产并保存 eng_symbols 到 symbols_dir/source.json
     eng_symbols_path = os.path.join(symbols_dir, 'source.json')
     if not os.path.exists(eng_symbols_path):
         # create symbols
@@ -127,6 +133,7 @@ def prepare_job():
             json.dump(fra_symbols, f)
 
     print('prepare job complete')
+
     return eng_symbols_path, fra_symbols_path
 
 
@@ -251,7 +258,8 @@ def infer_job(saved_params_fpath, src_symbols_path):
     # if dropout > 0.0: # 当网络有随机性时, 必须用贪心搜索预测. 因为束搜索要用 train mode 网络. 而 train mode 的网络在每次推理时会产生随机性
     #     search_mode = 'greedy'
     
-    translator = sentenceTranslator(src_vocab, tgt_vocab, net, num_steps, search_mode, device=device, beam_size=3, length_factor=5) #加大对长句的奖励
+    translator = sentenceTranslator(src_vocab, tgt_vocab, net, num_steps, search_mode,
+                                    device=device, beam_size=3, length_factor=5) #加大对长句的奖励
 
     # predict
     # src_sentence = 'i\'m home .'

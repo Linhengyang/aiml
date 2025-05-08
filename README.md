@@ -84,14 +84,15 @@ also recommend to have:
     │   │   │   ├── DataAssemble.py
     │   │   │   ├── DataSplit.py
     │   │   │   └── DataTransform.py
+    │   │   ├── Image
+    │   │   │   └── Display.py
     │   │   ├── System
-    │   │   │   └── pathCreate.py
-    │   │   ├── Text
-    │   │   │   ├── BytePairEncoding.py
-    │   │   │   ├── TextPreprocess.py
-    │   │   │   ├── Tokenize.py
-    │   │   │   └── Vocabulize.py
-    │   │   └── image
+    │   │   │   └── Math.py
+    │   │   └── Text
+    │   │       ├── BytePairEncoding.py
+    │   │       ├── TextPreprocess.py
+    │   │       ├── Tokenize.py
+    │   │       └── Vocabulize.py
     │   ├── apps
     │   │   ├── semantic_segmentation
     │   │   └── sentiment_analysis
