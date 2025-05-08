@@ -1,6 +1,7 @@
 from ...Compute.EvaluateTools import Timer, Accumulator, epochEvaluator, metric_summary
 from ...Compute.VisualizeTools import Animator
 import yaml
+import typing as t
 
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
@@ -74,7 +75,7 @@ class transformerEpochEvaluator(epochEvaluator):
     
 
     # @evaluation: record values for scalars
-    def evaluate_model(self, net, loss, valid_iter, num_batches=None):
+    def evaluate_model(self, net, loss, valid_iter, FP_step:t.Callable, num_batches=None):
         if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
             # 始终保持 net 在 train mode. 因为 net 在 eval mode 会触发自回归调用 KV_Cache
             for i, (net_inputs_batch, loss_inputs_batch) in enumerate(valid_iter):
@@ -85,9 +86,8 @@ class transformerEpochEvaluator(epochEvaluator):
 
                 if num_batches and i >= num_batches: # 如果 设定了 evaluate 的 batch 数量，那么在达到时，退出 eval_metric 的累积
                     break
-                Y_hat, _ = net(*net_inputs_batch)
-
-                l = loss(Y_hat, *loss_inputs_batch)
+                
+                l, Y_hat = FP_step(net, loss, net_inputs_batch, loss_inputs_batch)
 
                 # 记录 batch loss, 和 target batch valid token 数量
                 self.eval_accumulator.add(l.sum(), loss_inputs_batch[1].sum())
