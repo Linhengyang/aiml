@@ -138,7 +138,7 @@ def train_job(data_source):
 
     print('train job complete')
 
-    return saved_params_fpath, 
+    return saved_params_fpath
 
 
 
