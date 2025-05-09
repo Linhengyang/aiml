@@ -99,7 +99,7 @@ def train_job(data_source):
         validset = FMNISTDatasetOnline(path=fmnist_data_dir, is_train=False, resize=resize)
         testset = FMNISTDatasetOnline(path=fmnist_data_dir, is_train=False, resize=resize)
     elif data_source == 'local': # from local data
-        trainset = FMNISTDatasetLocal(configs['train_data'], configs['train_data'])
+        trainset = FMNISTDatasetLocal(configs['train_data'], configs['train_label'])
         validset = FMNISTDatasetLocal(configs['valid_data'], configs['valid_label'])
         testset = FMNISTDatasetLocal(configs['test_data'], configs['test_label'])
     else:
