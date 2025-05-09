@@ -37,7 +37,7 @@ def display_images_with_labels(
     num_channels = image_tensor.shape[1]
 
     # 检查标签（如果有）长度是否与图片数量匹配
-    if label_data and len(label_data) != N:
+    if label_data is not None and len(label_data) != N:
         raise ValueError(
             f"the length of label data {len(label_data)} must match with image tensor {image_tensor.shape} on dimension 0"
             )
