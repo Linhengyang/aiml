@@ -82,7 +82,7 @@ class FMNISTDatasetLocal(torch.utils.data.Dataset):
         self._labelTensor = decode_idx1_ubyte(imglabel_fpath).type(torch.int64) #shape: (numImgs, )
         self._img_shape = self._imgTensor.shape[1:]
         
-        assert self._imgTensor.size(0) == self._labelTensor.size(0), 'sample size mismatch'
+        assert self._imgTensor.size(0) == self._labelTensor.size(0), 'image data & label sample size mismatch'
     
     def __getitem__(self, index):
         return (self._imgTensor[index], self._labelTensor[index])
