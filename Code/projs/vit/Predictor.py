@@ -57,7 +57,7 @@ class fmnistClassifier(easyPredictor):
 
         sample_imgTensor = decode_idx3_ubyte(imgdata_fpath).type(torch.float32) # tensor shape:(numImgs, 1, numRows, numCols)
 
-        sample_size = sample_imgTensor.dim(0)
+        sample_size = sample_imgTensor.size(0)
 
         assert select_size <= sample_size, \
             f'select number to predict must be no larger than total sample size.\
