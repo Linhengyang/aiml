@@ -21,9 +21,10 @@ if __name__ == "__main__":
 
     from Code.projs.vit._jobs import prepare_job, train_job, infer_job
     
-    prepare_job()
+    # prepare_job()
 
-    saved_params_fpath = train_job("local")
+    # saved_params_fpath = train_job("local")
+    saved_params_fpath = "../model/vit/saved_params_2025-05-09_16:36.pth"
 
     infer_job(saved_params_fpath)
     
