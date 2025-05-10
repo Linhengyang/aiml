@@ -4,6 +4,12 @@ import torch
 from ...Modules._transformer import TransformerEncoderBlock
 from ...Base.RootLayers.PositionalEncodings import LearnAbsPosEnc
 
+
+
+
+
+
+
 class BERTEncoder(nn.Module):
     def __init__(self, vocab_size, num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, seq_len, use_bias=True, **kwargs):
         super().__init__()
@@ -46,6 +52,13 @@ class MLM(nn.Module):
         mask_Y_hat = self.mlp(mask_tokens_embd) # (batch_size, num_masktks, vocab_size)
         return mask_Y_hat # ground truth Y (batch_size, num_masktks), before go into CELoss, need to reshape mask_Y_hat
 
+
+
+
+
+
+
+
 class NSP(nn.Module):
     def __init__(self):
         super().__init__()
@@ -54,6 +67,13 @@ class NSP(nn.Module):
     def forward(self, cls_X):
         # input cls_X shape: (batch_size, num_hiddens)
         return self.head(cls_X) # output shape: (batch_size, 2)
+
+
+
+
+
+
+
 
 class BERT(nn.Module):
     def __init__(self, vocab_size, num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, seq_len):
