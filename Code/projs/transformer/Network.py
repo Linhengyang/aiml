@@ -17,7 +17,7 @@ class TransformerEncoder(Encoder):
         (batch_size, seq_length) --onehot--> (batch_size, seq_length, vocab_size) --linear_proj--> (batch_size, seq_length, num_hiddens)
 
     2. PositionEncoding层.
-        对 (seq_length, num_hiddens) 的 位置信息作编码. 注意 encoder 里的位置信息是 1-seq_length, timestep 0 是 BOS, 不在 src seq里
+        输入 (seq_length, num_hiddens) 的 位置信息, 对其编码. 注意 encoder 里的位置信息是 1-seq_length, timestep 0 是 BOS, 不在 src seq里
 
     3. 连续的 Encoder Block.
         每个 EncoderBlock 的输入 src_X (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
@@ -74,7 +74,7 @@ class TransformerDecoder(AttentionDecoder):
         输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID. 输出(batch_size, seq_length, num_hiddens)
 
     2. pos_encoding层.
-        对 (1, seq_length, num_hiddens) 的 位置信息作编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
+        输入 (seq_length, num_hiddens) 的 位置信息, 对其编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
 
     3. 连续的 decoder Block.
         每个 DecoderBlock 的输入 tgt_embd + pos_embd (batch_size, seq_length, num_hiddens), 还有 src_enc_info
