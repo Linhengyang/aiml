@@ -5,7 +5,7 @@ from torch import nn
 class TrigonoAbsPosEnc(nn.Module):
     '''
     args:
-        num_hiddens: the feature dimentions of input X, simply as d
+        num_hiddens: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
         position_ids: 1D tensors of int64, shall be inside [0, max_len-1]
@@ -56,7 +56,7 @@ class LearnAbsPosEnc(nn.Module):
 
         Given max_possible_posNum, the layer creates positions by using [0, 1, ..., max_possible_posNum-1] to index
 
-        num_hiddens: the feature dimentions of input X, simply as d
+        num_hiddens: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
         position_ids: 1D tensors of int64, shall be inside [0, max_possible_posNum-1]
