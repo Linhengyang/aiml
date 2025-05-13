@@ -198,7 +198,7 @@ class Transformer(EncoderDecoder):
     def forward(self, src, tgt_frontshift1, src_valid_lens):
         enc_outputs = self.encoder(src, src_valid_lens) # src_enc, src_valid_lens
         enc_info = self.decoder.init_state(enc_outputs)
-
+  
         #train: output[0] shape: (batch_size, num_steps, vocab_size) tensor of logits, output[2]: None
         #infer: output[0] shape: (1, 1, vocab_size) tensor of logits, output[2]: dict of (1, cur_infer_step i, d_dim) tensor
         return self.decoder(tgt_frontshift1, enc_info)
