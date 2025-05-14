@@ -6,10 +6,10 @@ import re
 
 
 
-def count_corpus(sentences: t.List[list]|t.List[str]) -> t.Dict:
+def count_corpus(sentences: list|tuple|set) -> t.Dict:
     '''
-    inputs: sentence/s of tokens
-        sentences can be 1D list or 2D list with basic elements as tokens
+    inputs: nested container of tokens
+        sentences can be nested container with basic elements as tokens
 
     returns: A dictionary, denoted as D
         keys are tokens(words, chars) and values are frequencies
@@ -17,11 +17,18 @@ def count_corpus(sentences: t.List[list]|t.List[str]) -> t.Dict:
     explains:
         Count token frequencies 
     '''
-    # flatten the 2D list
-    if len(sentences) == 0 or isinstance(sentences[0], list):
-        sentences = [token for line in sentences for token in line]
 
-    return collections.Counter(sentences)
+    def flatten(lst):
+        for item in lst:
+            if isinstance(item, (list, tuple, set)):
+                yield from flatten(item)
+            else:
+                yield item
+    
+    # flatten
+    tokens = list( flatten(sentences) )
+    
+    return collections.Counter(tokens)
 
 
 
