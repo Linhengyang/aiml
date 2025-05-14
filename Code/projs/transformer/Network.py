@@ -10,6 +10,8 @@ import torch
 
 class TransformerEncoder(Encoder):
     '''
+    在Encoder内部, 前后关系依赖是输入 timestep 1-seq_length, 输出 timestep 1-seq_length, 实现对 input data 的深度表征
+
     Transformer的 Encoder 部分由以下组成. 各层的 shape 变化如下:
     1. Embedding层. 
         输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID。输出 (batch_size, seq_length, num_hiddens)
@@ -17,13 +19,14 @@ class TransformerEncoder(Encoder):
         (batch_size, seq_length) --onehot--> (batch_size, seq_length, vocab_size) --linear_proj--> (batch_size, seq_length, num_hiddens)
 
     2. PositionEncoding层.
-        输入 (seq_length, num_hiddens) 的 位置信息, 对其编码. 注意 encoder 里的位置信息是 1-seq_length, timestep 0 是 BOS, 不在 src seq里
+        输入 (seq_length,) 的 位置信息, 对其编码. 注意 encoder 里的位置信息是 1-seq_length, timestep 0 是 BOS, 不在 src seq里
+        输出 (1, seq_length, num_hiddens)
 
     3. 连续的 Encoder Block.
         每个 EncoderBlock 的输入 src_X (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
-        输入/输出 valid_lens (batch_size,) 作为在 Block间不会变的 mask 信息
-    
-    在Encoder内部, 前后关系依赖是输入 timestep 1-seq_length, 输出 timestep 1-seq_length, 实现对 input data 的深度表征
+        输入/输出 valid_lens (batch_size,) 作为在 Block间不会变的 mask 信息接力传递. valid_lens[i] 给出了样本i 的 seq_length 中, 有几个是valid.
+
+        在自注意力中, 对每个token(对应每条query)而言, 都只限制了整体valid 长度. 故 encoder 里, 每个token是跟序列里前/后所有valid token作相关性运算的
     '''
     def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
         super().__init__()
@@ -48,9 +51,9 @@ class TransformerEncoder(Encoder):
         # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
         # source position embedding: 没有 bos, 从 1 开始到 num_steps
-        # pos_embd: (1, num_steps, num_hiddens)
+        # pos_embd: (num_steps,) --pos embed--> (1, num_steps, num_hiddens)
         # 1 到 num_steps, 所有位置都需要position embed. 0 是给 <bos> 的. src里没有bos
-        position_ids = torch.arange(1, num_steps+1, dtype=torch.int64)
+        position_ids = torch.arange(1, num_steps+1, dtype=torch.int64, device=src.device)
 
         # input embeddings + position embedding
         src_enc = self.dropout(src_embd + self.pos_encoding(position_ids))
@@ -74,7 +77,8 @@ class TransformerDecoder(AttentionDecoder):
         输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID. 输出(batch_size, seq_length, num_hiddens)
 
     2. pos_encoding层.
-        输入 (seq_length, num_hiddens) 的 位置信息, 对其编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
+        输入 (seq_length,) 的 位置信息, 对其编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
+        输出 (1, seq_length, num_hiddens)
 
     3. 连续的 decoder Block.
         每个 DecoderBlock 的输入 tgt_embd + pos_embd (batch_size, seq_length, num_hiddens), 还有 src_enc_info
@@ -86,6 +90,8 @@ class TransformerDecoder(AttentionDecoder):
     
     在Decoder内部, 前后关系依赖是输入 timestep 0-seq_length-1, 输出 timestep 1-seq_length, 实现对 shift1 data 的 并行单步预测
 
+
+
     eval 模式: eval 模式下, 单次forward是生产 单个token 的过程. 总共要生成 seq_length 个token, 所以要执行forward seq_length次,
     第 i 次 forward 生成 timestep 为 i 的token, i = 1,2,...,seq_length.    timestep = 0 的token是BOS
 
@@ -94,7 +100,8 @@ class TransformerDecoder(AttentionDecoder):
         输入(1, 1), 元素是 timestep=i-1 的 token 的ID integer. 输出 (1, 1, num_hiddens)
     
     2. pos_encoding层.
-        对 (1, num_hiddens) 的 位置信息作编码. 这里这个 位置信息代表 timestep i-1. 在forward过程中如何知道自己是在第几次forward过程?
+        对 (1,) 的 位置信息作编码. 这里这个 位置信息代表 timestep i-1. 在forward过程中如何知道自己是在第几次forward过程? 依靠 
+        输出 (1, seq_length, num_hiddens)
 
     3. 连续的 decoder Block
         每个 DecoderBlock 的输入 tgt_embd + pos_embd (1, 1, num_hiddens), 还有 src_enc_info

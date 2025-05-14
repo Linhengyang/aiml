@@ -40,12 +40,14 @@ class TransformerEncoderBlock(nn.Module):
     args:
         num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False
     
-    inputs: enc_X, valid_lens(optional) 
-        enc_X's shape: (batch_size, seq_len, num_hiddens) 
-        valid_lens(optional)'s shape: (batch_size,) since it's self-attention. 一条样本只有一个valid length
-    
-    returns: denoted as enc_O 
-        enc_O's shape: (batch_size, seq_len, num_hiddens), the same as enc_X 
+    inputs:
+        X: (batch_size, seq_len, num_hiddens)
+
+        valid_lens(optional): (batch_size,) since it's self-attention. 一条样本只有一个valid length, 这个 valid length 指出了
+        X 在 dim 1 的 valid 长度
+
+    returns:
+        shape: (batch_size, seq_len, num_hiddens), 和输入的 X 保持一致, 因为多个Block要堆叠起来, 所以要保持shape一致
     
     explains: 
         keep batch shape at every layer's input/output through the block 
@@ -53,8 +55,10 @@ class TransformerEncoderBlock(nn.Module):
             f(time 1 to T) --> node 1 to T on next layer
         
         自注意力Encoder Block. 对输入样本data作[自注意力-前向-norm]的深度处理, 样本从时间步1到T, 输出结果也是从时间步1到T
+
         单个样本内部, 时间步之间由于自注意力的机制, 作到了双向前后全连接表征.
-        依靠Add+LayerNorm层, 自注意力的输入data batch shape 和输出 data batch shape 是相同的. 这样处理是方便多个Block堆叠
+
+
     '''
     def __init__(self, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False):
         super().__init__()
@@ -74,6 +78,13 @@ class TransformerEncoderBlock(nn.Module):
         self.addlnorm2 = AddLNorm(num_hiddens, dropout)
     
     def forward(self, X, valid_lens):
+        # X 作 自注意力. X shape(batch_size, seq_len, num_hiddens), 在 dim 1 的 seq_len 里, valid area 由 valid_lens(batch_size,) 确定
+        # 可以先 mask, 再作 自注意力, 即对 X 在 dim 1 作 mask
+        # 也可以先 自注意力, 再 mask, 即 (Q, K) --相似度计算--> S --softmax--> W, (W, V) --n_query次线性组合 on V--> output
+        # 过程中, valid area 作用在 softmax 子过程里, 同样可以限制 valid area
+
+        # 在自注意力中, 对每个token(对应每条query)而言, 都只限制了整体valid 长度.
+        # 故 encoder 里, 每个token是跟序列里前/后所有valid token作相关性运算的
         Y = self.addlnorm1(X, self.attention(X, X, X, valid_lens))
         return self.addlnorm2(Y, self.PosFFN(Y))
 
