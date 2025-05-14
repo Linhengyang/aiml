@@ -155,8 +155,9 @@ class TransformerDecoderBlock(nn.Module):
 
             # train: 从0-T-1 T并行生成 1-T, 生成 step i(i=1,..,T) 的 qKV timestep分别是 q:i-1, K:0至i-1, V:0至i-1
             # 那么对于 T 条 query 的 QKV, timestep都是 0-T-1, valid length 应该分别是 1 for time0, 2 for time1, ..., T for time T-1
-            # 对 batch 内所有sample而言, 上述 valid length 应该是一样的, 所以重复 batch_size 遍, 成为一个 (batch_size, T) 的 2-D tensor
-            valid_lens = torch.arange(1, num_steps+1, dtype=torch.int32, device=tgt_query.device).repeat(batch_size, 1)
+            # 即 [1,2,...,T]
+            # 对 batch 内所有sample而言, 上述 valid length 是一样的, 所以重复 batch_size 遍, 成为一个 (batch_size, T) 的 2-D tensor
+            valid_lens = torch.arange(1, num_steps+1, dtype=torch.int32, device=tgt_query.device).expand(batch_size, -1)
 
             # 自注意力+AddLayerNorm:
             # target info 深度表达: (batch_size, T, d_dim) --auto_regressive_self_attention + add_layernorm--> (batch_size, T, d_dim)
