@@ -12,7 +12,6 @@ class TransformerEncoder(Encoder):
     '''
     在Encoder内部, 前后关系依赖是输入 timestep 1-seq_length, 输出 timestep 1-seq_length, 实现对 input data 的深度表征
 
-    Transformer的 Encoder 部分由以下组成. 各层的 shape 变化如下:
     1. Embedding层. 
         输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID。输出 (batch_size, seq_length, num_hiddens)
         Embedding层相当于一个 onehot + linear-projection 的组合体,
@@ -23,7 +22,7 @@ class TransformerEncoder(Encoder):
         输出 (1, seq_length, num_hiddens)
 
     3. 连续的 Encoder Block.
-        每个 EncoderBlock 的输入 src_X (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
+        每个 EncoderBlock 的输入 src_embd + pos_embd (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
         输入/输出 valid_lens (batch_size,) 作为在 Block间不会变的 mask 信息接力传递. valid_lens[i] 给出了样本i 的 seq_length 中, 有几个是valid.
 
         在自注意力中, 对每个token(对应每条query)而言, 都只限制了整体valid 长度. 故 encoder 里, 每个token是跟序列里前/后所有valid token作相关性运算的
@@ -70,42 +69,45 @@ class TransformerEncoder(Encoder):
 
 class TransformerDecoder(AttentionDecoder):
     '''
-    Transformer的 Decoder 部分由以下组成. 各层的 shape 变化如下:
-
     train 模式:
+    单次forward是 seq_length 并行, 前后关系依赖是输入 timestep 0-seq_length-1, 输出 timestep 1-seq_length, 实现对 shift1 data 的 并行预测
+
     1. Embedding层.
-        输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID. 输出(batch_size, seq_length, num_hiddens)
+        输入(batch_size, seq_length), 每个元素是 0-vocab_size 的int64, 代表token ID. 输出(batch_size, seq_length, num_hiddens)
 
     2. pos_encoding层.
         输入 (seq_length,) 的 位置信息, 对其编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
         输出 (1, seq_length, num_hiddens)
 
     3. 连续的 decoder Block.
-        每个 DecoderBlock 的输入 tgt_embd + pos_embd (batch_size, seq_length, num_hiddens), 还有 src_enc_info
+        每个 DecoderBlock 的输入 tgt_embd + pos_embd (batch_size, seq_length, num_hiddens),
+        输入/输出 src_enc_info(src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)] 作为在Block间不会变的 src 信息接力传递.
         输出 (batch_size, seq_length, num_hiddens)
 
-        在 Block 内部, tgt_embd 先作自注意力, 再和 src_embd 作交叉注意力以获取信息
+        在 Block 内部, tgt_embd 先作 自回归的自注意力 以深度表征, 再和 src_embd 作 交叉注意力 以获取信息
 
         Block 之间没有传递 valid_lens of tgt seq 的信息. 这个 valid lens of tgt seq 用在了 求loss 的步骤里
-    
-    在Decoder内部, 前后关系依赖是输入 timestep 0-seq_length-1, 输出 timestep 1-seq_length, 实现对 shift1 data 的 并行单步预测
 
+        
+    eval 模式:
+    单次forward是生产 单个token 的过程. 总共要生成 seq_length 个token, 所以总过程要执行forward seq_length次,
+    第 i 次 forward 生成 timestep 为 i 的token, i = 1,2,...,seq_length.    timestep = 0 的token是<BOS>
 
-
-    eval 模式: eval 模式下, 单次forward是生产 单个token 的过程. 总共要生成 seq_length 个token, 所以要执行forward seq_length次,
-    第 i 次 forward 生成 timestep 为 i 的token, i = 1,2,...,seq_length.    timestep = 0 的token是BOS
-
-    对于 第 i 次forward
+    对于 第 i 次forward, i = 1,2,...,seq_length
     1. Embedding层.
-        输入(1, 1), 元素是 timestep=i-1 的 token 的ID integer. 输出 (1, 1, num_hiddens)
+        输入(1, 1), 元素是 0-vocab_size 的int64, 代表 timestep=i-1 的 token ID. 输出 (1, 1, num_hiddens)
     
     2. pos_encoding层.
-        对 (1,) 的 位置信息作编码. 这里这个 位置信息代表 timestep i-1. 在forward过程中如何知道自己是在第几次forward过程? 依靠 
-        输出 (1, seq_length, num_hiddens)
+        对 (1,) 的 位置信息作编码. 这里这个位置信息代表 timestep i-1.
+        在forward过程中, 依靠 KV_Caches 中, dim 1 的维度长度, 得知当前 tgt_query 的位置信息
+        输出 (1, 1, num_hiddens)
 
     3. 连续的 decoder Block
-        每个 DecoderBlock 的输入 tgt_embd + pos_embd (1, 1, num_hiddens), 还有 src_enc_info
-        以及 KV_Caches: 记录了每个 Block 各自的 输入 tgt_tensor 在 timesteps 0 - i-2 上的堆叠.
+        每个 DecoderBlock 的输入 tgt_embd + pos_embd (1, 1, num_hiddens)
+        输入/输出 src_enc_info(src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)] 作为在Block间不会变的 src 信息接力传递.
+        输入/输出 KV_Caches: 
+            输入的 KV_Caches 记录了每个 Block 各自的 输入 tgt_tensor(timestep i-1) 在 timesteps 0 - i-2 上的堆叠,
+            输出的 KV_Caches 记录了每个 Block 堆叠了 输入 tgt_tensor(timestep i-1) 更新后的结果. 一次forward过程中, 所有KV都更新一次
     
     4. dense层.
         输出 (1, 1, vocab_size)tensor of logits, 即对 timestep=i 的token 的预测
