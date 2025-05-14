@@ -35,10 +35,10 @@ class BERTEncoder(nn.Module):
             self.blks.add_module(f'blk{i+1}', cur_blk)
     
 
-    def forward(self, tokens, segments, valid_lens):
+    def forward(self, tokens, valid_lens, segments):
         # tokens shape: (batch_size, seq_len)int64
-        # segments shape: (batch_size, seq_len)01 int64
         # valid_lens: (batch_size,)
+        # segments shape: (batch_size, seq_len)01 int64
         X = self.token_embedding(tokens) + self.seg_embedding(segments)
         # positions shape: [0, 1, ..., seq_len-1] 1D tensor
         positions = torch.arange(0, X.size(1), dtype=torch.int64, device=X.device)
@@ -143,6 +143,10 @@ class BERT(nn.Module):
 
         # segments: (batch_size, seq_len)01 indicating seq1 & seq2
         # mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task, 只需要 NSP task
+
+        if segments is None:
+            segments = torch.zeros_like(tokens, device=tokens.device)
+            
         embd_X = self.encoder(tokens, segments, valid_lens) # (batch_size, seq_len, num_hiddens)
 
         if mask_positions is not None:
