@@ -44,15 +44,18 @@ class Vocab:
                     self.idx_to_token.append(token) # 添加该token到self.idx_to_token
                     self.token_to_idx[token] = len(self.idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
     
+    
     def __len__(self):
         '''提供len()函数接口, 返回该vocab中总共有多少个distinct token'''
         return len(self.idx_to_token)
     
+
     @property # 修饰器, 在内部方法这样添加修饰之后, 可以以调用属性的方式来调用方法. 即 .unk() = .unk
     def unk(self):
         '''未知元 unk_token(默认为<unk>) 的idx为0'''
         return 0
     
+
     # 对给定的token（或者是tokens的hierarchy组合体）, 返回idx（或者是indices对应的hierarchy组合体）
     def __getitem__(self, tokens):
         '''提供文字to数字映射, 对给定的token, 返回其对应的idx. 如果输入有hierarchy结构, 则以相同的结构返回'''
@@ -62,6 +65,7 @@ class Vocab:
         # 当tokens是容器类型时, 取出内部的元素, 递归式地调用本函数. 这样本函数的返回值和输入值token具有相同的hierarchy结构
         return [self.__getitem__(token) for token in tokens]
     
+
     # 对给定的idx（或者是indices的hierarchy组合体）, 返回token（或者是tokens对应的hierarchy组合体）
     def to_tokens(self, indices):
         '''提供数字to文字映射, 对给定的idx, 返回其对应的token. 如果输入有hierarchy结构, 则以相同的结构返回'''
@@ -73,10 +77,17 @@ class Vocab:
         
         return [self.to_tokens(index) for index in indices]
     
+
     @property
     def token_freqs(self) -> t.List[t.Tuple]:
         return self._token_freqs
     
+
+    @property
+    def tokens(self) -> t.List[str]:
+        return self.idx_to_token
+    
+
     def save(self, dir, format='json'):
         # 字典分两个部分保存在文件夹 dir: idx to token 和 token to idx
         
@@ -91,6 +102,7 @@ class Vocab:
 
         else:
             raise NotImplementedError(f'format {format} not implemented')
+    
     
     def load(self, dir, format='json'):
         # 字典分两个部分保存在文件夹 dir: idx to token 和 token to idx
