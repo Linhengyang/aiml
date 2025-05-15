@@ -163,7 +163,7 @@ class BERT(nn.Module):
     
 
 
-class bertLoss(nn.Module):
+class BERTLoss(nn.Module):
     '''
     # get loss
     l = loss(mlm_Y_hat, mlm_label, mlm_valid_lens, nsp_Y_hat, nsp_label)
@@ -199,4 +199,4 @@ class bertLoss(nn.Module):
         mlm_l = self.mlmloss( mlm_Y_hat.permute(0,2,1), mlm_label, valid_area ) / mlm_valid_lens # (batch_size,) / (batch_size, )
         nsp_l = self.nsploss( nsp_Y_hat, nsp_label ) # (batch_size,)
 
-        return mlm_l + nsp_l
+        return mlm_l, nsp_l
