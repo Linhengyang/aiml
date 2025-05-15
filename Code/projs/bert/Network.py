@@ -3,7 +3,7 @@ from torch import Tensor
 import torch
 from ...Modules._transformer import TransformerEncoderBlock
 from ...Base.RootLayers.PositionalEncodings import LearnAbsPosEnc, TrigonoAbsPosEnc
-from ...Loss.MaskedCELoss import MaskedSoftmaxCELoss
+from ...Loss.MaskedCELoss import MaskedCrossEntropyLoss
 
 
 
@@ -163,12 +163,40 @@ class BERT(nn.Module):
     
 
 
-class BertLoss(nn.Module):
+class bertLoss(nn.Module):
     '''
     # get loss
-    l = loss(mlm_Y_hat, mlm_label, mlm_weight, nsp_Y_hat, nsp_label)
+    l = loss(mlm_Y_hat, mlm_label, mlm_valid_lens, nsp_Y_hat, nsp_label)
     '''
-    #TODO
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # pred: (batch_size, num_cls, [d1...dk] as position dims)float logits
+        # label: (batch_size, [d1...dk] as position dims)int64
+        # valid_area: (batch_size, [d1...dk] as position dims)0-1(int32)/True-False(bool)
+        self.mlmloss = MaskedCrossEntropyLoss()
+
+        # pred: (batch_size, num_cls, [d1...dk] as position dims)float logits
+        # label: (batch_size, [d1...dk] as position dims)int64
+        self.nsploss = nn.CrossEntropyLoss(reduction='none')
+
+    
+    def forward(self, mlm_Y_hat, mlm_label, mlm_valid_lens, nsp_Y_hat, nsp_label):
+        # mlm_Y_hat (batch_size, num_masktks, vocab_size)
+        # mlm_label (batch_size, num_masktks)
+        # mlm_valid_lens (batch_size,)
+        # nsp_Y_hat (batch_size, 2)
+        # nsp_label (batch_size,)
+
+        # [0, 1, ..., num_masktks-1] <?< [ [ mlm_valid_lens_0 ],
+        #                                  [ mlm_valid_lens_1 ],
+        #                                          ...
+        #                                  [ mlm_valid_lens_N-1 ] ]
+        # --> (N, num_masktks) for each row_i, where col index < mlm_valid_lens_i, 1 ; otherwise, 0
+        valid_area = torch.arange( mlm_Y_hat.size(1), dtype=torch.int64, device=mlm_valid_lens.device ) < mlm_valid_lens.unsqueeze(1)
 
 
+        mlm_l = self.mlmloss( mlm_Y_hat.permute(0,2,1), mlm_label, valid_area ) / mlm_valid_lens # (batch_size,) / (batch_size, )
+        nsp_l = self.nsploss( nsp_Y_hat, nsp_label ) # (batch_size,)
+
+        return mlm_l + nsp_l
