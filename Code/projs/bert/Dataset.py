@@ -168,9 +168,8 @@ def _mask_on_tokenList(tokens, symbols, not_mask_tokens=('<cls>', '<sep>'), mask
 # two_sentence_toknIDs_list, mask_position_list, mlm_label_toknIDs_list, two_sentence_segment_01_list, is_next_flag_TF)
 
 # pad to 统一 two_sentence_toknIDs_list / two_sentence_segment_01_list 到 max_len, 用 valid lens 记录 valid area 信息
-# pad to 统一 mask_position_list / mlm_label_toknIDs_list 到 max_len * 0.15, 用 mlm_weights 记录 valid area 信息
+# pad to 统一 mask_position_list / mlm_label_toknIDs_list 到 max_len * 0.15, 用 _mlm_valid_lens 记录 valid area 信息
 
-# 根据mask_position_list/mask_label_token_idx_list, 同步生成一个mlm_weight_list, 对于pad元素权重设0
 def _build_dataset(data, max_len, padTokn_ID, clsTokn_ID, mask_ratio=0.15):
     '''
     input:
@@ -184,13 +183,13 @@ def _build_dataset(data, max_len, padTokn_ID, clsTokn_ID, mask_ratio=0.15):
         用 valid lens 记录 valid area 信息
 
     分别用 0 / clsTokn_ID pad to 统一 mask_position_list / mlm_label_toknIDs_list 到 max_len * 0.15
-        用 mlm_weights 记录 valid area 信息
+        用 mlm_valid_lens 记录 valid area 信息
 
     '''
     max_num_masks = max(1, round( max_len*mask_ratio ))
 
     tokenID_sample, segments_sample, valid_lens = [], [], []
-    mask_positions_sample, mlm_weights_sample, mlm_labels_sample = [], [], []
+    mask_positions_sample, mlm_valid_lens, mlm_labels_sample = [], [], []
     nsp_labels = []
 
     for toknIDs, mask_positions, mlmLabels, segments, nspLabels in data:
@@ -205,14 +204,13 @@ def _build_dataset(data, max_len, padTokn_ID, clsTokn_ID, mask_ratio=0.15):
         # 0 pad segments 到 max_len
         segments_sample.append( truncate_pad(segments, max_len, 0) )
 
-        # 当前 样本 mask_positions 的 valid area: 1 代表 valid, 0 代表 invalid
-        mlm_weights = [1] * len(mask_positions)
-        mlm_weights_sample.append( truncate_pad(mlm_weights, max_num_masks, 0) ) # pad 0 mlm_weights 到 长度max_num_masks
+        # 当前 样本 mask_positions 的 valid length
+        mlm_valid_lens.append( len(mask_positions) )
 
         # 0 pad mask_positions 到 max_num_masks
         mask_positions_sample.append( truncate_pad(mask_positions, max_num_masks, 0) )
 
-        # 0 作为 position ID 代表的是 <cls>, 故对应应该用 clsTokn_ID 去pad mlm_labels 
+        # 0 作为 position ID 代表的是 <cls>, 故对应应该用 clsTokn_ID 去pad mlm_labels. 不过其实这个不重要
 
         # clsTokn_ID pad 到 mlm_labels_idx
         mlm_labels_sample.append( truncate_pad(mlmLabels, max_num_masks, clsTokn_ID) )
@@ -223,14 +221,14 @@ def _build_dataset(data, max_len, padTokn_ID, clsTokn_ID, mask_ratio=0.15):
     tokenID_sample = torch.tensor( tokenID_sample, dtype=torch.int64 ) # (sample_size, max_len)
     segments_sample = torch.tensor( segments_sample, dtype=torch.int64 ) # (sample_size, max_len)
 
-    mlm_weights_sample = torch.tensor( mlm_weights_sample, dtype=torch.int64 ) # (sample_size, max_num_masks)
+    mlm_valid_lens = torch.tensor( mlm_valid_lens, dtype=torch.int64 ) # (sample_size,)
     mask_positions_sample = torch.tensor( mask_positions_sample, dtype=torch.int64 ) # (sample_size, max_num_masks)
     mlm_labels_sample = torch.tensor( mlm_labels_sample, dtype=torch.int64 ) # (sample_size, max_num_masks)
 
     nsp_labels_sample = torch.tensor( nsp_labels, dtype=torch.int64 ) # (sample_size,)
 
 
-    return tokenID_sample, valid_lens, segments_sample, mask_positions_sample, mlm_weights_sample, mlm_labels_sample, nsp_labels_sample
+    return tokenID_sample, valid_lens, segments_sample, mask_positions_sample, mlm_valid_lens, mlm_labels_sample, nsp_labels_sample
 
 
 
@@ -272,10 +270,10 @@ class wikitextDataset(torch.utils.data.Dataset):
         # _valid_lens: (sample_size,)
         # _segment: (sample_size, max_len)
         # _mask_position: (sample_size, max_num_masks)
-        # _mlm_weight: (sample_size, max_num_masks)
+        # _mlm_valid_lens: (sample_size,)
         # _mlm_label: (sample_size, max_num_masks)
         # _nsp_label: (sample_size,)
-        self._tokenID, self._valid_lens, self._segment, self._mask_position, self._mlm_weight, self._mlm_label, self._nsp_label = \
+        self._tokenID, self._valid_lens, self._segment, self._mask_position, self._mlm_valid_lens, self._mlm_label, self._nsp_label = \
             _build_dataset(
                 data = toknIDs_segments_maskpositions_mlmlabels_nsplabels,
                 max_len = max_len,
@@ -293,13 +291,13 @@ class wikitextDataset(torch.utils.data.Dataset):
             segments: (batch_size, seq_len)01 分别代表 seq1 & seq2 | None, None 代表当前 batch 不需要进入 NSP task,
             mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task
         loss input:
-            weight_mask_positions: (batch_size, num_masktks)01 分别代表对应 mask position 是否是 pad. 如果是 pad 那么不计入 loss
+            mlm_valid_lens: (batch_size,) 说明 mask position 是否是 pad. 如果是 pad 则为 invalid, 不计入 loss
             mlm_labels: (batch_size, num_masktks)int64 ot token ID.
             nsp_labels: (batch_size,)T/F
         '''
         return (
             tuple( [self._tokenID[index], self._valid_lens[index], self._segment[index], self._mask_position[index]] ),
-            tuple( [self._mlm_weight[index], self._mlm_label[index], self._nsp_label[index]] )
+            tuple( [self._mlm_valid_lens[index], self._mlm_label[index], self._nsp_label[index]] )
             )
 
 
