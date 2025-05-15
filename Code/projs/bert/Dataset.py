@@ -223,7 +223,6 @@ def _build_dataset(data, max_len, padTokn_ID, clsTokn_ID, mask_ratio=0.15):
     tokenID_sample = torch.tensor( tokenID_sample, dtype=torch.int64 ) # (sample_size, max_len)
     segments_sample = torch.tensor( segments_sample, dtype=torch.int64 ) # (sample_size, max_len)
 
-
     mlm_weights_sample = torch.tensor( mlm_weights_sample, dtype=torch.int64 ) # (sample_size, max_num_masks)
     mask_positions_sample = torch.tensor( mask_positions_sample, dtype=torch.int64 ) # (sample_size, max_num_masks)
     mlm_labels_sample = torch.tensor( mlm_labels_sample, dtype=torch.int64 ) # (sample_size, max_num_masks)
