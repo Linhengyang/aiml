@@ -3,7 +3,7 @@ from torch import Tensor
 import torch
 from ...Modules._transformer import TransformerEncoderBlock
 from ...Base.RootLayers.PositionalEncodings import LearnAbsPosEnc, TrigonoAbsPosEnc
-
+from ...Loss.MaskedCELoss import MaskedSoftmaxCELoss
 
 
 
@@ -160,3 +160,15 @@ class BERT(nn.Module):
             nsp_Y_hat = None
 
         return embd_X, mlm_Y_hat, nsp_Y_hat
+    
+
+
+class BertLoss(nn.Module):
+    '''
+    # get loss
+    l = loss(mlm_Y_hat, mlm_label, mlm_weight, nsp_Y_hat, nsp_label)
+    '''
+    #TODO
+    pass
+
+
