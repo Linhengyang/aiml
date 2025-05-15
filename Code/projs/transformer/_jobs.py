@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore")
 import torch
 from .Dataset import seq2seqDataset
 from .Network import TransformerEncoder, TransformerDecoder, Transformer
-from ...Loss.MaskedCELoss import MaskedSoftmaxCELoss
+from ...Loss.MaskedCELoss import MaskedCrossEntropyLoss
 from .Trainer import transformerTrainer
 from .Evaluator import transformerEpochEvaluator
 from .Predictor import sentenceTranslator
@@ -192,7 +192,7 @@ def train_job(src_symbols_path, tgt_symbols_path):
     transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
 
     net = Transformer(transenc, transdec)
-    loss = MaskedSoftmaxCELoss()
+    loss = MaskedCrossEntropyLoss()
 
     # init trainer
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
