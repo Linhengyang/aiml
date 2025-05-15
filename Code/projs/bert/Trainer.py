@@ -43,10 +43,10 @@ class bertPreTrainer(easyTrainer):
 
         原dataset中的 __getitem__ 返回 datapoint of index:
             ( _tokenID[index], _valid_lens[index], _segment[index], _mask_position[index]] ),
-            ( _mlm_weight[index], _mlm_label[index], _nsp_label[index] )
+            ( _mlm_valid_lens[index], _mlm_label[index], _nsp_label[index] )
         经过 default_collate(batch_list), 返回 batch data:
             ( _tokenID[batch::], _valid_lens[batch::], _segment[batch::], _mask_position[batch::]] ),
-            ( _mlm_weight[batch::], _mlm_label[batch::], _nsp_label[batch::] )
+            ( _mlm_valid_lens[batch::], _mlm_label[batch::], _nsp_label[batch::] )
 
         逐一move到cuda上
         '''
@@ -55,17 +55,17 @@ class bertPreTrainer(easyTrainer):
             f"Device not set. Please set trainer's device before setting data iterators"
 
         def move_to_cuda(batch_list):
-            (_tokenID, _valid_lens, _segment, _mask_position), (_mlm_weight, _mlm_label, _nsp_label) = default_collate(batch_list)
+            (_tokenID, _valid_lens, _segment, _mask_position), (_mlm_valid_lens, _mlm_label, _nsp_label) = default_collate(batch_list)
 
             _tokenID = _tokenID.to(self.device)
             _valid_lens = _valid_lens.to(self.device)
             _segment = _segment.to(self.device)
             _mask_position = _mask_position.to(self.device)
-            _mlm_weight = _mlm_weight.to(self.device)
+            _mlm_valid_lens = _mlm_valid_lens.to(self.device)
             _mlm_label = _mlm_label.to(self.device)
             _nsp_label = _nsp_label.to(self.device)
 
-            return (_tokenID, _valid_lens, _segment, _mask_position), (_mlm_weight, _mlm_label, _nsp_label)
+            return (_tokenID, _valid_lens, _segment, _mask_position), (_mlm_valid_lens, _mlm_label, _nsp_label)
         
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=move_to_cuda)
 
@@ -86,10 +86,10 @@ class bertPreTrainer(easyTrainer):
     def FP_step(net:nn.Module, loss:nn.Module, net_inputs_batch, loss_inputs_batch):
         # net_inputs_batch, loss_inputs_batch 从 data_iter 中生成
 
-        # mlm_weight (batch_size, num_masktks)
+        # mlm_valid_lens (batch_size,)
         # mlm_label (batch_size, num_masktks)
         # nsp_label (batch_size,)
-        mlm_weight, mlm_label, nsp_label = loss_inputs_batch
+        mlm_valid_lens, mlm_label, nsp_label = loss_inputs_batch
 
         # embd_X (batch_size, max_len, num_hiddens)
         # mlm_Y_hat (batch_size, num_masktks, vocab_size)
@@ -98,9 +98,9 @@ class bertPreTrainer(easyTrainer):
 
 
         # get loss
-        l = loss(mlm_Y_hat, mlm_label, mlm_weight, nsp_Y_hat, nsp_label)
+        l = loss(mlm_Y_hat, mlm_label, mlm_valid_lens, nsp_Y_hat, nsp_label)
 
-        return l, embd_X
+        return l, embd_X # (batch_size,), (batch_size, max_len, num_hiddens)
     
 
     def resolve_net(self, need_resolve=False):
