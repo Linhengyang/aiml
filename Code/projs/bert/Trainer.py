@@ -98,9 +98,9 @@ class bertPreTrainer(easyTrainer):
 
 
         # get loss
-        l = loss(mlm_Y_hat, mlm_label, mlm_valid_lens, nsp_Y_hat, nsp_label)
+        mlm_l, nsp_l = loss(mlm_Y_hat, mlm_label, mlm_valid_lens, nsp_Y_hat, nsp_label)
 
-        return l, embd_X # (batch_size,), (batch_size, max_len, num_hiddens)
+        return mlm_l, nsp_l, embd_X # (batch_size,), (batch_size,), (batch_size, max_len, num_hiddens)
     
 
     def resolve_net(self, need_resolve=False):
@@ -123,7 +123,7 @@ class bertPreTrainer(easyTrainer):
             try:
                 self.optimizer.zero_grad()
 
-                _, _ = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
+                _, _, _ = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
 
                 self.net_resolved = True
                 print('Net & Loss forward succeed. Net & Loss checked. Ready to fit')
@@ -209,7 +209,8 @@ class bertPreTrainer(easyTrainer):
 
                 self.optimizer.zero_grad()
 
-                l, embd_X = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
+                mlm_l, nsp_l, embd_X = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
+                l = mlm_l + nsp_l
 
                 # bp
                 l.sum().backward()
@@ -220,7 +221,7 @@ class bertPreTrainer(easyTrainer):
                 self.optimizer.step()
 
                 with torch.no_grad():
-                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, embd_X, l)
+                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l, embd_X)
 
             with torch.no_grad():
                 # 如果 valid_iter 非 None, 那么在确定要 evaluate model 的 epoch, 将遍历 整个 valid_iter 得到 validation loss
