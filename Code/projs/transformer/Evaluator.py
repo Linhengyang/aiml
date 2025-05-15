@@ -5,7 +5,7 @@ import typing as t
 
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
-reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
+reveal_cnt_in_train, eval_cnt_in_train = configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
 
 
 class transformerEpochEvaluator(epochEvaluator):
