@@ -80,8 +80,12 @@ def build_tensorDataset(lines, vocab, num_steps):
         map tokens of input lines into indices according to input vocab, and set the sequence length
         将输入的词元序列lines映射成数字序列, 并设定num_steps(sequence length)序列长度. 不足num_steps的pad, 超出的剪掉. 
     """
-    lines = [vocab[l] + [vocab['<eos>']] for l in lines] # id映射: lines 2D list, l & vocab[l] list. 在每个 line 末尾添加 vocab['<eos>']. 注意这里不能用append
-    array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines], dtype=torch.int64) # tensor化 truncate_pad之后的token序列, 默认就是int64
+    lines = [vocab[l] + [vocab['<eos>']] for l in lines]
+    # id映射: lines 2D list, l & vocab[l] list. 在每个 line 末尾添加 vocab['<eos>']. 注意这里不能用append
+
+    array = torch.tensor([ truncate_pad(l, num_steps, vocab['<pad>']) for l in lines], dtype=torch.int64) 
+    # tensor化 truncate_pad之后的token序列, 默认就是int64
+    
     valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1) # 求出每个样本序列的valid length, 即token不是pad的个数, int32节省空间
     return array, valid_len
 
@@ -181,9 +185,11 @@ class seq2seqDataset(torch.utils.data.Dataset):
         else:
             tokenize_mode = 'simple'
         
-        (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(path, num_steps, num_examples, '\n', '\t',
-                                                                                         tokenize_mode, src_symbols, tgt_symbols, EOW_token, UNK_token,
-                                                                                         need_lower=True, separate_puncs=',.!?')
+        (X, X_valid_lens, Y, Y_valid_lens), (src_vocab, tgt_vocab) = build_dataset_vocab(\
+            path, num_steps, num_examples, '\n', '\t',
+            tokenize_mode, src_symbols, tgt_symbols, EOW_token, UNK_token,
+            need_lower=True, separate_puncs=',.!?'
+            )
         
         # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
         
