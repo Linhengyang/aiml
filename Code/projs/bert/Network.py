@@ -141,8 +141,8 @@ class BERT(nn.Module):
         # tokens: (batch_size, seq_len)int64 ot token ID. 已包含<cls>和<sep>
         # valid_lens: (batch_size,)
 
-        # segments: (batch_size, seq_len)01 indicating seq1 & seq2
-        # mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task, 只需要 NSP task
+        # segments: (batch_size, seq_len)01 indicating seq1 & seq2 | None, None 代表当前 batch 不需要进入 NSP task
+        # mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task
 
         if segments is None:
             segments = torch.zeros_like(tokens, device=tokens.device)
