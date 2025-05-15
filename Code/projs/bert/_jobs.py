@@ -4,21 +4,84 @@ warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
 from .Dataset import wikitextDataset
-from .Network import BERT
+from .Network import BERT, BERTLoss
 from .Trainer import bertPreTrainer
 from .Evaluator import bertEpochEvaluator
 from .Predictor import tokensEncoder
 import yaml
+
 configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
-local_model_save_dir = configs['local_model_save_dir']
-base_data_dir = configs['base_data_dir']
-bert_fname = configs['bert_fname']
-train_fname = configs['train_fname']
-test_fname = configs['test_fname']
+
+################## directories ##################
+# set train log file path / network resolve output path / params save path / source&targe vocabs path
+
+################## symbols and vocabs in workspace/cache ##################
+symbols_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'symbols' )
+vocabs_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'vocabs' )
+
+
+################## params saved in workspace/model ##################
+model_proj_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
+
+
+################## log file in workspace/logs ##################
+log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
+
+
+
+
+
+################## data-params ##################
+max_len = configs['max_len']
+
+
+
+
+
+################## network-params ##################
+num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
+
+
+
+
+
+
+
+################## train-params ##################
+num_epochs, batch_size, lr = 5, 512, 0.00005
+
+
+
+
+
+# 生产 source corpus 和 target corpus 的symbols
+def prepare_job():
+    print('prepare job begin')
+
+    # create all related directories if not existed
+    for dir_name in [symbols_dir, vocabs_dir, model_proj_dir, log_proj_dir]:
+        os.makedirs(dir_name, exist_ok=True)
+        print(f'directory {dir_name} created')
+
+
+
+
+
+
 
 def pretrain_job():
-    train_path, max_len = os.path.join(base_data_dir, bert_fname, train_fname), 64
-    test_path = os.path.join(base_data_dir, bert_fname, test_fname)
+    print('train job begin')
+    # [timetag]
+    from datetime import datetime
+    now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
+
+    # /workspace/logs/[proj_name]/train_log_[timetag].txt, defined_net_[timetag].txt
+    train_logs_fpath = os.path.join( log_proj_dir, f'train_log_{now_minute}.txt' )
+    defined_net_fpath = os.path.join( log_proj_dir, f'defined_net_{now_minute}.txt' )
+
+    # /workspace/model/[proj_name]/saved_params[timetag].params
+    saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.pth' )
+
     trainset = wikitextDataset(train_path, max_len)
     testset = wikitextDataset(test_path, max_len)
     # design net & loss
@@ -55,6 +118,23 @@ def pretrain_job():
     # save
     trainer.save_model('bert_test.params')
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def embed_job():
     device = torch.device('cpu')
     train_path, max_len = os.path.join(base_data_dir, bert_fname, train_fname), 64
@@ -77,3 +157,5 @@ def embed_job():
     second_embd = embd_res[1]
     print('bert embedding(first 3 dims) for word "a": ', second_embd[:3])
     print('similarity: ', (first_embd*second_embd).sum()/torch.sqrt((first_embd**2).sum()*(second_embd**2).sum()))
+
+
