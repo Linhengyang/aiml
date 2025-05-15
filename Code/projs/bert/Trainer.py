@@ -86,6 +86,13 @@ class bertPreTrainer(easyTrainer):
     def FP_step(net:nn.Module, loss:nn.Module, net_inputs_batch, loss_inputs_batch):
         # net_inputs_batch, loss_inputs_batch 从 data_iter 中生成
 
+        # net_inputs_batch        
+        # tokens: (batch_size, seq_len)int64 ot token ID. 已包含<cls>和<sep>
+        # valid_lens: (batch_size,)
+        # segments: (batch_size, seq_len)01 indicating seq1 & seq2 | None, None 代表当前 batch 不需要进入 NSP task
+        # mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task
+
+        # loss_inputs_batch
         # mlm_valid_lens (batch_size,)
         # mlm_label (batch_size, num_masktks)
         # nsp_label (batch_size,)
@@ -221,7 +228,7 @@ class bertPreTrainer(easyTrainer):
                 self.optimizer.step()
 
                 with torch.no_grad():
-                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l, embd_X)
+                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l)
 
             with torch.no_grad():
                 # 如果 valid_iter 非 None, 那么在确定要 evaluate model 的 epoch, 将遍历 整个 valid_iter 得到 validation loss
