@@ -243,6 +243,7 @@ class wikitextDataset(torch.utils.data.Dataset):
         # 得到 symbols 和 vocab. 对于 simple tokenizer, symbols 就是 vocab 里所有 tokens
         self._vocab = Vocab(corpus, min_freq=5, reserved_tokens=['<pad>', '<mask>', '<cls>', '<sep>'])
         self._symbols = self._vocab.tokens
+        
 
         # tokens, 对应 segments, nsp labels
         tokens_segments_nsplabels = _get_tokens_segments_nsplabels(corpus, max_len)
@@ -308,3 +309,7 @@ class wikitextDataset(torch.utils.data.Dataset):
     @property
     def vocab(self):
         return self._vocab
+    
+    @property
+    def symbols(self):
+        return self._symbols
