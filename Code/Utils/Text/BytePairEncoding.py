@@ -28,39 +28,43 @@ from .TextPreprocess import count_corpus, preprocess_space, attach_EOW_token, te
 def init_tokcombo_freqs(
         raw_corpus:dict,
         reserved_tokens:t.List[str],
-        tail_token:str = '',
-        attach_tail_token_init: bool = False,
-        type:str = 'list'):
+        EOW_token:str = '',
+        bind_EOW_lastCHAR: bool = False,
+        type:str = 'list'
+        ):
     '''
     初始化一个 token combo frequency counter, 类型可以是 dict/list
     input: 
         raw_corpus: 原始的 corpus 统计器, 一个 统计 word/punc 频数 的 dict. word/punc 按照原始方式组织
         reserved_tokens: 保留字符, 作为整体不可分割的 token 列表. 在初始化分割时 保留它们作为最小token
-        tail_token: 标识原词末尾的符号。
-        attach_tail_token_init: True/False. if True, tail_token和它前面的字符在初始化 token combos的时候 不被分割。
+        EOW_token: end-of-word token 标识原词末尾的符号
+        bind_EOW_lastCHAR: True/False. if True, EOW_token 和它前面的字符 last CHAR 在初始化 token combos的时候 不被分割。
         type: 类型, 返回的 token combo 频数 corpus 的类型, 可以是 dict / list
     return:
         一个  token combo 频数 统计器, 类型是 输入参数 type
     explain:
         token combo 频数统计器中, word/punc 被 单空格拆成了独立字符。用以迭代组合, 来创造新的token。每次迭代将出现频次最高的连续token合并, 生成新token
         参数 reserved_tokens 指明了哪些 字符combo 不会被拆分, 作为独立字符
-        参数 tail_token 指明了 end-of-word token。它将被加到 每个 word/punc 的末尾, 以区分 中断 和 结束。tail_token 作为 独立字符, 不会被拆分
-        参数 attach_tail_token_init 指明了 end-of-word token 是如何被加到每个 word/punc 的末尾的。
-            True: tail_token 和 末尾char 之间不分割, 即 tail_token 从最开始就和末尾字符绑定。
-            False: tail_token 和 末尾char 之间分割。tail_token 作为一个独立 的 字符, 参与 token 的合并生成过程
-            区别: 业界通常使用 False, 这样 token 生成的 灵活性更高, 
+        参数 EOW_token 指明了 end-of-word token。它将被加到 每个 word/punc 的末尾, 以区分 中断 和 结束. EOW_token 作为 独立字符, 不会被拆分
+        参数 bind_EOW_lastCHAR 指明了 end-of-word token 是如何被加到每个 word/punc 的末尾的:
+            True: EOW_token 和 末尾char 之间不分割, 即 EOW_token 从最开始就和末尾字符绑定。
+            False: EOW_token 和 末尾char EOW_token 作为一个独立 的 字符, 参与 token 的合并生成过程
+            业界通常使用 False, 这样 token 生成的 灵活性更高
     '''
-    # 输入了 tail_token
-
-    # 要求 tail_token和它前面的字符在初始化 token combos的时候 不分割。
-    if tail_token and attach_tail_token_init:
-        # 最先匹配 (.tail_token), 即完整的tail_token 和它前面一个字符
-        reserved_tokens = ['.'+tail_token, ] + reserved_tokens
+    # 输入了 EOW_token, 那么就要修改 reserved_tokens
+    # 要求 EOW_token, 并要求它前面的字符在初始化 token combos的时候 不分割
+    if EOW_token and bind_EOW_lastCHAR:
+        # 最先匹配 (.EOW_token), 即完整的 EOW_token 和它前面一个字符
+        reserved_tokens = ['.'+EOW_token, ] + reserved_tokens
     
-    # 要求 tail_token和它前面的字符在初始化 token combos的时候 被分割。
-    elif tail_token:
-        # tail_token 自身应该作为 独立字符, 保证不被 分割
-        reserved_tokens.append( tail_token )
+    # 要求 EOW_token 和它前面的字符在初始化 token combos的时候 被分割。
+    elif EOW_token:
+        # EOW_token 自身应该作为 独立字符, 保证不被 分割
+        reserved_tokens.append( EOW_token )
+    
+    # 没有输入 EOW_token, 那么 reserved_tokens 无需变动
+    else:
+        pass
 
     if type == "dict":
         tokcombo_freqs = {}
@@ -100,7 +104,11 @@ def merge_maxfreq_token_pair(
         updated tokcombo_freqs & symbols
     
     explains:
-        tokcombo_freqs: tokcombo中, 最频繁出现的 连续 token pair 被合并. 如果 merge_mode 选择了all, 那么所有 token_pair将以 它们在 输入列表中顺序作合并
+        tokcombo_freqs: tokcombo中, 最频繁出现的 连续 token pair 中, 以不同方式选择一个或几个 pair 合并
+            如果 merge_mode 选择了all, 那么所有 token_pair 将以 它们在 输入列表中顺序作合并
+            如果 merge_mode 选择了first, 那么第一对 token_pair 将合并
+            如果 merge_mode 选择了shortest, 那么最短的 token_pair 将合并
+            如果 merge_mode 选择了random, 那么随机的 token_pair 将合并
         symbols: 最频繁出现的 连续 token pair 被合并后, 添加入symbols
     '''
     
@@ -209,7 +217,7 @@ def get_maxfreq_token_pair(
 
 def get_BPE_symbols(
         text,
-        tail_token,
+        EOW_token,
         merge_times: int,
         merge_mode: str = 'first',
         min_occur_freq_merge: int = 1,
@@ -218,44 +226,45 @@ def get_BPE_symbols(
         need_lower: bool = True,
         separate_puncs: str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
         normalize_whitespace: bool = True,
-        attach_tail_token_init: bool = False
+        bind_EOW_lastCHAR: bool = False
         ) -> t.List|t.Set:
     '''
     input:
         text: 输入文本, 用以 构建 token symbols 集合
-        tail_token: 用来标记每个 单词的末尾, 区分从中间分割的token和结尾token。会被加入到 输出的集合中。
+        EOW_token: end-of-word 用来标记每个 单词 的末尾, 区分从中间分割的token和结尾token. 会被加入到输出的 token symbols 中。
         merge_times: 超参数, 用来确定 生成的 token symbols集合大小
         merge_mode: 当有多个 token pair 是 最大出现频率的时候, 采用什么方法选择 该合并的 token pair
             all全部都合并 / first第一个合并 / random 随机选 / shortest 最短的合并
-        min_occur_freq_merge: 最低要合并的token pair 出现频率。出现频率小于这个值的 token pair 不再合并添加到集合中
-        reserved_tokens: 保留token组合. 列表中的tokens将被作为最小单元保留, 不会被分割。会出现在 输出的集合中
-        symbols_type: 输出的集合数据类型。list / set
+        min_occur_freq_merge: 最低要合并的 token pair 出现频率。出现频率小于这个值的 token pair 不再合并添加到集合中
+        reserved_tokens: 保留token组合. 列表中的tokens将被作为最小单元保留, 不会被分割。会出现在输出的 token symbols 中
+        symbols_type: 输出的集合数据类型. list / set
         need_lower: 输入text是否要小写化
-        separate_puncs: 作为独立视作token的标点符号
+        separate_puncs: 视作独立token的标点符号们
         normalize_whitespace: 是否将text中非 单空格 的连续空白字符or空白字符 统一转换为 单空格
-        attach_tail_token_init: 是否绑定 tail_token 和 末尾char。如果否(通用做法), tail_token 作为独立字符 参与token生成
+        bind_EOW_lastCHAR: 合并生成过程的最开始, 是否 初始绑定 EOW_token 和 末尾的单字符 char.
+            通用做法是不绑定, 那么 EOW_token 作为独立字符, 参与token的合并生成
     '''
-    # 输入文本中不应该存在用以分割的 tail_token. 如果存在, 报错;
-    if tail_token in text:
-        raise ValueError(f'tail_token {tail_token} exists in text. change tail_token')
+    # 输入文本中不应该存在用以分割的 EOW_token. 如果存在, 报错;
+    if EOW_token in text:
+        raise ValueError(f'end-of-word token {EOW_token} exists in text. change EOW_token')
     
     # 处理空白字符. 在标点前面添加 单空格
     text_normspace = preprocess_space(text, need_lower, separate_puncs, normalize_whitespace)
 
-    # 在每个单词/标点末尾添加 tail_token
-    text_normspace_appdtail = attach_EOW_token(text_normspace, tail_token)
+    # 在每个单词/标点末尾添加 EOW_token
+    text_normspace_appdEOW = attach_EOW_token(text_normspace, EOW_token)
 
     # 原始的 corpus counter
-    raw_corpus = count_corpus(text_normspace_appdtail.split(" "))
+    raw_corpus = count_corpus(text_normspace_appdEOW.split(" "))
 
-    # 初始化 tokcombo_freqs: 用单空格 分割 corpus 中的key, 至不可分割粒度。参数 reserved_tokens 是不可分割token
-    tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, tail_token, attach_tail_token_init)
+    # 初始化 tokcombo_freqs: 用单空格 分割 raw_corpus 中的key, 至不可分割粒度。参数 reserved_tokens 是不可分割token
+    tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, EOW_token, bind_EOW_lastCHAR)
     
-    # 初始化 symbols: 包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens、tail_token
-    symbols = set(text_normspace) | set(reserved_tokens) | set([tail_token])
-    
+    # 初始化 symbols: 包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens、EOW_token
+    symbols = set(text_normspace) | set(reserved_tokens) | set([EOW_token])
     # 这里也可以不 union reserved_tokens.
     # 因为 reversed_tokens 在合并生成 bpe symbols 的过程中没有起作用, 而且它可以在 vocab 类中设定. 故它不是必须的
+
     if symbols_type == 'list':
         symbols = list(symbols)
 
