@@ -2,6 +2,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
+import typing as t
 from .Dataset import seq2seqDataset
 from .Network import TransformerEncoder, TransformerDecoder, Transformer
 from ...Loss.MaskedCELoss import MaskedCrossEntropyLoss
@@ -68,7 +69,7 @@ num_epochs, batch_size, lr = 5, 512, 0.00005
 
 
 
-# 生产 source corpus 和 target corpus 的symbols
+# 生产 source corpus 和 target corpus 的symbols, 生产 datasets
 def prepare_job():
     print('prepare job begin')
 
@@ -101,8 +102,9 @@ def prepare_job():
     print(f'eng_uniq_size:{eng_uniq_size}\nfra_uniq_size:{fra_uniq_size}')
 
     # 当 eng_symbols_path 文件不存在时, 生产并保存 eng_symbols 到 symbols_dir/source.json
-    eng_symbols_path = os.path.join(symbols_dir, 'source.json')
-    if not os.path.exists(eng_symbols_path):
+    src_symbols_path = os.path.join(symbols_dir, 'source.json')
+
+    if not os.path.exists(src_symbols_path):
         # create symbols
         eng_symbols = get_BPE_symbols(
             text = eng_corpus,
@@ -112,13 +114,13 @@ def prepare_job():
             separate_puncs = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
             normalize_whitespace = True,
             )
-        with open(eng_symbols_path, 'w') as f:
+        with open(src_symbols_path, 'w') as f:
             json.dump(eng_symbols, f)
 
     # 当 fra_symbols_path 文件不存在时, 生产并保存 fra_symbols 到 symbols_dir/target.json
-    fra_symbols_path = os.path.join(symbols_dir, 'target.json')
+    tgt_symbols_path = os.path.join(symbols_dir, 'target.json')
 
-    if not os.path.exists(fra_symbols_path):
+    if not os.path.exists(tgt_symbols_path):
         # create france symbols
         fra_symbols = get_BPE_symbols(
             text = fra_corpus,
@@ -129,18 +131,44 @@ def prepare_job():
             normalize_whitespace = True,
             )
         
-        with open(fra_symbols_path, 'w') as f:
+        with open(tgt_symbols_path, 'w') as f:
             json.dump(fra_symbols, f)
+    
+    # build datasets
+    # full_dataset as trainset
+
+    # read source and target symbols
+    with open(src_symbols_path, 'r') as f:
+        eng_symbols = json.load( f )
+    with open(tgt_symbols_path, 'r') as f:
+        fra_symbols = json.load( f )
+    
+    # 输入 EOW_token="</w>", 和 src_symbols/tgt_symbols, 说明使用 Byte-Pair-encoding 的方式来 tokenize sentence
+    full_dataset = seq2seqDataset(configs['full_data'], num_steps=num_steps, EOW_token="</w>",
+                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
+    
+    # validset & testset
+    valid_dataset = seq2seqDataset(configs['valid_data'], num_steps=num_steps, EOW_token="</w>",
+                                   src_symbols=eng_symbols, tgt_symbols=fra_symbols)
+    
+    test_dataset = seq2seqDataset(configs['test_data'], num_steps=num_steps, EOW_token="</w>",
+                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
+    
+    # save source and target vocabs
+    # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
+    full_dataset.src_vocab.save( src_vocab_dir )
+    # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json
+    full_dataset.tgt_vocab.save( tgt_vocab_dir )
 
     print('prepare job complete')
 
-    return eng_symbols_path, fra_symbols_path
+    return full_dataset, valid_dataset, test_dataset
 
 
 
 
 
-def train_job(src_symbols_path, tgt_symbols_path):
+def train_job(Datasets: t.List[torch.utils.data.Dataset]):
     print('train job begin')
     # [timetag]
     from datetime import datetime
@@ -153,43 +181,14 @@ def train_job(src_symbols_path, tgt_symbols_path):
     # /workspace/model/[proj_name]/saved_params[timetag].params
     saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.pth' )
 
-    # build datasets
-    # full_dataset as trainset
-
-    # read source and target symbols
-    with open(src_symbols_path, 'r') as f:
-        eng_symbols = json.load( f )
-    with open(tgt_symbols_path, 'r') as f:
-        fra_symbols = json.load( f )
-
-    # 输入 EOW_token="</w>", 和 src_symbols/tgt_symbols, 说明使用 Byte-Pair-encoding 的方式来 tokenize sentence
-    full_dataset = seq2seqDataset(configs['full_data'], num_steps=num_steps, EOW_token="</w>",
-                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
-    
-    # validset & testset
-    valid_dataset = seq2seqDataset(configs['valid_data'], num_steps=num_steps, EOW_token="</w>",
-                                   src_symbols=eng_symbols, tgt_symbols=fra_symbols)
-    
-    test_dataset = seq2seqDataset(configs['test_data'], num_steps=num_steps, EOW_token="</w>",
-                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
-    # release memory
-    del eng_symbols, fra_symbols
-
-    # save source and target vocabs
-    src_vocab = full_dataset.src_vocab
-    tgt_vocab = full_dataset.tgt_vocab
-
-    # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
-    src_vocab.save( src_vocab_dir )
-    # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json
-    tgt_vocab.save( tgt_vocab_dir )
+    trainset, validset, testset = Datasets
 
     # design net & loss
-    test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
+    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
+                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     
-    transenc = TransformerEncoder(vocab_size=len(src_vocab), **test_args)
-    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
+    transenc = TransformerEncoder(vocab_size=len(src_vocab), **net_args)
+    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **net_args)
 
     net = Transformer(transenc, transdec)
     loss = MaskedCrossEntropyLoss()
@@ -198,7 +197,7 @@ def train_job(src_symbols_path, tgt_symbols_path):
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
 
     trainer.set_device(torch.device('cuda')) # set the device
-    trainer.set_data_iter(full_dataset, valid_dataset, test_dataset) # set the data iters
+    trainer.set_data_iter(trainset, validset, testset) # set the data iters
     trainer.set_optimizer(lr) # set the optimizer
     trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
     trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True)) # set the epoch evaluator
@@ -242,11 +241,11 @@ def infer_job(saved_params_fpath, src_symbols_path):
     device = torch.device('cuda')
 
     # construct model
-    test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
+    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
+                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     
-    transenc = TransformerEncoder(vocab_size=len(src_vocab), **test_args)
-    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
+    transenc = TransformerEncoder(vocab_size=len(src_vocab), **net_args)
+    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **net_args)
     net = Transformer(transenc, transdec)
 
     # load params
