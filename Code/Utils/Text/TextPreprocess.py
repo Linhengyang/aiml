@@ -156,12 +156,16 @@ def attach_EOW_token(
 
 def text_atomize(text, reserved_combos:t.List[str]=[], uniq=False) -> t.List[str]:
     '''
-    按顺序分割字符串到不可分割字符（保留reserved_combos里的组合不拆分，其他拆分成单个字符）
+    按顺序分割字符串到不可分割字符(保留 reserved_combos 里的组合不拆分, 其他拆分成单个字符)
     reserved_combos里可以有正则表达式.
     返回list
     '''
-    # 如果 reserved_combos 为空, 那么就是不需要保留组合，直接返回 list(text)
+    # 如果 reserved_combos 为空, 那么就是不需要保留组合，直接 用 set/list 返回原子化结果
     if not reserved_combos:
+
+        if uniq: # 如果需要 unique
+            return list( set(text) )
+        
         return list(text)
     
     rsvd_tokn_pattern = "(" + "|".join(reserved_combos) + ")" # (<unk>|...|<eos>)
