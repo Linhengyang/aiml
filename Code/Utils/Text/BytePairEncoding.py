@@ -288,14 +288,15 @@ def get_BPE_symbols(
 
 def segment_word_BPE_greedy(
         word:str,
-        symbols: t.List[str] | t.Set[str],
+        symbols: t.List[str] | t.Set[str] = [],
         UNK_token:str = "<unk>",
         EOW_token:str = ''
         ):
     '''
     input:
         word: 输入单词, 用以拆分成多个 subword. 末尾可以已经添加 EOW_token. 也可以没有添加 EOW_token, 此时会被添加到末尾
-        symbols: 以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集
+        symbols: 以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集.
+            如果不输入 symbols, 或输入空 symbols, 那么意味着 word以 整个不分割 的方式返回
         UNK_token: unknown token, 用以替代 无法分割的片段
         EOW_token: end-of-word token, 用以标识 word 的结尾.
             当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下: 
