@@ -137,7 +137,7 @@ def attach_EOW_token(
     '''
     inputs:
         text: string
-        eow_tok: 该 end-of-word token 将被插入到每个 单空格之前
+        eow_tok: 该 end-of-word token 将被插入到每个 单空格之前. eow_tok 可以是空字符, 这样 输入输出 text 不变
 
     returns:
         whose spaces are normal single space ' ', and every space has append_punc append before it
