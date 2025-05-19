@@ -2,6 +2,7 @@
 import collections
 import typing as t
 import re
+import json
 from .TextPreprocess import count_corpus, preprocess_space, attach_EOW_token, text_atomize
 
 
@@ -219,6 +220,7 @@ def get_BPE_symbols(
         text,
         EOW_token,
         merge_times: int,
+        save_path: str|None = None,
         merge_mode: str = 'first',
         min_occur_freq_merge: int = 1,
         reserved_tokens: t.List[str] = [],
@@ -227,12 +229,14 @@ def get_BPE_symbols(
         separate_puncs: str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
         normalize_whitespace: bool = True,
         bind_EOW_lastCHAR: bool = False
-        ) -> t.List|t.Set:
+        ) -> t.Dict:
     '''
     input:
         text: 输入文本, 用以 构建 token symbols 集合
         EOW_token: end-of-word 用来标记每个 单词 的末尾, 区分从中间分割的token和结尾token. 会被加入到输出的 token symbols 中。
         merge_times: 超参数, 用来确定 生成的 token symbols集合大小
+        save_path: symbols 保存的地址. symbols 将以 dict 形式保存,
+            其中 'tokens' key 的 value 是所有tokens list, 'EOW_token' key 的 value 是生成这个 symbols 所用的 EOW_token
         merge_mode: 当有多个 token pair 是 最大出现频率的时候, 采用什么方法选择 该合并的 token pair
             all全部都合并 / first第一个合并 / random 随机选 / shortest 最短的合并
         min_occur_freq_merge: 最低要合并的 token pair 出现频率。出现频率小于这个值的 token pair 不再合并添加到集合中
@@ -277,8 +281,21 @@ def get_BPE_symbols(
         if maxfreq > 0 and maxfreq >= min_occur_freq_merge:
             # merge maxfreq token pair(s) : update vocab(symbols), tokcombo_freqs, 
             tokcombo_freqs, symbols = merge_maxfreq_token_pair(token_pairs_w_maxfreq, tokcombo_freqs, symbols, merge_mode)
-        
+    
+    # 组装 symbols 和 EOW_token 成一个 dict
+    symbols = {'tokens': symbols, 'EOW_token': EOW_token}
+
+    if isinstance(save_path, str):
+        with open(save_path, 'w') as f:
+            json.dump(symbols, f)
+    
     return symbols
+
+
+
+
+
+
 
 
 
@@ -288,7 +305,7 @@ def get_BPE_symbols(
 
 def segment_word_BPE_greedy(
         word:str,
-        symbols: t.List[str] | t.Set[str] = [],
+        symbols: t.Dict|None,
         UNK_token:str = "<unk>",
         EOW_token:str = ''
         ):
