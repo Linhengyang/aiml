@@ -13,12 +13,9 @@ def tokenize_seq2seqText(
         sample_separator:str, # 样本之间的分隔符, 默认为 \n
         srctgt_separator:str, # source seq 和 target seq 之间的分隔符, 默认为 \t
         # params for sentence_tokenizer
-        src_symbols:t.List[str]|t.Set[str]|None, # 切割 source seq 用的 symbols. None 代表 word 即 token
-        tgt_symbols:t.List[str]|t.Set[str]|None, # 切割 target seq 用的 symbols. None 代表 word 即 token
-        src_EOW_token:str, # 切割 source seq 用的 EOW_token. 同时也是生产 src_symbols 的 EOW_token
-        tgt_EOW_token:str, # 切割 target seq 用的 EOW_token. 同时也是生产 tgt_symbols 的 EOW_token
-        src_UNK_token:str, # 切割 source seq 时, 代表 无法识别切割的部分的 unkown token
-        tgt_UNK_token:str, # 切割 source seq 时, 代表 无法识别切割的部分的 unkown token 
+        src_glossary:t.Dict|None, # 切割 source seq 用的 glossary. None 代表 word 即 token
+        tgt_glossary:t.Dict|None, # 切割 target seq 用的 glossary. None 代表 word 即 token
+        UNK_token:str, # 切割 source/target seq 时, 代表 无法识别切割的部分的 unkown token. src 和 tgt 用一个 UNK 就行
         # 设定 文本统一预处理 的格式
         need_lower=True, # 是否小写化
         separate_puncs=',.!?', # 独立标点符号集
@@ -31,9 +28,8 @@ def tokenize_seq2seqText(
         sample_separator: separator between samples (default as \n)
         srctgt_separator: separator inside a sample (default as \t)
         
-        src_symbols: 切割 source seq 用的 symbols, 空对象或None代表使用word整体作为source token
-        tgt_symbols: 切割 target seq 用的 symbols, 空对象或None代表使用word整体作为target token
-        EOW_token: 切割 source/target seq 用的 EOW_token. 同时也是生产 src_symbols & tgt_symbols 的 EOW_token
+        src_glossary: 切割 source seq 用的 glossary, None代表使用word整体作为source token. EOW 已经包含其中
+        tgt_glossary: 切割 target seq 用的 glossary, None代表使用word整体作为target token. EOW 已经包含其中
         UNK_token: 切割 source/target seq 时, 代表 无法识别切割的部分的 unkown token 
         
         need_lower=True, 是否小写化
@@ -69,9 +65,9 @@ def tokenize_seq2seqText(
         try:
             src_sentence, tgt_sentence = line.split('<#seq_separator#>') # 每一行分成两部分, 前半是 source sentence，后半是 target sentence
             # source list append tokenized src_seq token list
-            source.append( line_tokenize_greedy(src_sentence, src_symbols, EOW_token, UNK_token, flatten=True)[0] )
+            source.append( line_tokenize_greedy(src_sentence, src_glossary, UNK_token, flatten=True)[0] )
             # target list append tokenized src_seq token list
-            target.append( line_tokenize_greedy(tgt_sentence, tgt_symbols, EOW_token, UNK_token, flatten=True)[0] )
+            target.append( line_tokenize_greedy(tgt_sentence, tgt_glossary, UNK_token, flatten=True)[0] )
         except ValueError:
             raise ValueError(f"line {i+1} of text unpack wrong. line text as {line}")
 

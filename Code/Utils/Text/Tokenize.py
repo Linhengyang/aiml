@@ -5,7 +5,6 @@
 import typing as t
 import re
 from .TextPreprocess import preprocess_space, attach_EOW_token
-from .BytePairEncoding import segment_word_BPE_greedy
 
 # a segmenter, which tokenizes a raw sentences
 def segment_word_BPE_greedy(    
