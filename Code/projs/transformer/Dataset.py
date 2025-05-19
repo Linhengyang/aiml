@@ -9,7 +9,7 @@ import re
 
 
 def tokenize_seq2seqText(
-        text_path,
+        raw_text:str, # raw text data
         sample_separator:str, # 样本之间的分隔符, 默认为 \n
         srctgt_separator:str, # source seq 和 target seq 之间的分隔符, 默认为 \t
         # params for sentence_tokenizer
@@ -24,7 +24,7 @@ def tokenize_seq2seqText(
         ):
     """
     inputs:
-        text_path: corpus file path, samples separated by arg sample_separator, src & tgt separated by arg srctgt_separator
+        raw_text: seq2seq text dat file, samples separated by arg sample_separator, src & tgt separated by arg srctgt_separator
         sample_separator: separator between samples (default as \n)
         srctgt_separator: separator inside a sample (default as \t)
         
@@ -45,9 +45,6 @@ def tokenize_seq2seqText(
         fisrt pre-process translation seq2seq text data, then split it into source token 2-D list and target token 2-D list
         首先预处理翻译数据集, 然后将它分拆成 source 词元序列们 和 对应的target词元序列们
     """
-    with open(text_path, 'r', encoding='utf-8') as f:
-        raw_text = f.read() # 文本对象.read()方法：将整个文本对象读进一个str对象
-    
     # 因为 src 和 tgt 之间由 \t 分隔, 行之间由 \n 分隔, 为了在 normalize 特殊空白字符后 保留 样本间以及样本内部的分隔符号, 故用特殊符号替换
     assert '<#line_separator#>' not in raw_text, f'temp sample separator exists in raw text. change code'
     assert '<#seq_separator#>' not in raw_text, f'temp feature/label separator exists in raw text. change code'
@@ -108,32 +105,23 @@ def tensorize_tokens(tokens, vocab, num_steps):
 
 
 
-# # 制作 vocab
-# src_vocab = Vocab(source, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'], unk_token=UNK_token) # 制作src词表
-# tgt_vocab = Vocab(target, min_freq=2, reserved_tokens=['<pad>', '<bos>', '<eos>'], unk_token=UNK_token) # 制作tgt词表
 
 
 
-
-def build_seq2seqDataset(text_path:str,
+def build_seq2seqDataset(raw_text:str,
                          num_steps:int,
                          src_vocab:Vocab,
                          tgt_vocab:Vocab,
-                         tokenize_mode:str,
                          sample_separator:str,
                          srctgt_separator:str,
-                         EOW_token:str,
-                         UNK_token:str,
                          num_examples:int|None,
                          ):
     """
     inputs:
-        text_path: seq2seq text file path
+        raw_text: seq2seq text file
         num_steps: hyperparams to identify the length of sequences by truncating if too long or padding if too short
         src_vocab: vocab for source language
         tgt_vocab: vocab for target language
-        tokenize_mode: bpe or other.
-            if tokenize_mode == 'bpe', then use vocabs.tokens as symbols to tokenize text_path
         sample_separator: separator for datapoints
         srctgt_separator: separator for source & target sequences
         EOW_token: end-of-word token used to generate symbols
@@ -153,26 +141,23 @@ def build_seq2seqDataset(text_path:str,
         返回seq2seq翻译数据集, 其中tensors是(src数据集int64, src有效长度集int32, tgt数据集int64, tgt有效长度集int32)
         返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
     """
+    # 确保两个字典使用同一个 unk_token
+    assert src_vocab.to_tokens(src_vocab.unk) == tgt_vocab.to_tokens(tgt_vocab.unk), f'different unk_token in src/tgt vocabs'
+
+    unk_token = src_vocab.to_tokens(src_vocab.unk)
 
     # tokenize src / tgt sentences. source 和 target 是 2D list of tokens
-
-    # 直接使用 vocab 的 tokens 作为 symbols
-    # vocab 是基于 symbols, 在 language corpus 上生产出来的 mapping, 它将 symbols 中的绝大多数 token 都映射到 独有数字, 极少部分映射到 UNK_token
-    if tokenize_mode == 'bpe':
-        src_symbols, tgt_symbols = src_vocab.tokens, tgt_vocab.tokens
-    else:
-        src_symbols, tgt_symbols = None, None
     
-    source, target = tokenize_seq2seqText(text_path = text_path,
-                                          sample_separator = sample_separator,
-                                          srctgt_separator = srctgt_separator,
-                                          src_symbols = src_symbols,
-                                          tgt_symbols = tgt_symbols,
-                                          EOW_token = EOW_token,
-                                          UNK_token = UNK_token,
-                                          need_lower = True,
-                                          separate_puncs = ',.!?',
-                                          num_examples = num_examples)
+    source, target = tokenize_seq2seqText(
+        raw_text,
+        sample_separator,
+        srctgt_separator,
+        {'tokens':src_vocab.tokens, 'EOW_token':src_vocab.to_tokens(src_vocab.eow)} if src_vocab.to_tokens(src_vocab.eow) else None,
+        {'tokens':tgt_vocab.tokens, 'EOW_token':tgt_vocab.to_tokens(tgt_vocab.eow)} if tgt_vocab.to_tokens(tgt_vocab.eow) else None,
+        unk_token,
+        need_lower = True,
+        separate_puncs = ',.!?',
+        num_examples = num_examples)
     
     # 制作 tensor dataset
     src_array, src_valid_len = tensorize_tokens(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
@@ -196,22 +181,29 @@ def build_seq2seqDataset(text_path:str,
 
 
 class seq2seqDataset(torch.utils.data.Dataset):
-    def __init__(self, text_path, num_steps, num_examples:int|None=None, 
-                 EOW_token='', src_symbols:t.List[str]=[], tgt_symbols:t.List[str]=[], UNK_token='<unk>'):
+    def __init__(self,
+                 text_path,
+                 num_steps,
+                 src_vocab_path,
+                 tgt_vocab_path,
+                 sample_separator='\n',
+                 srctgt_separator='\t',
+                 num_examples:int|None=None):
         
         super().__init__()
-        # 只有 src 和 tgt language 都输入了 有效 的symbols, 以及有效的 EOW_token, 才使用 byte-pair-encoding
-        if len(src_symbols) != 0 and len(tgt_symbols) != 0 and EOW_token != '':
-            tokenize_mode = 'bpe'
-        else:
-            tokenize_mode = 'simple'
+        src_vocab, tgt_vocab = Vocab(), Vocab()
+        src_vocab.load(src_vocab_path)
+        tgt_vocab.load(tgt_vocab_path)
+
+        with open(text_path, 'r', encoding='utf-8') as f:
+            raw_text = f.read()
+
         
-        X, X_valid_lens, Y, Y_valid_lens = build_dataset(path, num_steps, num_examples, '\n', '\t',
-            tokenize_mode, src_symbols, tgt_symbols, EOW_token, UNK_token,
-            need_lower=True, separate_puncs=',.!?'
-            )
+        X, X_valid_lens, Y, Y_valid_lens = build_seq2seqDataset(
+            raw_text, num_steps, src_vocab, tgt_vocab, sample_separator, srctgt_separator, num_examples)
         
         # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
+        # X_valid_lens 是 source 的 (batch_size,), Y_valid_lens 是 target 的 (batch_size,)
         
         bos = torch.tensor( [tgt_vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
         # encoder 只对 source data 作深度表征, 故只需要 source data: X 和 X_valid_lens
