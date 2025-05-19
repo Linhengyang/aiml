@@ -298,6 +298,24 @@ def get_BPE_glossary(
 
 
 
+# 不同的 glossary 之间应该可以 merge, 只要保证 它们用同一个 EOW_token
+def merge_glossary(glossary_lst:t.List[t.Dict]) -> t.Dict:
+
+    check = [glossary['tokens'][0] == glossary['EOW_token'] for glossary in glossary_lst]
+    assert all(check), f'glossary EOW not same with first token. Check code'
+
+    EOW_token = glossary_lst[0]['EOW_token']
+    same_EOW = [glossary['EOW_token'] == EOW_token for glossary in glossary_lst]
+    assert all(same_EOW), f'glossaries have different EOW_token, cannot merge. Check code'
+
+    merge_tokens = [EOW_token]
+    for glossary in glossary_lst:
+        merge_tokens.extend( glossary['tokens'][1:] )
+    
+    return {'tokens':merge_tokens, 'EOW_token':EOW_token}
+
+
+
 
 
 
