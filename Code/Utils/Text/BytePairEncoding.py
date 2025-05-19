@@ -88,19 +88,22 @@ def init_tokcombo_freqs(
 def merge_maxfreq_token_pair(
         maxfreq_token_pairs: t.List[t.Tuple[str]],
         tokcombo_freqs: t.List[t.Tuple]|t.Dict,
-        symbols:t.List|t.Set,
+        symbols:t.List,
         merge_mode: str = 'first'):
     '''
     input
         maxfreq_token_pairs:
             list of tuples of most frequent adjacent token pair [(tok_L, tok_R), ...]
-
             if only one token pair has highest frequency, then it will be a list of length 1
+
         tokcombo_freqs:
             Dict: { token_combo_by_space: word_frequency ... } / list of tuple: [ (token_combo_by_space, word_frequency) ... ]
+
         symbols:
-            set/list
-        merge_mode: str, one of first/all/shortest/random ...
+            list of tokens
+        merge_mode:
+            str, one of first/all/shortest/random
+
     output:
         updated tokcombo_freqs & symbols
     
@@ -110,7 +113,7 @@ def merge_maxfreq_token_pair(
             如果 merge_mode 选择了first, 那么第一对 token_pair 将合并
             如果 merge_mode 选择了shortest, 那么最短的 token_pair 将合并
             如果 merge_mode 选择了random, 那么随机的 token_pair 将合并
-        symbols: 最频繁出现的 连续 token pair 被合并后, 添加入symbols
+        symbols: 最频繁出现的 连续 token pair 被合并后, 添加入 symbols
     '''
     
     if merge_mode != 'all': # 当 mode 不为 all 时, 以某种方式确定 单个 token pair 以合并
@@ -130,10 +133,7 @@ def merge_maxfreq_token_pair(
 
     # update vocab(symbols)
     for token_pair in maxfreq_token_pairs: # 逐一在 symbols 添加 合并后的 token pair 作为 新token
-        if isinstance(symbols, set):
-            symbols.union( ''.join(token_pair) )
-        elif isinstance(symbols, list):
-            symbols.append( ''.join(token_pair) )
+        symbols.append( ''.join(token_pair) )
     
     # update token combo frequency corpus counter
     if isinstance(tokcombo_freqs, dict):
@@ -216,7 +216,7 @@ def get_maxfreq_token_pair(
 
 
 
-def get_BPE_symbols(
+def get_BPE_glossary(
         text,
         EOW_token,
         merge_times: int,
@@ -224,24 +224,26 @@ def get_BPE_symbols(
         merge_mode: str = 'first',
         min_occur_freq_merge: int = 1,
         reserved_tokens: t.List[str] = [],
-        symbols_type: str = 'list',
         need_lower: bool = True,
         separate_puncs: str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
         normalize_whitespace: bool = True,
         bind_EOW_lastCHAR: bool = False
         ) -> t.Dict:
     '''
+    output:
+        glossary, dict of
+            'tokens': 用 BPE 流程从 text 中生产出来的 token list. index 0 位置是该 BPE 流程使用的 EOW_token
+            'EOW_token': 该 BPE 流程使用的 EOW_token
     input:
-        text: 输入文本, 用以 构建 token symbols 集合
-        EOW_token: end-of-word 用来标记每个 单词 的末尾, 区分从中间分割的token和结尾token. 会被加入到输出的 token symbols 中。
-        merge_times: 超参数, 用来确定 生成的 token symbols集合大小
-        save_path: symbols 保存的地址. symbols 将以 dict 形式保存,
-            其中 'tokens' key 的 value 是所有tokens list, 'EOW_token' key 的 value 是生成这个 symbols 所用的 EOW_token
+        text: 输入文本, 用以 构建 token 集合
+        EOW_token: end-of-word 用来标记每个 单词 的末尾, 区分从中间分割的token和结尾token. 会被加入到输出的 token list 中。
+        merge_times: 超参数, 用来确定 生成的 token symbol list 大小
+        save_path: glossary 保存的地址. 将以 dict 形式保存,
+            其中 'tokens' key 的 value 是所有tokens list, 'EOW_token' key 的 value 是生成这个 tokens list 所用的 EOW_token
         merge_mode: 当有多个 token pair 是 最大出现频率的时候, 采用什么方法选择 该合并的 token pair
             all全部都合并 / first第一个合并 / random 随机选 / shortest 最短的合并
         min_occur_freq_merge: 最低要合并的 token pair 出现频率。出现频率小于这个值的 token pair 不再合并添加到集合中
-        reserved_tokens: 保留token组合. 列表中的tokens将被作为最小单元保留, 不会被分割。会出现在输出的 token symbols 中
-        symbols_type: 输出的集合数据类型. list / set
+        reserved_tokens: 保留token组合. 列表中的tokens将被作为最小单元保留, 不会被分割。会出现在输出的 token list 中
         need_lower: 输入text是否要小写化
         separate_puncs: 视作独立token的标点符号们
         normalize_whitespace: 是否将text中非 单空格 的连续空白字符or空白字符 统一转换为 单空格
@@ -264,13 +266,13 @@ def get_BPE_symbols(
     # 初始化 tokcombo_freqs: 用单空格 分割 raw_corpus 中的key, 至不可分割粒度。参数 reserved_tokens 是不可分割token
     tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, EOW_token, bind_EOW_lastCHAR)
     
-    # 初始化 symbols: 包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens、EOW_token
-    symbols = set(text_normspace) | set(reserved_tokens) | set([EOW_token])
+    # 初始化 symbols as list: 包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens
+    symbols = list( set(text_normspace) | set(reserved_tokens) )
     # 这里也可以不 union reserved_tokens.
     # 因为 reversed_tokens 在合并生成 bpe symbols 的过程中没有起作用, 而且它可以在 vocab 类中设定. 故它不是必须的
 
-    if symbols_type == 'list':
-        symbols = list(symbols)
+    # 确保 EOW_token 在 symbols 的 index 0 位置
+    symbols = [EOW_token] + symbols
 
     # merge 一定次数, 或 maxfreq 的token pair 的出现频次 低于 阈值
     for _ in range(merge_times):
@@ -282,14 +284,14 @@ def get_BPE_symbols(
             # merge maxfreq token pair(s) : update vocab(symbols), tokcombo_freqs, 
             tokcombo_freqs, symbols = merge_maxfreq_token_pair(token_pairs_w_maxfreq, tokcombo_freqs, symbols, merge_mode)
     
-    # 组装 symbols 和 EOW_token 成一个 dict
-    symbols = {'tokens': symbols, 'EOW_token': EOW_token}
+    # 组装 symbols 和 EOW_token 成一个 dict: glossary
+    glossary = {'tokens': symbols, 'EOW_token': EOW_token}
 
     if isinstance(save_path, str):
         with open(save_path, 'w') as f:
-            json.dump(symbols, f)
+            json.dump(glossary, f)
     
-    return symbols
+    return glossary
 
 
 
@@ -303,17 +305,17 @@ def get_BPE_symbols(
 
 # a segmenter, which tokenizes a raw sentences
 
-def segment_word_BPE_greedy(
+def segment_word_BPE_greedy(    
         word:str,
-        symbols: t.Dict|None,
-        UNK_token:str = "<unk>",
-        EOW_token:str = ''
+        glossary: t.Dict|None = None,
+        UNK_token:str = "<unk>"
         ):
     '''
     input:
         word: 输入单词, 用以拆分成多个 subword. 末尾可以已经添加 EOW_token. 也可以没有添加 EOW_token, 此时会被添加到末尾
-        symbols: 以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集.
-            如果不输入 symbols, 或输入空 symbols, 那么意味着 word以 整个不分割 的方式返回
+        glossary: Dict, key 'EOW_token' --> end-of-word token, key 'tokens' --> 以 EOW_token 和 标准BPE流程制作的词元集.
+            检查 glossary 是标准流程制作: glossary['EOW_token'] == glossary['tokens'][0]
+            如果 glossary 不输入, 或输入 None, 那么意味着 word以 整个不分割 的方式返回
         UNK_token: unknown token, 用以替代 无法分割的片段
         EOW_token: end-of-word token, 用以标识 word 的结尾.
             当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下: 
@@ -324,30 +326,32 @@ def segment_word_BPE_greedy(
                 分割不成功:     tok1, ... tokn, UNK_token
     return:
         segmented: list of string
-            word被切分成 symbols 中包含的 subwords/tokens, 和 UNK_token(如果未能在symbols中找到). 以列表的方式返回
+            word被切分成 glossary['tokens'] 中包含的 subwords/tokens, 和 UNK_token(如果未能在 glossary['tokens'] 中找到). 以列表的方式返回
         unsegmented: string
-            word中未被 symbols 切分的部分。若成功切分, 则它为 空字符串
+            word中未被 glossary['tokens'] 切分的部分。若成功切分, 则它为 空字符串
     explain:
-        用贪心的方法来切割输入 word, 即用 symbols 中尽量少的 symbol 来切分 word(将 word 切割成尽量长的subwords/tokens)
-        以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集 symbols, EOW_token 必然以整体参与形成 token
+        用贪心的方法来切割输入 word, 即用 glossary['tokens'] 中尽量少的 symbol 来切分 word(将 word 切割成尽量长的subwords/tokens)
+        以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集 glossary['tokens'], EOW_token 必然以整体参与形成 token
         那么在 greedy 的算法下, 即使EOW_token 以部分参与来分割word的过程会出现, 但这种情况不会出现在最终分割结果中
     '''
 
-    if len(symbols) == 0: # 如果 symbols 为空, 直接将 整个word作为分割好的token返回.
+    if glossary is None: # 如果 glossary 为 None, 直接将 整个word作为分割好的token返回.
         return [word], ''
+    
+    EOW_token, symbols = glossary['EOW_token'], glossary['tokens']
 
     # start 是起始为止, end 是终结位置后一
     # 从start 位置开始
-    #   从 end 为止开始, 检查 start 到 end 是不是 symbols 中的 symbol
+    #   从 end 为止开始, 检查 start 到 end 是不是 glossary['tokens'] 中的 symbol
     #       如果不是, end 指针 往前 移 一位, 重新判断
     #       如果是, 记录该 symbol, 同时 start 移动到 end(即终结位置后一), end 回到末尾后一
     # 重复这个过程直到 start 等于 end
     #   start 等于 end 有两种可能: 
     #       可能1: end = length 被赋值给 start. 此时即start 和 end 都处于末尾后一 位置。这意味着 word 被切割完毕
-    #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始, 往右的每一个字符组合都不是symbols中的symbol, 
-    #       说明 word的start位置的字符 不存在于 symbols 中
+    #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始, 往右的每一个字符组合都不是 glossary['tokens'] 中的symbol, 
+    #       说明 word的start位置的字符 不存在于 glossary['tokens'] 中
 
-    if EOW_token and not word.endswith(EOW_token): # 如果输入了 EOW_token 且 word 不是以 EOW_token 结尾
+    if EOW_token and not word.endswith(EOW_token): # 如果 EOW_token 存在 且 word 不是以 EOW_token 结尾
         word += EOW_token
     
     length = len(word)
@@ -369,7 +373,6 @@ def segment_word_BPE_greedy(
             segmented = segmented + [UNK_token, EOW_token]
         else:
             segmented.append( UNK_token )
-
     
     return segmented, word[start:]
 
