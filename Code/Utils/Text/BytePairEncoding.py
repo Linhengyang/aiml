@@ -307,30 +307,41 @@ def get_BPE_glossary(
 
 def segment_word_BPE_greedy(    
         word:str,
+        EOW_appnd: bool = True,
         glossary: t.Dict|None = None,
         UNK_token:str = "<unk>"
         ):
     '''
     input:
-        word: 输入单词, 用以拆分成多个 subword. 末尾可以已经添加 EOW_token. 也可以没有添加 EOW_token, 此时会被添加到末尾
+        word: str, 输入单词, 用以拆分成多个 subword. 末尾可以已经添加 EOW_token, 也可以没有添加 EOW_token(由 EOW_appnd 指明)
+        若没有添加, 则 EOW_token 会被添加到末尾.
+            EOW_token 由 glossary['EOW_token'] 确定, EOW_token 用以标识 word 的结尾.
+        
+        分割的结果中, EOW_token 将以合适的方式出现: 
+            若 EOW_token 不为空字符, 那么分割结果如下: 
+                分割成功:       tok1, ... tokn                              EOW_token 可能被包含在 last token 内, 也可能是 独立的 last token
+                分割不成功:     tok1, ... tokj, UNK_token, EOW_token        EOW_token 和 UNK_token 分别以独立 token 方式被分割
+            若 EOW_token 为空字符, 那么分割结果如下:
+                分割成功:       tok1, ... tokn''                            EOW_token 作为空字符, 被包含在 last token 内
+                分割不成功:     tok1, ... tokj, UNK_token, ''               EOW_token 作为 独立的 空字符标识结尾
+
+        EOW_appnd: T/F, 指明输入 word 的末尾是否已经添加 EOW_token.
+
         glossary: Dict, key 'EOW_token' --> end-of-word token, key 'tokens' --> 以 EOW_token 和 标准BPE流程制作的词元集.
             检查 glossary 是标准流程制作: glossary['EOW_token'] == glossary['tokens'][0]
+        
             如果 glossary 不输入, 或输入 None, 那么意味着 word以 整个不分割 的方式返回
-        UNK_token: unknown token, 用以替代 无法分割的片段
-        EOW_token: end-of-word token, 用以标识 word 的结尾.
-            当输入时, 如果word没有EOW_token, 那么attach在word后面; 分割的结果中, EOW_token将以合适的方式出现, 例如如下: 
-                分割成功:       tok1, ... tokn  
-                分割不成功:     tok1, ... tokn, UNK_token, EOW_token
-            当不输入时, 无视 EOW_token
-                分割成功:       tok1, ... tokn  
-                分割不成功:     tok1, ... tokn, UNK_token
+
+        UNK_token: str, unknown token, 用以替代 无法分割的片段
+
     return:
         segmented: list of string
-            word被切分成 glossary['tokens'] 中包含的 subwords/tokens, 和 UNK_token(如果未能在 glossary['tokens'] 中找到). 以列表的方式返回
+            word被切分成 glossary['tokens'] 中包含的 subwords/tokens, 和 UNK_token(未能在 glossary['tokens'] 中匹配的部分). 以列表的方式返回
         unsegmented: string
             word中未被 glossary['tokens'] 切分的部分。若成功切分, 则它为 空字符串
+    
     explain:
-        用贪心的方法来切割输入 word, 即用 glossary['tokens'] 中尽量少的 symbol 来切分 word(将 word 切割成尽量长的subwords/tokens)
+        用贪心的方法来切割输入 word, 即用 glossary['tokens'] 中尽量少的 symbol 来切分 word(等价于 将 word 切割成尽量长的subwords/tokens)
         以 EOW_token 作为 end-of-word token, 且以标准BPE流程制作的词元集 glossary['tokens'], EOW_token 必然以整体参与形成 token
         那么在 greedy 的算法下, 即使EOW_token 以部分参与来分割word的过程会出现, 但这种情况不会出现在最终分割结果中
     '''
@@ -351,7 +362,7 @@ def segment_word_BPE_greedy(
     #       可能2: end -= 1 过程中等于 start. 此时说明 word 从start位置开始, 往右的每一个字符组合都不是 glossary['tokens'] 中的symbol, 
     #       说明 word的start位置的字符 不存在于 glossary['tokens'] 中
 
-    if EOW_token and not word.endswith(EOW_token): # 如果 EOW_token 存在 且 word 不是以 EOW_token 结尾
+    if not EOW_appnd: # 如果 EOW_appnd = False, 说明 word 末尾没有添加 EOW_token
         word += EOW_token
     
     length = len(word)
@@ -366,15 +377,17 @@ def segment_word_BPE_greedy(
             end -= 1
     
     # 循环结束时 start = end. 此时有两种可能
-    #   start = end = length, 此时 word 被切割完毕
-    #   start = end < length, 此时 word 存在 不可被识别片段: 从 start位置开始
+    #   1. start = end = length, 此时 word 被切割完毕, 返回 segmented 即可. EOW_token 以合适的方式包含在了 segmented[-1] 内
+
+    #   2. start = end < length, 此时 word 存在 不可被识别片段: 从 start位置开始. segmented 添加一个独立的 UNK 以及一个独立的 EOW
+    #      以标识 不可识别片段, 和 word 的终结. 此时 返回 word 的不可识别片段作为 unsegmented part
     if start < length:
-        if EOW_token:
-            segmented = segmented + [UNK_token, EOW_token]
-        else:
-            segmented.append( UNK_token )
+        segmented = segmented + [UNK_token, EOW_token]
     
     return segmented, word[start:]
+
+
+
 
 
 
