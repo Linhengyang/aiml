@@ -217,7 +217,7 @@ def get_maxfreq_token_pair(
 
 
 def get_BPE_glossary(
-        text,
+        corpus,
         EOW_token,
         merge_times: int,
         save_path: str|None = None,
@@ -235,7 +235,7 @@ def get_BPE_glossary(
             'tokens': 用 BPE 流程从 text 中生产出来的 token list. index 0 位置是该 BPE 流程使用的 EOW_token
             'EOW_token': 该 BPE 流程使用的 EOW_token
     input:
-        text: 输入文本, 用以 构建 token 集合
+        corpus: 输入 语料, 用以 构建 token 集合
         EOW_token: end-of-word 用来标记每个 单词 的末尾, 区分从中间分割的token和结尾token. 会被加入到输出的 token list 中。
         merge_times: 超参数, 用来确定 生成的 token symbol list 大小
         save_path: glossary 保存的地址. 将以 dict 形式保存,
@@ -250,21 +250,21 @@ def get_BPE_glossary(
         bind_EOW_lastCHAR: 合并生成过程的最开始, 是否 初始绑定 EOW_token 和 末尾的单字符 char.
             通用做法是不绑定, 那么 EOW_token 作为独立字符, 参与token的合并生成
     '''
-    # 输入文本中不应该存在用以分割的 EOW_token. 如果存在, 报错;
-    if EOW_token in text:
+    # 输入语料中不应该存在用以分割的 EOW_token. 如果存在, 报错;
+    if EOW_token in corpus:
         raise ValueError(f'end-of-word token {EOW_token} exists in text. change EOW_token')
     
     # 处理空白字符. 在标点前面添加 单空格
-    text_normspace = preprocess_space(text, need_lower, separate_puncs, normalize_whitespace)
+    text_normspace = preprocess_space(corpus, need_lower, separate_puncs, normalize_whitespace)
 
     # 在每个单词/标点末尾添加 EOW_token
     text_normspace_appdEOW = attach_EOW_token(text_normspace, EOW_token)
 
     # 原始的 corpus counter
-    raw_corpus = count_corpus(text_normspace_appdEOW.split(" "))
+    raw_wordfreq = count_corpus(text_normspace_appdEOW.split(" "))
 
     # 初始化 tokcombo_freqs: 用单空格 分割 raw_corpus 中的key, 至不可分割粒度。参数 reserved_tokens 是不可分割token
-    tokcombo_freqs = init_tokcombo_freqs(raw_corpus, reserved_tokens, EOW_token, bind_EOW_lastCHAR)
+    tokcombo_freqs = init_tokcombo_freqs(raw_wordfreq, reserved_tokens, EOW_token, bind_EOW_lastCHAR)
     
     # 初始化 symbols as list: 包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens
     symbols = list( set(text_normspace) | set(reserved_tokens) )
@@ -298,8 +298,11 @@ def get_BPE_glossary(
 
 
 
-# 不同的 glossary 之间应该可以 merge, 只要保证 它们用同一个 EOW_token
-def merge_glossary(glossary_lst:t.List[t.Dict]) -> t.Dict:
+# 不同的 glossary 之间应该可以 merge, 只需要 保证它们用同一个 EOW_token
+def merge_glossary(
+        glossary_lst:t.List[t.Dict],
+        save_path:str|None = None,
+        ) -> t.Dict:
 
     check = [glossary['tokens'][0] == glossary['EOW_token'] for glossary in glossary_lst]
     assert all(check), f'glossary EOW not same with first token. Check code'
@@ -312,7 +315,12 @@ def merge_glossary(glossary_lst:t.List[t.Dict]) -> t.Dict:
     for glossary in glossary_lst:
         merge_tokens.extend( glossary['tokens'][1:] )
     
-    return {'tokens':merge_tokens, 'EOW_token':EOW_token}
+    merged = {'tokens':merge_tokens, 'EOW_token':EOW_token}
+    if isinstance(save_path, str):
+        with open(save_path, 'w') as f:
+            json.dump(merged, f)
+
+    return merged
 
 
 
@@ -333,7 +341,8 @@ def segment_word_BPE_greedy(
     input:
         word: str, 输入单词, 用以拆分成多个 subword. 末尾可以已经添加 EOW_token, 也可以没有添加 EOW_token(由 EOW_appnd 指明)
         若没有添加, 则 EOW_token 会被添加到末尾.
-            EOW_token 由 glossary['EOW_token'] 确定, EOW_token 用以标识 word 的结尾.
+
+            EOW_token 由 glossary['EOW_token'] 确定, 用以标识 word 的结尾.
         
         分割的结果中, EOW_token 将以合适的方式出现: 
             若 EOW_token 不为空字符, 那么分割结果如下: 
