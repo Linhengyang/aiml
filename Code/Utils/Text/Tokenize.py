@@ -7,7 +7,7 @@ import re
 from .TextPreprocess import preprocess_space, attach_EOW_token
 
 # a segmenter, which tokenizes a raw sentences
-def segment_word_BPE_greedy(    
+def word_segment_greedy(    
         word:str,
         EOW_appnd: bool = True,
         glossary: t.Dict|None = None,
@@ -129,10 +129,11 @@ def line_tokenize_greedy(
         # [] represents unsegmented part of sentence
         return segmented_output, []
     else:
-        assert glossary['EOW_token'], f'EOW token of input glossary cannot be null string'
+        # 确保 EOW_token 不为空, 且不出现再 sentence里. 因为 sentence 极大概率存在单空格, nullstring 的EOW_token 无法分辨word/subword间的空格
+        assert glossary['EOW_token'] not in sentence, \
+            f"glossary's EOW_token {glossary['EOW_token']} cannot be null string, neither should exist in sentence {sentence}"
 
-    # 统一给每个 word和 独立token 后面添加 eow_token. attach_EOW_token 本身支持 EOW_token 为 空字符, 但
-    # 这里 在 切割 sentence, 所以不应该是 空字符, 不然会造成无法分辨 words 之间的自然空格 和 subword 之间的人造空格
+    # 统一给每个 word和 独立token 后面添加 eow_token.
     sentence = attach_EOW_token(sentence, glossary['EOW_token'])
 
     # 用单空格拆出每个 word
@@ -140,10 +141,10 @@ def line_tokenize_greedy(
     segmented_output, unsegmented_output = [], []
 
     for word in words:
-        segmented_lst, unsegmented_str = segment_word_BPE_greedy(word,
-                                                                 EOW_appnd=True, # 已经统一给每个 word和 独立token 后面添加 eow_token
-                                                                 glossary=glossary,
-                                                                 UNK_token=UNK_token)
+        segmented_lst, unsegmented_str = word_segment_greedy(word,
+                                                             EOW_appnd=True, # 已经统一给每个 word和 独立token 后面添加 eow_token
+                                                             glossary=glossary,
+                                                             UNK_token=UNK_token)
 
         if flatten:
             segmented_output.extend( segmented_lst ) # segmented_output: list of string
