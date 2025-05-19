@@ -48,7 +48,7 @@ def line_tokenize_greedy(
         # [] represents unsegmented part of sentence
         return segmented_output, []
     
-    # 统一给每个 word和 独立token 后面添加 eow_token
+    # 统一给每个 word和 独立token 后面添加 eow_token. attach_EOW_token 支持 EOW_token 为 空字符, 这样 sentence 输入输出不变
     sentence = attach_EOW_token(sentence, glossary['EOW_token'])
 
     # 用单空格拆出每个 word
