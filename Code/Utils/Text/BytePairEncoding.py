@@ -250,9 +250,8 @@ def get_BPE_glossary(
         bind_EOW_lastCHAR: 合并生成过程的最开始, 是否 初始绑定 EOW_token 和 末尾的单字符 char.
             通用做法是不绑定, 那么 EOW_token 作为独立字符, 参与token的合并生成
     '''
-    # 输入语料中不应该存在用以分割的 EOW_token. 如果存在, 报错;
-    if EOW_token in corpus:
-        raise ValueError(f'end-of-word token {EOW_token} exists in text. change EOW_token')
+    # 输入语料中不应该存在用以分割的 EOW_token, 以及 EOW_token 不可以为 空字符. 如果存在或EOW_token为空字符, 报错;
+    assert EOW_token not in corpus, f'end-of-word token {EOW_token} exists in text or is null char. change EOW_token'
     
     # 处理空白字符. 在标点前面添加 单空格
     text_normspace = preprocess_space(corpus, need_lower, separate_puncs, normalize_whitespace)
