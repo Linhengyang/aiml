@@ -22,7 +22,7 @@ class Vocab:
         A mapper whose main function is to map tokens(words, chars) to indices, or vice versa.
     
     explains:
-        定义一个vocab类, 它提供将token映射到integer ID的功能, 并可以自定义忽视token的阈值, 以及预先设定的tokens
+        定义一个vocab类, 它提供将token映射到integer ID的功能
 
         本 Vocab 得到的词汇量, 是所使用的 glossary 的高频子集. 低频 token <==> unk_token
         故对于某语言的语料数据 data 来说,
@@ -33,8 +33,8 @@ class Vocab:
         vocab 是语料 corpus 基于 glossary 的再加工.
             glossary作为一个dict, 只记录了BPE流程制作的all tokens, 以及所使用的 EOW_token. 没有统计信息, 不包含 unk_token
 
-            而vocab基于 glossary, 对语料 corpus 再加工, 基于 glossary tokenize corpus 后得到的 tokens 的频次, 提供 map token 2 ID 的功能.
-            vocab.unk 就是 unk_token 的 ID, vocab.eow 是所基于的 glossary 的 EOW_token. 如果 它是 None, 说明原 glossary 是 None
+            而vocab基于 glossary, 对语料 corpus 再加工, 基于 glossary tokenize corpus 后得到的 tokens 的统计频次, 提供 map token to ID 的功能.
+            vocab.unk 就是 unk_token 的 ID, vocab.eow 是所基于的 glossary 的 EOW_token. 如果 它是 '', 说明原 glossary 是 None
     '''
     def __init__(self,
                  corpus:str='',
@@ -47,6 +47,7 @@ class Vocab:
                  ):
 
         # 将 corpus 作为 一条string 输入, normalize 空白格式,独立化每个 punc
+        # line_tokenize_greedy 要求 glossary 要么为 None, 要么 EOW_token 不为空
         tokens = line_tokenize_greedy(corpus, glossary, unk_token,
                                       flatten = True,
                                       need_preprocess = True,
@@ -64,7 +65,11 @@ class Vocab:
         counter = count_corpus(tokens) # 计算各个 token 出现频次
         counter.pop('', None) # 去除可能存在的 '' 空字符串token
 
-        EOW_token = glossary['EOW_token'] if glossary else '' # 记录 EOW_token. 如果 glossary 是 None, 那么 EOW_token 设为 空字符串 ''
+        EOW_token = glossary['EOW_token'] if glossary else '' # 记录 EOW_token. 
+        # 如果 glossary 是 None, 那么 EOW_token 设为 空字符串 ''
+        # 如果 glossary 不为 None, 那么 EOW_token 为 非空字符串
+
+        # ----> 可以通过 本 vocab 的 EOW_token 是否为 '' 判断 所使用的 glassary 是否是 None
 
         del tokens, glossary # 节省内存
 
@@ -76,8 +81,7 @@ class Vocab:
         # 建立从token到数字的双射
 
         ## 更新 reserved_tokens: 
-        # 添加 unk 到 index0 位置
-        # 如果使用了标准 BPE 流程制作的 glossary, 那么加入相应 EOW_token 到index1位置;否则, 加入 空字符串 到index1位置, 作为 EOW_token
+        # 添加 unk 到 index0 位置, 添加 eow 到 index1 位置
         self._reserved_tokens = [unk_token, EOW_token] + reserved_tokens
 
         # 记录 token 而不是 unk_token 的 最小出现 频次
