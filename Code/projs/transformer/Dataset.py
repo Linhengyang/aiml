@@ -18,7 +18,7 @@ def tokenize_seq2seqText(
         UNK_token:str, # 切割 source/target seq 时, 代表 无法识别切割的部分的 unkown token. src 和 tgt 用一个 UNK 就行
         # 设定 文本统一预处理 的格式
         need_lower=True, # 是否小写化
-        separate_puncs=',.!?', # 独立标点符号集
+        separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', # 独立标点符号集
         # 样本量
         num_examples=None,
         ):
@@ -114,7 +114,9 @@ def build_seq2seqDataset(raw_text:str,
                          tgt_vocab:Vocab,
                          sample_separator:str,
                          srctgt_separator:str,
-                         num_examples:int|None,
+                         need_lower:bool=True,
+                         separate_puncs:str='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
+                         num_examples:int|None=None,
                          ):
     """
     inputs:
@@ -124,8 +126,8 @@ def build_seq2seqDataset(raw_text:str,
         tgt_vocab: vocab for target language
         sample_separator: separator for datapoints
         srctgt_separator: separator for source & target sequences
-        EOW_token: end-of-word token used to generate symbols
-        UNK_token: unknown token
+        need_lower: if lower the raw text
+        separate_puncs: punctuations that shall be seen as independent tokens
         num_examples: total sample size if given. None to read all
 
     returns: denoted as tuple of tensors(tensor dataset), tuple of vocabs
@@ -134,12 +136,10 @@ def build_seq2seqDataset(raw_text:str,
             2. source seqs valid(not-pad) lens, shape (num_examples, )
             3. target seqs, with shape (num_examples, num_steps)
             4. target seqs valid(not-pad) lens, with shape (num_examples, )
-        src_vocab: vocab of source language corpus
-        tgt_vocab: vocab of target language corpus
-    
+
     explains:
-        返回seq2seq翻译数据集, 其中tensors是(src数据集int64, src有效长度集int32, tgt数据集int64, tgt有效长度集int32)
-        返回seq2seq翻译词汇表, (src词汇表, tgt词汇表)
+        输入 seq2seq 数据集, 和 src/tgt 语言的 vocab; 输入num_steps; 以及其他参数
+        返回 datasets, 其中tensors是(src数据集int64, src有效长度集int32, tgt数据集int64, tgt有效长度集int32)
     """
     # 确保两个字典使用同一个 unk_token
     assert src_vocab.to_tokens(src_vocab.unk) == tgt_vocab.to_tokens(tgt_vocab.unk), f'different unk_token in src/tgt vocabs'
@@ -155,9 +155,9 @@ def build_seq2seqDataset(raw_text:str,
         {'tokens':src_vocab.tokens, 'EOW_token':src_vocab.to_tokens(src_vocab.eow)} if src_vocab.to_tokens(src_vocab.eow) else None,
         {'tokens':tgt_vocab.tokens, 'EOW_token':tgt_vocab.to_tokens(tgt_vocab.eow)} if tgt_vocab.to_tokens(tgt_vocab.eow) else None,
         unk_token,
-        need_lower = True,
-        separate_puncs = ',.!?',
-        num_examples = num_examples)
+        need_lower,
+        separate_puncs,
+        num_examples)
     
     # 制作 tensor dataset
     src_array, src_valid_len = tensorize_tokens(source, src_vocab, num_steps)# all src data, shapes (num_examples, num_stpes), (num_examples,)
@@ -188,6 +188,8 @@ class seq2seqDataset(torch.utils.data.Dataset):
                  tgt_vocab_path,
                  sample_separator='\n',
                  srctgt_separator='\t',
+                 need_lower=True,
+                 separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
                  num_examples:int|None=None):
         
         super().__init__()
@@ -200,7 +202,7 @@ class seq2seqDataset(torch.utils.data.Dataset):
 
         
         X, X_valid_lens, Y, Y_valid_lens = build_seq2seqDataset(
-            raw_text, num_steps, src_vocab, tgt_vocab, sample_separator, srctgt_separator, num_examples)
+            raw_text, num_steps, src_vocab, tgt_vocab, sample_separator, srctgt_separator, need_lower, separate_puncs, num_examples)
         
         # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
         # X_valid_lens 是 source 的 (batch_size,), Y_valid_lens 是 target 的 (batch_size,)
