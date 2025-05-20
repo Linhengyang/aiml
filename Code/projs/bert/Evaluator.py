@@ -121,6 +121,7 @@ class bertEpochEvaluator(epochEvaluator):
             mlm_loss_train = self.reveal_accumulator[0] / self.reveal_accumulator[3]
             nsp_loss_train = self.reveal_accumulator[1] / self.reveal_accumulator[3]
             loss_train = mlm_loss_train + nsp_loss_train
+            
             speed = self.reveal_accumulator[2] / time_cost
             est_remain_time = time_cost*(self.num_epochs-self.epoch-1)/60
 
@@ -140,8 +141,8 @@ class bertEpochEvaluator(epochEvaluator):
         
         # 若当前 epoch 需要 evaluate model, eval累加器4位( mlm loss, nsp loss, valid masked tokens 总数量, size)
         if self.eval_flag:
-            mlm_loss_eval = self.reveal_accumulator[0] / self.reveal_accumulator[3]
-            nsp_loss_eval = self.reveal_accumulator[1] / self.reveal_accumulator[3]
+            mlm_loss_eval = self.eval_accumulator[0] / self.eval_accumulator[3]
+            nsp_loss_eval = self.eval_accumulator[1] / self.eval_accumulator[3]
             loss_eval = mlm_loss_eval + nsp_loss_eval
 
             eval_log = metric_summary(
