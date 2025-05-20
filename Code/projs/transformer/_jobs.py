@@ -179,7 +179,7 @@ def train_job(eng_vocab_path, fra_vocab_path):
     # init trainer
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
 
-    trainer.set_device(torch.device('cpu')) # set the device
+    trainer.set_device(torch.device('cuda')) # set the device
     trainer.set_data_iter(trainset, validset, testset) # set the data iters
     trainer.set_optimizer(lr) # set the optimizer
     trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
@@ -218,7 +218,7 @@ def infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path):
     tgt_vocab.load( fra_vocab_path )
 
     # set device
-    device = torch.device('cpu')
+    device = torch.device('cuda')
 
     # construct model
     net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
