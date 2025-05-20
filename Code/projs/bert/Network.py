@@ -138,8 +138,8 @@ class BERT(nn.Module):
         '''
         对于 fine-tune 不一定需要的输入参数, 要设默认为 None 以不进入相关任务. 比如两个 pre-train 任务特需的输入
         '''
-        # tokens: (batch_size, seq_len)int64 ot token ID. 已包含<cls>和<sep>
-        # valid_lens: (batch_size,)
+        # tokens: (batch_size, seq_len)int64 ot token ID. 已包含 seq1前面的<cls>，和seq1/2之间 seq2后面的<sep>
+        # valid_lens: (batch_size,) 非 <pad> 的token数量
 
         # segments: (batch_size, seq_len)01 indicating seq1 & seq2 | None, None 代表当前 batch 不需要进入 NSP task
         # mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task
