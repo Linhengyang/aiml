@@ -146,15 +146,24 @@ class BERT(nn.Module):
 
         if segments is None:
             segments = torch.zeros_like(tokens, device=tokens.device)
-            
+            nsp_job_flag = False
+        else:
+            nsp_job_flag = True
+
+        if mask_positions is None:
+            mlm_job_flag = False
+        else:
+            mlm_job_flag = True
+        
+
         embd_X = self.encoder(tokens, segments, valid_lens) # (batch_size, seq_len, num_hiddens)
 
-        if mask_positions is not None:
+        if mlm_job_flag:
             mlm_Y_hat = self.mlm(embd_X, mask_positions)# (batch_size, num_masktks, vocab_size)
         else:
             mlm_Y_hat = None
 
-        if segments is not None:
+        if nsp_job_flag:
             nsp_Y_hat = self.nsp(embd_X) # (batch_size, 2)
         else:
             nsp_Y_hat = None
