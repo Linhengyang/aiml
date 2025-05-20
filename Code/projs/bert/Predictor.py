@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 from ...Compute.PredictTools import easyPredictor
-from ...projs.bert.Dataset import _concate_tokenlist_pair
 from ...Utils.Common.SeqOperation import truncate_pad
 
 
@@ -16,7 +15,18 @@ def get_bert_embedding(
         cls_token='<cls>', eos_token='<sep>', pad_tokne='<pad>',
         *args, **kwargs):
     
-    tokens, segments = _concate_tokenlist_pair(tokens, tokens_next, cls_token, eos_token)
+    # add <cls> before tokens, add <sep> after tokens & tokens_next if any
+    # produce segments to indicate 0 for tokens(including <cls> and first <sep>), 1 for tokens_next(including last <sep>)
+
+    # tokens, segments = _concate_tokenlist_pair(tokens, tokens_next, cls_token, eos_token)
+    tokens = [cls_token] + tokens + [eos_token]
+    segments = [0] * len(tokens)
+
+    if tokens_next is not None:
+        tokens += tokens_next + [eos_token]
+        segments += [1]*(len(tokens_next) + 1)
+
+
     valid_lens = torch.tensor([len(tokens)], dtype=torch.int32) #(1,)
 
     tokens = truncate_pad(tokens, max_len, pad_tokne) # token list with length max_len
