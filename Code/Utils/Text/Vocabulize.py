@@ -69,7 +69,7 @@ class Vocab:
         # 如果 glossary 是 None, 那么 EOW_token 设为 空字符串 ''
         # 如果 glossary 不为 None, 那么 EOW_token 为 非空字符串
 
-        # ----> 可以通过 本 vocab 的 EOW_token 是否为 '' 判断 所使用的 glassary 是否是 None
+        # ----> 可以通过 本 vocab 的 EOW_token 是否为 '' 判断 所使用的 glossary 是否是 None
 
         del tokens, glossary # 节省内存
 
@@ -87,6 +87,12 @@ class Vocab:
         # 记录 token 而不是 unk_token 的 最小出现 频次
         self._min_freq = min_freq
 
+
+        # 构建 vocab 的两个 mapping:
+        self.__build_mapping()
+    
+    
+    def __build_mapping(self):
         # 构建 vocab 的两个 mapping:
         #   _idx_to_token, a list mapping idx to token
         #   _token_to_idx, a dict mapping token to idx
@@ -94,7 +100,7 @@ class Vocab:
         ## 初始化token列表, 以便用index取出token, 即从 数字映射到token
         self._idx_to_token = copy.deepcopy( self._reserved_tokens )
         ## 初始化token-idx字典, 以便用取value的方式取idx, 即从token映射到数字
-        self._token_to_idx = {token: idx for idx, token in enumerate(self.idx_to_token)}
+        self._token_to_idx = {token: idx for idx, token in enumerate(self._idx_to_token)}
 
         ## 遍历_token_freqs中的所有token, 按序添加到self.idx_to_token, 并添加token-idx的kv pair到token_to_idx
         for token, freq in self._token_freqs:
@@ -104,8 +110,8 @@ class Vocab:
                 if token not in self._reserved_tokens: # reserved_tokens 内存在的 token 已经在idx_to_token和token_to_idx中建立好双射关系了
                     self._idx_to_token.append(token) # 添加该token到self.idx_to_token
                     self._token_to_idx[token] = len(self._idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
-    
-    
+
+
     def __len__(self):
         '''提供len()函数接口, 返回该vocab中总共有多少个distinct token'''
         return len(self._idx_to_token)
@@ -192,16 +198,5 @@ class Vocab:
         self._reserved_tokens = vocab_info['_reserved_tokens']
         self._min_freq = vocab_info['_min_freq']
 
-        ## 初始化token列表, 以便用index取出token, 即从 数字映射到token
-        self._idx_to_token = copy.deepcopy( self._reserved_tokens )
-        ## 初始化token-idx字典, 以便用取value的方式取idx, 即从token映射到数字
-        self._token_to_idx = {token: idx for idx, token in enumerate(self.idx_to_token)}
-
-        ## 遍历_token_freqs中的所有token, 按序添加到self.idx_to_token, 并添加token-idx的kv pair到token_to_idx
-        for token, freq in self._token_freqs:
-            if freq < self._min_freq: # 如果该token出现的频次小于阈值, 则视该token为<unk>, 即已经建立好双射了. 后续的也不需要再建立映射, 跳出循环
-                break
-            else:
-                if token not in self._reserved_tokens: # reserved_tokens 内存在的 token 已经在idx_to_token和token_to_idx中建立好双射关系了
-                    self._idx_to_token.append(token) # 添加该token到self.idx_to_token
-                    self._token_to_idx[token] = len(self._idx_to_token) - 1 # 添加token-idx的kv pair到token_to_idx
+        # 构建 vocab 的两个 mapping:
+        self.__build_mapping()
