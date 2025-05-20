@@ -124,8 +124,8 @@ def prepare_job():
     eng_vocab_path = os.path.join(vocab_dir, 'english.json')
 
     if not os.path.exists(eng_vocab_path):
-        eng_vocab = Vocab(corpus=eng_corpus, glossary=eng_glossary, reserved_tokens=['<pad>', '<bos>', '<eos>'],
-                          need_lower=True, unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
+        eng_vocab = Vocab(corpus=eng_corpus, glossary=eng_glossary, need_lower=True, reserved_tokens=['<pad>', '<bos>', '<eos>'],
+                          unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
         eng_vocab.save(eng_vocab_path)
     
 
@@ -133,8 +133,8 @@ def prepare_job():
     fra_vocab_path = os.path.join(vocab_dir, 'france.json')
 
     if not os.path.exists(fra_vocab_path):
-        fra_vocab = Vocab(corpus=fra_corpus, glossary=fra_glossary, reserved_tokens=['<pad>', '<bos>', '<eos>'],
-                          need_lower=True, unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
+        fra_vocab = Vocab(corpus=fra_corpus, glossary=fra_glossary, need_lower=True, reserved_tokens=['<pad>', '<bos>', '<eos>'],
+                          unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
         fra_vocab.save(fra_vocab_path)
 
 
