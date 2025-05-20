@@ -242,12 +242,12 @@ def infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path):
 
     # predict
     # src_sentence = 'i\'m home .'
-    src_sentence = 'Please come into the room.'
+    src_sentence = 'Who forced you to do that?'
     print(translator.predict(src_sentence))
 
     # evaluate output
     # print('bleu score: ', translator.evaluate('je suis chez moi .'))
-    print('bleu score: ', translator.evaluate('Entre dans la pièce, je te prie.'))
+    print('bleu score: ', translator.evaluate('Qui vous a forcée à faire cela ?'))
     print('pred score: ', translator.pred_scores)
 
     print('infer job complete')
