@@ -9,7 +9,7 @@ from ...Compute.EvaluateTools import bleu
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.Tokenize import line_tokenize_greedy
 from ...Utils.Common.SeqOperation import truncate_pad
-from ...Utils.Text.Vocabulize import Vocab
+
 
 
 def greedy_predict(
@@ -272,7 +272,7 @@ def beam_predict(
 
 class sentenceTranslator(easyPredictor):
     def __init__(self,
-                 src_vocab_path, tgt_vocab_path, # 两个语言的词汇表地址
+                 src_vocab, tgt_vocab, # 两个语言的词汇表
                  net, num_steps, # 模型, 步长
                  search_mode='greedy', bleu_k=2, device=None, beam_size=3, length_factor=0.75, # 生成的模式及参数
                  ):
@@ -280,9 +280,7 @@ class sentenceTranslator(easyPredictor):
         super().__init__()
 
         # load src/tgt language vocab
-        self._src_vocab, self._tgt_vocab = Vocab(), Vocab()
-        self._src_vocab.load(src_vocab_path)
-        self._tgt_vocab.load(tgt_vocab_path)
+        self._src_vocab, self._tgt_vocab = src_vocab, tgt_vocab
 
         # set device
         if device is not None and torch.cuda.is_available():
@@ -315,7 +313,7 @@ class sentenceTranslator(easyPredictor):
 
 
 
-    def predict(self, src_sentence, need_lower, separate_puncs):
+    def predict(self, src_sentence, need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'):
         # 从 text 转换成 input data
 
         # 和训练相同的预处理
@@ -366,7 +364,7 @@ class sentenceTranslator(easyPredictor):
 
 
 
-    def evaluate(self, tgt_sentence, need_lower, separate_puncs):
+    def evaluate(self, tgt_sentence, need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'):
         assert hasattr(self, 'pred_sentence'), f'predicted target sentence not found'
 
         # 和训练相同的预处理
