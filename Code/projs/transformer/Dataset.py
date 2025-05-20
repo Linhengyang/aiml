@@ -5,6 +5,7 @@ from ...Utils.Text.Tokenize import line_tokenize_greedy
 import torch
 import typing as t
 import re
+import random
 
 
 
@@ -46,27 +47,30 @@ def tokenize_seq2seqText(
         首先预处理翻译数据集, 然后将它分拆成 source 词元序列们 和 对应的target词元序列们
     """
     # 因为 src 和 tgt 之间由 \t 分隔, 行之间由 \n 分隔, 为了在 normalize 特殊空白字符后 保留 样本间以及样本内部的分隔符号, 故用特殊符号替换
-    assert '<#line_separator#>' not in raw_text, f'temp sample separator exists in raw text. change code'
-    assert '<#seq_separator#>' not in raw_text, f'temp feature/label separator exists in raw text. change code'
+    randint = random.randint(10000, 99999)
+    sample_sep, seq_sep = f'{randint}samplesep{randint}', f'{randint}datalabelsep{randint}'
+
+    assert sample_sep not in raw_text, f'temp sample separator exists in raw text.'
+    assert seq_sep not in raw_text, f'temp source/target sequence separator exists in raw text.'
     # 替换 \n 和 \t 以顺利 normalize 其他空白字符
-    raw_text = re.sub(sample_separator, '<#line_separator#>', raw_text) # 用 '<#line_separator#>' 替换原来的 sample_separator
-    raw_text = re.sub(srctgt_separator, '<#seq_separator#>', raw_text) # 用 '<#seq_separator#>' 替换原来的 srctgt_separator
+    raw_text = re.sub(sample_separator, sample_sep, raw_text) # 用新的 sample_sep 替换原来的 sample_separator
+    raw_text = re.sub(srctgt_separator, seq_sep, raw_text) # 用新的 seq_sep 替换原来的 srctgt_separator
 
     # 统一预处理: 替换不间断空格为单空格, trim首尾空格, 保证文字和 圈定的标点符号 之间有 单空格, normalize 空白 到 单空格
     text = preprocess_space(raw_text, need_lower=need_lower, separate_puncs=separate_puncs, normalize_whitespace=True)
 
     source, target = [], []
-    for i, line in enumerate(text.split('<#line_separator#>')): # 大文本按行分隔
+    for i, line in enumerate(text.split(sample_sep)): # 大文本按行分隔
         if (num_examples and i >= num_examples) or (line == ''): # 当有最大样本数限制, 且循环已经收集足够样本时, 抑或是读到空行时, 跳出循环
             break
         try:
-            src_sentence, tgt_sentence = line.split('<#seq_separator#>') # 每一行分成两部分, 前半是 source sentence，后半是 target sentence
+            src_sentence, tgt_sentence = line.split(seq_sep) # 每一行分成两部分, 前半是 source sentence，后半是 target sentence
             # source list append tokenized src_seq token list
             source.append( line_tokenize_greedy(src_sentence, src_glossary, UNK_token, flatten=True)[0] )
             # target list append tokenized src_seq token list
             target.append( line_tokenize_greedy(tgt_sentence, tgt_glossary, UNK_token, flatten=True)[0] )
         except ValueError:
-            raise ValueError(f"line {i+1} of text unpack wrong. line text as {line}")
+            raise ValueError(f"line {i+1} of text unpack wrong. line text as {line[:100]}")
 
     return source, target
 
