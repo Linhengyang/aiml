@@ -1,6 +1,6 @@
 # Math.py
 import math
-
+import numpy as np
 
 
 
@@ -17,3 +17,13 @@ def find_closet_2factors(N:int):
 
 
 
+def cosine_similarity(a, b):
+    # a, b: shape (L, )
+    dot_prod = np.dot(a, b)
+
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+
+    cosine_sim = dot_prod / (norm_a*norm_b)
+
+    return cosine_sim
