@@ -62,7 +62,7 @@ num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias = 2, 2, 128
 
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 10, 512, 0.00015
+num_epochs, batch_size, lr = 20, 512, 0.00015
 
 
 
@@ -220,3 +220,7 @@ def embed_job(saved_params_fpath, vocab_path):
     print('similarity for word "crane":', cosine_similarity(embd_output1[1], embd_output2[1]))
 
 
+
+
+def finetune_jon():
+    pass
