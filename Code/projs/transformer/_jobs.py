@@ -101,15 +101,12 @@ def prepare_job():
 
     eng_uniq_size = len( set(eng_corpus.split(' ')) )
     fra_uniq_size = len( set(fra_corpus.split(' ')) )
-
-    print(f'eng_uniq_size:{eng_uniq_size}\nfra_uniq_size:{fra_uniq_size}')
+    print(f'english unique word size:{eng_uniq_size} \n france unique word size:{fra_uniq_size}')
 
 
     # glossary
-
     # 当 eng_glossary_path 文件不存在时, 生产并保存 eng_glossary 到 glossary_dir/english.json
     eng_glossary_path = os.path.join(glossary_dir, 'english.json')
-
     if not os.path.exists(eng_glossary_path):
         # create english glossary
         eng_glossary = get_BPE_glossary(corpus = eng_corpus, EOW_token = "</w>", merge_times = 15000, save_path = eng_glossary_path)
@@ -117,14 +114,12 @@ def prepare_job():
 
     # 当 fra_glossary_path 文件不存在时, 生产并保存 fra_glossary 到 glossary_dir/france.json
     fra_glossary_path = os.path.join(glossary_dir, 'france.json')
-
     if not os.path.exists(fra_glossary_path):
         # create france glossary
         fra_glossary = get_BPE_glossary(corpus = fra_corpus, EOW_token = "</w>", merge_times = 25000, save_path = fra_glossary_path)
 
 
     # vocab
-
     # 当 eng_vocab_path 文件不存在时, 生产并保存 eng_vocab 到 vocab_dir/english.json
     eng_vocab_path = os.path.join(vocab_dir, 'english.json')
 
@@ -253,7 +248,6 @@ def infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path):
     # evaluate output
     # print('bleu score: ', translator.evaluate('je suis chez moi .'))
     print('bleu score: ', translator.evaluate('Entre dans la pièce, je te prie.'))
-    
     print('pred score: ', translator.pred_scores)
 
     print('infer job complete')
