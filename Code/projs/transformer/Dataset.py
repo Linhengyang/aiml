@@ -92,7 +92,7 @@ def tensorize_tokens(tokens, vocab, num_steps):
         map tokens of input lines into indices according to input vocab, and set the sequence length
         将输入的词元序列lines映射成数字序列, 并设定num_steps(sequence length)序列长度. 不足num_steps的pad, 超出的剪掉. 
     """
-    # id映射: lines 2D list, l & vocab[l] list. 在每个 line 末尾添加 vocab['<eos>']. 注意这里不能用append
+    # id映射: lines 2D list, l & vocab[l] list. 在每个 line 末尾添加 vocab['<eos>']. 注意这里不能用append, append 在 列表生成式里返回None
     tokens = [vocab[l] + [vocab['<eos>']] for l in tokens]
 
     # tensor化 truncate_pad 之后的token序列, 默认就是int64
