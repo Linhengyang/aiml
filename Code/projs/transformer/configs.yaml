@@ -22,10 +22,10 @@ eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accur
 
 
 # data-params
-full_data: '../../data/MachineTranslation/English2France/full.txt'
-train_data: '../../data/MachineTranslation/English2France/full.txt' # 使用 full data 来 train
-valid_data: '../../data/MachineTranslation/English2France/10.txt' # 使用 10% data 来 eval
-test_data: '../../data/MachineTranslation/English2France/5.txt' # 使用 5% data 来 test
+full_data: '../../data/WMT14/en-fr/167130.txt'
+train_data: '../../data/WMT14/en-fr/167130.txt' # 使用 full data 来 train
+valid_data: '../../data/WMT14/en-fr/16713.txt' # 使用 10% data 来 eval
+test_data: '../../data/WMT14/en-fr/8356.txt' # 使用 5% data 来 test
 
 num_steps: 20
 
