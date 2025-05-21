@@ -20,7 +20,7 @@ from ..System.Math import find_closet_2factors
 def display_images_with_labels(
         image_tensor: torch.Tensor,
         label_data: t.List|pd.DataFrame|None = None,
-        grid_number_row_col:t.Tuple[int]|None = None,
+        grid_number_row_col:t.Tuple[int, int]|None = None,
         ):
     """
     以 grid_number_row_col (p 行 q 列) 的网格形式展示图片Tensor image_tensor 及其对应的标签 label_data
@@ -37,9 +37,10 @@ def display_images_with_labels(
     num_channels = image_tensor.shape[1]
 
     # 检查标签（如果有）长度是否与图片数量匹配
-    if label_data and len(label_data) != N:
+    if label_data is not None and len(label_data) != N:
         raise ValueError(
-            f"the length of label data {len(label_data)} must match with image tensor {image_tensor.shape} on dimension 0"
+            f"the length of label data {len(label_data)} must match with number of images, \
+                which is {image_tensor.shape} on image tensor dimension 0"
             )
     
     # 创建一个 p x q 的 subplot 网格

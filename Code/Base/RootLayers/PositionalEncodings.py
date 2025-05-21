@@ -5,7 +5,7 @@ from torch import nn
 class TrigonoAbsPosEnc(nn.Module):
     '''
     args:
-        num_hiddens: the feature dimentions of input X, simply as d
+        num_hiddens: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
         position_ids: 1D tensors of int64, shall be inside [0, max_len-1]
@@ -48,27 +48,34 @@ class TrigonoAbsPosEnc(nn.Module):
 class LearnAbsPosEnc(nn.Module):
     '''
     args:
-        seq_len: the sequence length
-        num_hiddens: the feature dimentions of input X, simply as d
+        max_possible_posNum: how many possible 1D positions are there in total
+            e.g, if there are positions of 1,2,3,4,5 without 0, then max_possible_posNum = 5
+            e.g, if there are positioins of 1,2,3,4,5 but position 0 still exists, then max_possible_posNum = 6
+
+        For sequence data, max_possible_posNum can be 1 + sequence length if BOS should be considered
+
+        Given max_possible_posNum, the layer creates positions by using [0, 1, ..., max_possible_posNum-1] to index
+
+        num_hiddens: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
-        position_ids: 1D tensors of int64, shall be inside [0, seq_len]. 0 stands for <bos>
+        position_ids: 1D tensors of int64, shall be inside [0, max_possible_posNum-1]
     
-    returns: (1, len(position_ids), num_hiddens)learnable position embedding of position_ids
+    returns: (1, len(position_ids), num_hiddens) learnable position embedding of position_ids
 
     explains:
         The Learnable absolute positional encodes P shall be shared in different position encoding layers.
 
-        PosEnc with shape (1, seq_len+1, num_hiddens), whose elements are all learnable parameters. the +1 learnable is for <bos> position
+        PosEnc with shape (1, max_possible_posNum, num_hiddens), whose elements are all learnable parameters.
 
         Given input position_ids(int64), selected learnable positional encoding PosEnc with shape 
         (1, len(position_ids), num_hiddens) shall be added to every corresponding steps of data sample
     '''
-    def __init__(self, seq_len, num_hiddens):
+    def __init__(self, max_possible_posNum, num_hiddens):
         super().__init__()
-        self.register_parameter('PosEnc', nn.Parameter(torch.randn(1, seq_len+1, num_hiddens)))
+        self.register_parameter('PosEnc', nn.Parameter(torch.randn(1, max_possible_posNum, num_hiddens)))
 
     def forward(self, position_ids):
-        # position_ids: 1D tensors of int64, shall be inside [0, seq_len]
+        # position_ids: 1D tensors of int64, shall be inside [0, max_possible_posNum-1]
         
         return self.PosEnc[:, position_ids, :] # shape as (1, len(position_ids), num_hiddens)

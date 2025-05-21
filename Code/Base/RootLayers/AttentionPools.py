@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import math
-from ..Functions.Mask import mask_first_n_valid
+from ..Functions.Mask import mask_on_last_dim
 
 
 
@@ -40,13 +40,13 @@ from ..Functions.Mask import mask_first_n_valid
 
 def masked_softmax(S, valid_lens):
     '''
-    inputs: S, valid_lens
-        S: 3-Dtensor, shape: (batch_size, n_query, n_kv);
-        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_query)
-        (if len=0 in valid_lens, it means average all Vs in QKV pool)
+    inputs:
+        S: 3-Dtensor, shape: (batch_size, n_query, n_logits);
+        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_query) or None
     
-    returns: convex weight tensor with shape (batch_size, n_query, n_kv), denoted as W
+    returns: convex weight tensor with shape (batch_size, n_query, n_logits), denoted as W
         W[sample_idx, query_idx, :] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
+        对每个样本而言, 返回 n_query 个 凸组合权重
 
     explains:
         for sample i,
@@ -65,9 +65,13 @@ def masked_softmax(S, valid_lens):
 
     else:
         raise ValueError(f'wrong valid_lens')
-        
-    mask = mask_first_n_valid(S.shape, valid_lens) # mask shape: (batch_size, n_query, n_kv)
-    S[~mask] = -1e20 # non-valid 部分填入 负无穷, 这样在 softmax 操作中被消去. index-put操作梯度可传
+    
+    # valid 部分被 mask, 为 False; non-valid 部分不被 mask, 为 True
+    mask = mask_on_last_dim(tensor_shape=S.shape, mask_lens=valid_lens, mask_flag=False)
+
+    # mask tensor shape: (batch_size, n_query, n_kv)
+
+    S[mask] = -1e20 # non-valid 部分填入 负无穷, 这样在 softmax 操作中被消去. index-put操作梯度可传
 
     return nn.functional.softmax(S, dim=-1)
 
@@ -133,16 +137,17 @@ class ScaledDotProductAttention(nn.Module):
         dropout: dropout rate. Regularization on the attention weight matrices
     
     inputs: Q_batch, K_batch, V_batch, valid_lens(optional)
-        Q_batch's shape: (batch_size, n_queries, qk_size)
+        Q_batch's shape: (batch_size, n_query, qk_size)
         K_batch's shape: (batch_size, n_kvs, qk_size)
-        V_batch's shape: (batch_size, n_kvs, value_size)
-        valid_lens(optional)'s shape: (batch_size,) or (batch_size, n_queries)
+        V_batch's shape: (batch_size, n_kvs, v_size)
+        valid_lens(optional)'s shape: (batch_size,) or (batch_size, n_query)
     
     returns: denoted as O
-        O's shape: (batch_size, n_queries, value_size)
+        O's shape: (batch_size, n_query, v_size)
     
     explains:
-        returns W @ V where W is attention pool of (Q, K)
+        Q(batch_size, n_query, qk_size), K(batch_size, n_kvs, qk_size) --相似度计算--> W(batch_size, n_query, n_kvs)
+        
         Scaled Dot Production on queries and keys to attention pool for weight matrices W (batch_size, n_queries, n_kvs)
         Convex combinations of Values based on weight matrices are returned
     
@@ -166,9 +171,9 @@ class ScaledDotProductAttention(nn.Module):
         # Q: (batch_size, n_query, qk_size) @ K: (batch_size, n_kvs, qk_size) 转置 -> (batch_size, n_query, n_kvs)
         S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d) # 本质是 Q 和 K 的相似度计算
 
-        self.attention_weights = masked_softmax(S_batch, valid_lens) # 注意力权重shape (batch_size, n_queries, n_kvs)
+        self.attention_weights = masked_softmax(S_batch, valid_lens) # 注意力权重shape (batch_size, n_query, n_kvs)
 
-        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, value_size) ->  (batch_size, n_query, value_size) 
+        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, v_size) ->  (batch_size, n_query, v_size) 
         return torch.bmm( self.dropout(self.attention_weights), V_batch )
 
 

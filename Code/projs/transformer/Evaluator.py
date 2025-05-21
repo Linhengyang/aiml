@@ -5,7 +5,7 @@ import typing as t
 
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
-reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
+reveal_cnt_in_train, eval_cnt_in_train = configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
 
 
 class transformerEpochEvaluator(epochEvaluator):
@@ -98,7 +98,7 @@ class transformerEpochEvaluator(epochEvaluator):
 
         loss_avg, eval_loss_avg = None, None
 
-        # 若当前 epoch 需要 reveal train, 停止计时, reveal累加器二位(train loss, num_tokens)
+        # 若当前 epoch 需要 reveal train, 停止计时, reveal 累加器二位(train loss, num_tokens)
         if self.reveal_flag:
             # reveal_accumulator: loss, num_valid_tokens
 
@@ -121,7 +121,7 @@ class transformerEpochEvaluator(epochEvaluator):
                 print(reveal_log)
         
         
-        # 若当前 epoch 需要 evaluate model, reveal累加器二位(validation loss, num_tokens)
+        # 若当前 epoch 需要 evaluate model, eval 累加器二位(validation loss, num_tokens)
         if self.eval_flag:
             # eval_accumulator: loss, num_valid_tokens
 

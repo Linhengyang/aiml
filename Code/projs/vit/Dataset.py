@@ -1,9 +1,8 @@
 import torch
 import torchvision
 from torchvision import transforms
-import numpy as np
-import struct
-from torch import Tensor
+from ...Utils.Image.MNIST import decode_idx3_ubyte, decode_idx1_ubyte
+
 
 
 class FMNISTDatasetOnline(torch.utils.data.Dataset):
@@ -25,54 +24,6 @@ class FMNISTDatasetOnline(torch.utils.data.Dataset):
 
 
 
-def decode_idx3_ubyte(file) -> Tensor:
-    '''
-    解析idx3数据文件: 图像, 返回(num_examples, 1, 28, 28)float的tensor
-    '''
-    # 读取二进制数据
-    with open(file, 'rb') as fp:
-        bin_data = fp.read()
-    # 解析文件中的头信息. 从文件头部依次读取四个32位, 分别为: magic_num, numImgs, numRows, numCols(没有numChannels)
-    # 偏置
-    offset = 0
-    # 读取格式: 大端
-    fmt_header = '>iiii'
-    magic_num, numImgs, numRows, numCols = struct.unpack_from(fmt_header, bin_data, offset)
-    print('reading file ', file, ' with magic ', magic_num, ' image number ', numImgs)
-    # 解析图片数据
-    # 偏置掉头文件信息
-    offset = struct.calcsize(fmt_header)
-    # 读取格式
-    fmt_image = '>'+str(numImgs*numRows*numCols)+'B'
-    data = torch.tensor(struct.unpack_from(fmt_image, bin_data, offset)).reshape(numImgs, 1, numRows, numCols)
-
-    return data
-
-
-
-def decode_idx1_ubyte(file) -> Tensor:
-    """
-    解析idx1数据文件: 标签, 返回(num_examples, )int64的tensor
-    """
-    # 读取二进制数据
-    with open(file, 'rb') as fp:
-        bin_data = fp.read()
-    # 解析文件中的头信息. 从文件头部依次读取两个个32位，分别为: magic，numImgs
-    # 偏置
-    offset = 0
-    # 读取格式: 大端
-    fmt_header = '>ii'
-    magic_num, numImgs = struct.unpack_from(fmt_header, bin_data, offset)
-    print('reading file ', file, ' with magic ', magic_num, ' image number ', numImgs)
-    # 解析图片数据
-    # 偏置掉头文件信息
-    offset = struct.calcsize(fmt_header)
-    # 读取格式
-    fmt_image = '>'+str(numImgs)+'B'
-    data = torch.tensor(struct.unpack_from(fmt_image, bin_data, offset))
-    
-    return data
-
 
 
 class FMNISTDatasetLocal(torch.utils.data.Dataset):
@@ -82,7 +33,7 @@ class FMNISTDatasetLocal(torch.utils.data.Dataset):
         self._labelTensor = decode_idx1_ubyte(imglabel_fpath).type(torch.int64) #shape: (numImgs, )
         self._img_shape = self._imgTensor.shape[1:]
         
-        assert self._imgTensor.size(0) == self._labelTensor.size(0), 'sample size mismatch'
+        assert self._imgTensor.size(0) == self._labelTensor.size(0), 'image data & label sample size mismatch'
     
     def __getitem__(self, index):
         return (self._imgTensor[index], self._labelTensor[index])

@@ -1,4 +1,5 @@
 import numbers
+import torch
 from torch import nn
 from ..Functions.PatchOperation import patchify, calc_patchifed_sizes
 
@@ -42,8 +43,9 @@ class Patchify(nn.Module):
 
 
     def forward(self, img_batch):
-        # 确保 img_batch 的 shape 和 参数 img_shape 相同
-        assert img_batch.shape[1:] == self.img_shape, \
+        # 确保 img_batch 的 shape 和 参数 img_shape 相同. 
+        # 这里 img_batch 作为 tensor, .shape 返回 torch.Size dtype. 但是 self.img_shape 可能是 list/tuple 等
+        assert img_batch.shape[1:] == torch.Size(self.img_shape), \
             f"image batch shape {img_batch.shape[1:]} not match with argument img_shape {self.img_shape}"
         
         return patchify(img_batch, self._patch_size, self.pad_mode, self.pad_value)

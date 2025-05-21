@@ -6,6 +6,8 @@ import torch
 from torch import Tensor
 import typing as t
 
+
+
 class Timer:  #@save
     """Record multiple running times."""
     def __init__(self):
@@ -79,6 +81,8 @@ class epochEvaluator(object):
         raise NotImplementedError
 
 
+
+
 def metric_summary(
         values, 
         metric_names:t.List[str], 
@@ -136,7 +140,7 @@ def bleu(pred_seq, label_seq, k):
 
 
 
-def accuracy(y_hat: Tensor, y: Tensor):
+def accuracy(y_hat: Tensor, y: Tensor) -> float:
     """
     计算预测正确的数量, 类似nn.CrossEntropyLoss
     y_hat: (batch_size, num_classes, positions(optional)), elements是logit或softmax后的Cond Prob
@@ -165,6 +169,10 @@ def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
     cmp = (y_hat > threshold).type(y.dtype) == y
     return float(cmp.type(y.dtype).sum())
 
+
+
+
+
 # 二分类问题的四种预测结果
 # True Positive: 正确地判别成1, 即Truth为1的元素, 预测为1
 # False Negative: 错误地判别成0, 即Truth为1的元素, 预测为0
@@ -187,6 +195,7 @@ def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
     FP = binary_accuracy(y_hat[~truth_p_mask], 1-y[~truth_p_mask], threshold)
     assert TP + FN == y[truth_p_mask].numel()
     assert TN + FP == y[~truth_p_mask].numel()
+
     return {'TP':TP, 'FN':FN, 'TN':TN, 'FP':FP}
 
 

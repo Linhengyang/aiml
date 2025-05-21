@@ -1,9 +1,12 @@
 import torch
+import typing as t
+import pandas as pd
+import random
 from torch import nn
 from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import accuracy
-from .Dataset import decode_idx3_ubyte, decode_idx1_ubyte
 from ...Utils.Image.Display import display_images_with_labels
+from ...Utils.Image.MNIST import decode_idx3_ubyte, decode_idx1_ubyte
 
 
 
@@ -24,10 +27,10 @@ def imageTensor_batch_predict(net, imgTensor_batch, device):
         Y_hat = net(input_tensor) # Y_hat shape:(batch_size, num_classes)
         pred_result = nn.Softmax(dim=1)(Y_hat).max(dim=1)
     
-    pred_indices, pred_scores = pred_result.indices.tolist(), pred_result.values.tolist()
+    pred_classes, pred_scores = pred_result.indices.tolist(), pred_result.values.tolist()
 
     # return [pred_cls1, .., pred_clsN], [pred_score1, .., pred_scoreN]
-    return pred_indices, pred_scores
+    return pred_classes, pred_scores
 
 
 
@@ -49,26 +52,64 @@ class fmnistClassifier(easyPredictor):
         self.net = net
 
 
-    def predict(self, imgdata_fpath):
-        input = decode_idx3_ubyte(imgdata_fpath).type(torch.float32) #tensor shape:(numImgs, 1, numRows, numCols)
 
-        # pred_indices: list of int, pred_scores: list of float
-        self.pred_indices, self._pred_scores = self.pred_fn(self.net, input, self.device)
+    def predict(self, imgdata_fpath, select_size, view=False):
 
-        pred_labels = [ self.classes[i] for i in self.pred_indices ]
+        sample_imgTensor = decode_idx3_ubyte(imgdata_fpath).type(torch.float32) # tensor shape:(numImgs, 1, numRows, numCols)
 
-        display_images_with_labels(input, pred_labels)
+        sample_size = sample_imgTensor.size(0)
+
+        assert select_size <= sample_size, \
+            f'select number to predict must be no larger than total sample size.\
+              now select size {select_size} exceeds sample size {sample_size}'
+        
+
+        # 随机选择 select_size 张图片tensor
+        sample_indices = list(range(sample_size))
+        random.shuffle(sample_indices)
+
+        self._select_indices = sample_indices[:select_size] # tensor shape:(select_size,)
+        self._input_imgTensor = sample_imgTensor[self._select_indices] # tensor shape:(select_size, 1, numRows, numCols)
+
+
+
+        # pred_indices: list of int, pred_scores: list of float   both with length select_size
+        self.pred_classes, self._pred_scores = self.pred_fn(self.net, self._input_imgTensor, self.device)
+
+        pred_labels = [ self.classes[i] for i in self.pred_classes ]
+        
+        if view:
+            print("display prediction")
+            display_images_with_labels(self._input_imgTensor, pred_labels)
     
 
-    def evaluate(self, imglabel_fpath):
-        assert hasattr(self, 'pred_indices'), f'predicted class indices not found'
 
-        truths = decode_idx1_ubyte(imglabel_fpath).type(torch.int64) #tensor shape: (numImgs, )
-        preds = torch.tensor( self.pred_indices, dtype=torch.int64 ) #tensor shape: (numImgs, )
+    def evaluate(self, imglabel_fpath, view=True):
+        assert hasattr(self, 'pred_classes'), f'predicted class not found'
 
-        return self.eval_fn(preds, truths) / truths.size(0)
+        sample_clsTensor = decode_idx1_ubyte(imglabel_fpath).type(torch.int64) # tensor shape: (numImgs, )
+        input_imgclsTensor = sample_clsTensor[self._select_indices] # tensor shape: (select_size, )
+
+        pred_imgclsTensor = torch.tensor( self.pred_classes, dtype=torch.int64 ) # tensor shape: (select_size, )
+
+        if view:
+            print("display evaluation")
+            truth_labels = [ self.classes[i] for i in input_imgclsTensor ]
+            pred_labels = [ self.classes[i] for i in pred_imgclsTensor ]
+            correct = [p == t for p, t in zip(truth_labels, pred_labels)]
+
+            legend_df = pd.DataFrame({'pred':pred_labels, 'truth':truth_labels, 'is_right':correct})
+
+            display_images_with_labels(self._input_imgTensor, legend_df)
+
+
+        return self.eval_fn(pred_imgclsTensor, input_imgclsTensor) / input_imgclsTensor.size(0)
+    
+
+
+
 
 
     @property
-    def pred_scores(self):
+    def pred_scores(self) -> t.List[float]:
         return self._pred_scores

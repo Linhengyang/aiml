@@ -52,8 +52,9 @@ class vitTrainer(easyTrainer):
         
         def move_to_cuda(batch_list):
             data_batch, label_batch = default_collate(batch_list)
-            data_batch.to(self.device)
-            label_batch.to(self.device)
+            data_batch = data_batch.to(self.device)
+            label_batch = label_batch.to(self.device)
+
             return data_batch, label_batch
         
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=move_to_cuda)

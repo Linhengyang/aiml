@@ -2,15 +2,16 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
+import typing as t
 from .Dataset import seq2seqDataset
 from .Network import TransformerEncoder, TransformerDecoder, Transformer
-from ...Loss.MaskedCELoss import MaskedSoftmaxCELoss
+from ...Loss.MaskedCELoss import MaskedCrossEntropyLoss
 from .Trainer import transformerTrainer
 from .Evaluator import transformerEpochEvaluator
 from .Predictor import sentenceTranslator
 import yaml
-import json
-from ...Utils.Text.BytePairEncoding import get_BPE_symbols
+from ...Utils.Text.Vocabulize import Vocab
+from ...Utils.Text.BytePairEncoding import get_BPE_glossary
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -18,19 +19,23 @@ configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=ya
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
 
 ################## symbols and vocabs in workspace/cache ##################
-symbols_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'symbols' )
-vocabs_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'vocabs' )
+glossary_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'glossary' )
+vocab_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'vocab' )
 
-# directories for vocabs
-src_vocab_dir = os.path.join(vocabs_dir, 'source')
-tgt_vocab_dir = os.path.join(vocabs_dir, 'target')
+
 
 ################## params saved in workspace/model ##################
-model_proj_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
+model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
+
 
 
 ################## log file in workspace/logs ##################
-log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
+log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
+
+
+
+
+
 
 
 
@@ -68,25 +73,24 @@ num_epochs, batch_size, lr = 5, 512, 0.00005
 
 
 
-# 生产 source corpus 和 target corpus 的symbols
+# 生产 source corpus 和 target corpus 的 glossary/vocab
 def prepare_job():
     print('prepare job begin')
 
     # create all related directories if not existed
-    for dir_name in [symbols_dir, vocabs_dir, src_vocab_dir, tgt_vocab_dir, model_proj_dir, log_proj_dir]:
+    for dir_name in [glossary_dir, vocab_dir, model_dir, log_dir]:
         os.makedirs(dir_name, exist_ok=True)
         print(f'directory {dir_name} created')
 
-    # generate symbols of source/target language and save them
+    # generate glossary of source/target language and save them
 
     # 读取全部语料 corpus
     with open(configs['full_data'], 'r', encoding='utf-8') as f:
         full_data = f.readlines() # full_data 中存在 \t \n 等其他空白符
 
     # 分割成 english 和 france. 
-    # 由于本次任务对 source language 和 target language 采用 分开独立的词汇表 和 嵌入空间, 故 BPE 生成 symbols 也是独立的
+    # 由于本次任务对 source / target language 采用 分开独立的词汇表 和 嵌入空间, 故 BPE 生成 glossary 也是独立的
     eng_corpus, fra_corpus = [], []
-
     for line in full_data:
         eng_sentence, fra_sentence = line.split('\t')
         eng_corpus.append(eng_sentence)
@@ -97,108 +101,86 @@ def prepare_job():
 
     eng_uniq_size = len( set(eng_corpus.split(' ')) )
     fra_uniq_size = len( set(fra_corpus.split(' ')) )
+    print(f'english unique word size:{eng_uniq_size} \n france unique word size:{fra_uniq_size}')
 
-    print(f'eng_uniq_size:{eng_uniq_size}\nfra_uniq_size:{fra_uniq_size}')
 
-    # 当 eng_symbols_path 文件不存在时, 生产并保存 eng_symbols 到 symbols_dir/source.json
-    eng_symbols_path = os.path.join(symbols_dir, 'source.json')
-    if not os.path.exists(eng_symbols_path):
-        # create symbols
-        eng_symbols = get_BPE_symbols(
-            text = eng_corpus,
-            tail_token = "</w>",
-            merge_times = 15000,
-            need_lower = True,
-            separate_puncs = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-            normalize_whitespace = True,
-            )
-        with open(eng_symbols_path, 'w') as f:
-            json.dump(eng_symbols, f)
+    # glossary
+    # 当 eng_glossary_path 文件不存在时, 生产并保存 eng_glossary 到 glossary_dir/english.json
+    eng_glossary_path = os.path.join(glossary_dir, 'english.json')
+    if not os.path.exists(eng_glossary_path):
+        # create english glossary
+        eng_glossary = get_BPE_glossary(corpus = eng_corpus, EOW_token = "</w>", merge_times = 15000, save_path = eng_glossary_path)
+    
 
-    # 当 fra_symbols_path 文件不存在时, 生产并保存 fra_symbols 到 symbols_dir/target.json
-    fra_symbols_path = os.path.join(symbols_dir, 'target.json')
+    # 当 fra_glossary_path 文件不存在时, 生产并保存 fra_glossary 到 glossary_dir/france.json
+    fra_glossary_path = os.path.join(glossary_dir, 'france.json')
+    if not os.path.exists(fra_glossary_path):
+        # create france glossary
+        fra_glossary = get_BPE_glossary(corpus = fra_corpus, EOW_token = "</w>", merge_times = 25000, save_path = fra_glossary_path)
 
-    if not os.path.exists(fra_symbols_path):
-        # create france symbols
-        fra_symbols = get_BPE_symbols(
-            text = fra_corpus,
-            tail_token = "</w>",
-            merge_times = 25000,
-            need_lower = True,
-            separate_puncs = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-            normalize_whitespace = True,
-            )
-        
-        with open(fra_symbols_path, 'w') as f:
-            json.dump(fra_symbols, f)
+
+    # vocab
+    # 当 eng_vocab_path 文件不存在时, 生产并保存 eng_vocab 到 vocab_dir/english.json
+    eng_vocab_path = os.path.join(vocab_dir, 'english.json')
+
+    if not os.path.exists(eng_vocab_path):
+        eng_vocab = Vocab(corpus=eng_corpus, glossary=eng_glossary, need_lower=True, reserved_tokens=['<pad>', '<bos>', '<eos>'],
+                          unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
+        eng_vocab.save(eng_vocab_path)
+    
+
+    # 当 fra_vocab_path 文件不存在时, 生产并保存 fra_vocab 到 vocab_dir/france.json
+    fra_vocab_path = os.path.join(vocab_dir, 'france.json')
+
+    if not os.path.exists(fra_vocab_path):
+        fra_vocab = Vocab(corpus=fra_corpus, glossary=fra_glossary, need_lower=True, reserved_tokens=['<pad>', '<bos>', '<eos>'],
+                          unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
+        fra_vocab.save(fra_vocab_path)
+
 
     print('prepare job complete')
-
-    return eng_symbols_path, fra_symbols_path
-
+    return eng_vocab_path, fra_vocab_path
 
 
 
 
-def train_job(src_symbols_path, tgt_symbols_path):
+
+def train_job(eng_vocab_path, fra_vocab_path):
     print('train job begin')
     # [timetag]
     from datetime import datetime
     now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
 
     # /workspace/logs/[proj_name]/train_log_[timetag].txt, defined_net_[timetag].txt
-    train_logs_fpath = os.path.join( log_proj_dir, f'train_log_{now_minute}.txt' )
-    defined_net_fpath = os.path.join( log_proj_dir, f'defined_net_{now_minute}.txt' )
+    train_logs_fpath = os.path.join( log_dir, f'train_log_{now_minute}.txt' )
+    defined_net_fpath = os.path.join( log_dir, f'defined_net_{now_minute}.txt' )
 
     # /workspace/model/[proj_name]/saved_params[timetag].params
-    saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.pth' )
+    saved_params_fpath = os.path.join( model_dir, f'saved_params_{now_minute}.pth' )
 
-    # build datasets
-    # full_dataset as trainset
-
-    # read source and target symbols
-    with open(src_symbols_path, 'r') as f:
-        eng_symbols = json.load( f )
-    with open(tgt_symbols_path, 'r') as f:
-        fra_symbols = json.load( f )
-
-    # 输入 EOW_token="</w>", 和 src_symbols/tgt_symbols, 说明使用 Byte-Pair-encoding 的方式来 tokenize sentence
-    full_dataset = seq2seqDataset(configs['full_data'], num_steps=num_steps, EOW_token="</w>",
-                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
-    
-    # validset & testset
-    valid_dataset = seq2seqDataset(configs['valid_data'], num_steps=num_steps, EOW_token="</w>",
-                                   src_symbols=eng_symbols, tgt_symbols=fra_symbols)
-    
-    test_dataset = seq2seqDataset(configs['test_data'], num_steps=num_steps, EOW_token="</w>",
-                                  src_symbols=eng_symbols, tgt_symbols=fra_symbols)
-    # release memory
-    del eng_symbols, fra_symbols
-
-    # save source and target vocabs
-    src_vocab = full_dataset.src_vocab
-    tgt_vocab = full_dataset.tgt_vocab
-
-    # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
-    src_vocab.save( src_vocab_dir )
-    # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json
-    tgt_vocab.save( tgt_vocab_dir )
+    trainset = seq2seqDataset(text_path=configs['train_data'], num_steps=num_steps,
+                              src_vocab_path=eng_vocab_path, tgt_vocab_path=fra_vocab_path)
+    validset = seq2seqDataset(text_path=configs['valid_data'], num_steps=num_steps,
+                              src_vocab_path=eng_vocab_path, tgt_vocab_path=fra_vocab_path)
+    testset = seq2seqDataset(text_path=configs['test_data'], num_steps=num_steps,
+                             src_vocab_path=eng_vocab_path, tgt_vocab_path=fra_vocab_path)
 
     # design net & loss
-    test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
+    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
+                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     
-    transenc = TransformerEncoder(vocab_size=len(src_vocab), **test_args)
-    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
+    src_vocab_size, tgt_vocab_size = len(trainset.src_vocab), len(trainset.tgt_vocab)
+    transenc = TransformerEncoder(vocab_size=src_vocab_size, **net_args)
+    transdec = TransformerDecoder(vocab_size=tgt_vocab_size, **net_args)
 
     net = Transformer(transenc, transdec)
-    loss = MaskedSoftmaxCELoss()
+    loss = MaskedCrossEntropyLoss()
 
     # init trainer
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
 
     trainer.set_device(torch.device('cuda')) # set the device
-    trainer.set_data_iter(full_dataset, valid_dataset, test_dataset) # set the data iters
+    trainer.set_data_iter(trainset, validset, testset) # set the data iters
     trainer.set_optimizer(lr) # set the optimizer
     trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
     trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True)) # set the epoch evaluator
@@ -225,28 +207,25 @@ def train_job(src_symbols_path, tgt_symbols_path):
 
 
 
-def infer_job(saved_params_fpath, src_symbols_path):
+def infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path):
     print('infer job begin')
 
     # load vocabs
-    from ...Utils.Text.Vocabulize import Vocab
     src_vocab, tgt_vocab = Vocab(), Vocab()
 
     # source and target language vocabs
-    # /workspace/cache/[proj_name]/vocabs/source/idx2token.json, token2idx.json
-    src_vocab.load( src_vocab_dir )
-    # /workspace/cache/[proj_name]/vocabs/target/idx2token.json, token2idx.json
-    tgt_vocab.load( tgt_vocab_dir )
+    src_vocab.load( eng_vocab_path )
+    tgt_vocab.load( fra_vocab_path )
 
     # set device
     device = torch.device('cuda')
 
     # construct model
-    test_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
+    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
+                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blk}
     
-    transenc = TransformerEncoder(vocab_size=len(src_vocab), **test_args)
-    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **test_args)
+    transenc = TransformerEncoder(vocab_size=len(src_vocab), **net_args)
+    transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **net_args)
     net = Transformer(transenc, transdec)
 
     # load params
@@ -263,13 +242,12 @@ def infer_job(saved_params_fpath, src_symbols_path):
 
     # predict
     # src_sentence = 'i\'m home .'
-    src_sentence = 'Please come into the room.'
-    print(translator.predict(src_sentence, src_symbols_path, '</w>'))
+    src_sentence = 'Who forced you to do that?'
+    print(translator.predict(src_sentence))
 
     # evaluate output
     # print('bleu score: ', translator.evaluate('je suis chez moi .'))
-    print('bleu score: ', translator.evaluate('Entre dans la pièce, je te prie.'))
-    
+    print('bleu score: ', translator.evaluate('Qui vous a forcée à faire cela ?'))
     print('pred score: ', translator.pred_scores)
 
     print('infer job complete')

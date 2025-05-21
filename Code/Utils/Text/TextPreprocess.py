@@ -6,10 +6,10 @@ import re
 
 
 
-def count_corpus(sentences: t.List[list]|t.List[str]) -> t.Dict:
+def count_corpus(sentences: list|tuple|set) -> t.Dict:
     '''
-    inputs: sentence/s of tokens
-        sentences can be 1D list or 2D list with basic elements as tokens
+    inputs: nested container of tokens
+        sentences can be nested container with basic elements as tokens
 
     returns: A dictionary, denoted as D
         keys are tokens(words, chars) and values are frequencies
@@ -17,11 +17,18 @@ def count_corpus(sentences: t.List[list]|t.List[str]) -> t.Dict:
     explains:
         Count token frequencies 
     '''
-    # flatten the 2D list
-    if len(sentences) == 0 or isinstance(sentences[0], list):
-        sentences = [token for line in sentences for token in line]
 
-    return collections.Counter(sentences)
+    def flatten(lst):
+        for item in lst:
+            if isinstance(item, (list, tuple, set)):
+                yield from flatten(item)
+            else:
+                yield item
+    
+    # flatten
+    tokens = list( flatten(sentences) )
+    
+    return collections.Counter(tokens)
 
 
 
@@ -130,7 +137,7 @@ def attach_EOW_token(
     '''
     inputs:
         text: string
-        eow_tok: 该 end-of-word token 将被插入到每个 单空格之前
+        eow_tok: 该 end-of-word token 将被插入到每个 单空格之前. eow_tok 可以是空字符, 这样 输入输出 text 不变
 
     returns:
         whose spaces are normal single space ' ', and every space has append_punc append before it
@@ -149,12 +156,16 @@ def attach_EOW_token(
 
 def text_atomize(text, reserved_combos:t.List[str]=[], uniq=False) -> t.List[str]:
     '''
-    按顺序分割字符串到不可分割字符（保留reserved_combos里的组合不拆分，其他拆分成单个字符）
+    按顺序分割字符串到不可分割字符(保留 reserved_combos 里的组合不拆分, 其他拆分成单个字符)
     reserved_combos里可以有正则表达式.
     返回list
     '''
-    # 如果 reserved_combos 为空, 那么就是不需要保留组合，直接返回 list(text)
+    # 如果 reserved_combos 为空, 那么就是不需要保留组合，直接 用 set/list 返回原子化结果
     if not reserved_combos:
+
+        if uniq: # 如果需要 unique
+            return list( set(text) )
+        
         return list(text)
     
     rsvd_tokn_pattern = "(" + "|".join(reserved_combos) + ")" # (<unk>|...|<eos>)
