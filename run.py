@@ -1,12 +1,13 @@
 # run some simple scripts
 import pandas as pd
 
-wikitext2 = '../../data/WikiText2/test2.parquet'
+wikitext2 = '../../data/WikiText2/raw/test-00000-of-00001.parquet'
+
 
 try:
     df = pd.read_parquet(wikitext2)
     print("Successfully read Parquet file:")
-    print(df.head())
+    print(df.head()['text'].tolist()[3])
     print(f"\nDataFrame shape: {df.shape}")
     print(f"\nDataFrame columns: {df.columns.tolist()}")
 
@@ -14,3 +15,5 @@ except FileNotFoundError:
     print(f"Error: The file '{wikitext2}' was not found.")
 except Exception as e:
     print(f"An error occurred: {e}")
+
+

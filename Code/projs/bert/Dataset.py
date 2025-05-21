@@ -1,6 +1,7 @@
 import torch
 import random
 import copy
+import pandas as pd
 from ...Utils.Text.Vocabulize import Vocab
 from ...Utils.Text.Tokenize import line_tokenize_greedy
 from ...Utils.Common.SeqOperation import truncate_pad
@@ -8,12 +9,13 @@ from ...Utils.Common.SeqOperation import truncate_pad
 
 
 
-def _read_shuffle(fpath):
+def _read_shuffle(parquet_fpath):
 
-    with open(fpath, 'r') as f:
-        lines = f.readlines() # list of strings. each string is several sentences(joined by ' . '), that is a paragraph
+    df = pd.read_parquet(parquet_fpath)
+    
+    lines = df['text'].tolist() # list of strings. each string maybe several sentences(joined by ' . '), that is a paragraph
 
-    # 2-D list. lists of list of at least 2 sentences.
+    # 2-D list. lists of list of at least 2 sentences(filter)
     corpus = [line.strip().lower().split(' . ') for line in lines if ' . ' in line]
     random.shuffle(corpus) # 段落之间打乱
 

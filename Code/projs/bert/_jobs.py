@@ -3,6 +3,7 @@ import warnings
 warnings.filterwarnings("ignore")
 import torch
 import typing as t
+import pandas as pd
 from .Dataset import wikitextDataset
 from .Network import BERT, BERTLoss
 from .Trainer import bertPreTrainer
@@ -92,8 +93,13 @@ def prepare_job():
     # not use BPE
 
     # 读取全部语料 corpus
-    with open(configs['full_data'], 'r', encoding='utf-8') as f:
-        corpus = f.read() # corpus 中存在 \t \n 等其他空白符
+    train_df = pd.read_parquet(configs['train_data'])
+    valid_df = pd.read_parquet(configs['valid_data'])
+    test_df = pd.read_parquet(configs['test_data'])
+    full_df = pd.concat([train_df, valid_df, test_df], ignore_index=True)
+    del train_df, valid_df, test_df
+    
+    corpus = ' '.join( full_df['text'].tolist() )
 
     uniq_size = len( set(corpus.split(' ')) )
     print(f'unique word size:{uniq_size}')
