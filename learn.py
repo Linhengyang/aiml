@@ -8,8 +8,8 @@ import math
 
 if __name__ == "__main__":
     # base_path = "../../data"
-    # proj_folder = "text_translator/fra-eng"
-    # data_file = "fra.txt"
+    # proj_folder = "WMT14/en-fr"
+    # data_file = "167130.txt"
 
     # fname = os.path.join(base_path, proj_folder, data_file)
     # print(fname)
