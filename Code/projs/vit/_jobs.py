@@ -19,18 +19,18 @@ configs = yaml.load(open('Code/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullL
 
 ################## image arguments in workspace/cache ##################
 # json file for image data arguments
-cache_proj_dir = os.path.join( configs['cache_dir'], configs['proj_name'] )
-image_args = os.path.join( cache_proj_dir, 'image_args.json' )
+cache_dir = os.path.join( configs['cache_dir'], configs['proj_name'] )
+image_args = os.path.join( cache_dir, 'image_args.json' )
 
 
 
 ################## params saved in workspace/model ##################
-model_proj_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
+model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 
 
 
 ################## log file in workspace/logs ##################
-log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
+log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
 
 
@@ -67,7 +67,7 @@ def prepare_job():
     print('prepare job begin')
 
     # create all related directories if not existed
-    for dir_name in [cache_proj_dir, model_proj_dir, log_proj_dir]:
+    for dir_name in [cache_dir, model_dir, log_dir]:
         os.makedirs(dir_name, exist_ok=True)
         print(f'directory {dir_name} created')
 
@@ -84,11 +84,11 @@ def train_job(data_source):
     now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
 
     # /workspace/logs/[proj_name]/train_log_[timetag].txt, defined_net_[timetag].txt
-    train_logs_fpath = os.path.join( log_proj_dir, f'train_log_{now_minute}.txt' )
-    defined_net_fpath = os.path.join( log_proj_dir, f'defined_net_{now_minute}.txt' )
+    train_logs_fpath = os.path.join( log_dir, f'train_log_{now_minute}.txt' )
+    defined_net_fpath = os.path.join( log_dir, f'defined_net_{now_minute}.txt' )
 
     # /workspace/model/[proj_name]/saved_params[timetag].params
-    saved_params_fpath = os.path.join( model_proj_dir, f'saved_params_{now_minute}.pth' )
+    saved_params_fpath = os.path.join( model_dir, f'saved_params_{now_minute}.pth' )
 
     
     # # build datasets

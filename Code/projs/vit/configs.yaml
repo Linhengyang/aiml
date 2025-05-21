@@ -23,15 +23,15 @@ eval_cnt_in_train: 3 # 训练过程中模型衡量次数. valid loss/valid accur
 
 
 # data-params
-train_data: '../../data/FashionMNIST/raw/train-images-idx3-ubyte'
-train_label: '../../data/FashionMNIST/raw/train-labels-idx1-ubyte'
-valid_data: '../../data/FashionMNIST/raw/t10k-images-idx3-ubyte'
-valid_label: '../../data/FashionMNIST/raw/t10k-labels-idx1-ubyte'
-test_data: '../../data/FashionMNIST/raw/t10k-images-idx3-ubyte'
-test_label: '../../data/FashionMNIST/raw/t10k-labels-idx1-ubyte'
+train_data: '../../data/test/image/FashionMNIST/raw/train-images-idx3-ubyte'
+train_label: '../../data/test/image/FashionMNIST/raw/train-labels-idx1-ubyte'
+valid_data: '../../data/test/image/FashionMNIST/raw/t10k-images-idx3-ubyte'
+valid_label: '../../data/test/image/FashionMNIST/raw/t10k-labels-idx1-ubyte'
+test_data: '../../data/test/image/FashionMNIST/raw/t10k-images-idx3-ubyte'
+test_label: '../../data/test/image/FashionMNIST/raw/t10k-labels-idx1-ubyte'
 
 
-fmnist_data_dir: '../../data/FashionMNIST'
+fmnist_data_dir: '../../data/test/image/FashionMNIST/download'
 
 
 
