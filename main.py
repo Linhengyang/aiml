@@ -3,18 +3,28 @@ import warnings
 warnings.filterwarnings("ignore")
 
 if __name__ == "__main__":
+    # bert
 
-    # transformer
-
-    from Code.projs.transformer._jobs import prepare_job, train_job, infer_job
-    eng_vocab_path, fra_vocab_path = prepare_job()
+    from Code.projs.bert._jobs import prepare_job, pretrain_job, embed_job
+    vocab_path = prepare_job()
 
     # saved_params_fpath = train_job(eng_vocab_path, fra_vocab_path)
-    saved_params_fpath = "../model/text_translator/saved_params_2025-05-20_14:10.pth"
+    # saved_params_fpath = "../model/text_translator/saved_params_2025-05-20_14:10.pth"
+    print(vocab_path)
 
-    infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path)
+    # bert tested
 
-    # transformer tested
+    # # transformer
+
+    # from Code.projs.transformer._jobs import prepare_job, train_job, infer_job
+    # eng_vocab_path, fra_vocab_path = prepare_job()
+
+    # # saved_params_fpath = train_job(eng_vocab_path, fra_vocab_path)
+    # saved_params_fpath = "../model/text_translator/saved_params_2025-05-20_14:10.pth"
+
+    # infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path)
+
+    # # transformer tested
 
     ###########################################################
 
