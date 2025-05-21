@@ -5,8 +5,8 @@ import random
 from torch import nn
 from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import accuracy
-from .Dataset import decode_idx3_ubyte, decode_idx1_ubyte
 from ...Utils.Image.Display import display_images_with_labels
+from ...Utils.Image.MNIST import decode_idx3_ubyte, decode_idx1_ubyte
 
 
 
