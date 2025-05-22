@@ -26,9 +26,9 @@ eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accur
 
 
 # data-params
-train_data: '../../data/WikiText2/raw/train-00000-of-00001.parquet'
-valid_data: '../../data/WikiText2/raw/validation-00000-of-00001.parquet'
-test_data: '../../data/WikiText2/raw/test-00000-of-00001.parquet'
+train_data: '../../data/WikiText2/raw/train.parquet'
+valid_data: '../../data/WikiText2/raw/validation.parquet'
+test_data: '../../data/WikiText2/raw/test.parquet'
 
 max_len: 64
 
