@@ -9,7 +9,7 @@ resource = '../../resource/'
 
 
 
-from datasets import load_dataset
+from datasets import load_dataset # type: ignore
 
 wikitext2 = '../../data/WikiText2/raw/'
 
