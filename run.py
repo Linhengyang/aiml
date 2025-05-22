@@ -1,19 +1,24 @@
 # run some simple scripts
 import pandas as pd
+import os
+resource = '../../resource/'
 
-wikitext2 = '../../data/WikiText2/raw/test-00000-of-00001.parquet'
 
 
-try:
-    df = pd.read_parquet(wikitext2)
-    print("Successfully read Parquet file:")
-    print(df.head()['text'].tolist()[3])
-    print(f"\nDataFrame shape: {df.shape}")
-    print(f"\nDataFrame columns: {df.columns.tolist()}")
 
-except FileNotFoundError:
-    print(f"Error: The file '{wikitext2}' was not found.")
-except Exception as e:
-    print(f"An error occurred: {e}")
+
+
+
+from datasets import load_dataset
+
+wikitext2 = '../../data/WikiText2/raw/'
+
+ds = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", cache_dir=resource)
+
+ds['train'].to_parquet(os.path.join(wikitext2, "train.parquet"))
+
+ds['test'].to_parquet(os.path.join(wikitext2, "test.parquet"))
+
+ds['validation'].to_parquet(os.path.join(wikitext2, "validation.parquet"))
 
 
