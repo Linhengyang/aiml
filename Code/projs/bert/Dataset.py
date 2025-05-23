@@ -214,6 +214,8 @@ def _build_dataset(data, max_len, pad_tokenID, cls_tokenID, mask_ratio=0.15):
             作为单条样本
         
         max_len
+    output:
+        tokenID_sample, valid_lens, segments_sample, mask_positions_sample, mlm_valid_lens, mlm_labels_sample, nsp_labels_sample
     
     分别用 padTokn_ID / 0 pad to 统一 two_sentence_toknIDs_list / two_sentence_segment_01_list 到 max_len
         用 valid lens 记录 valid area 信息
@@ -228,7 +230,8 @@ def _build_dataset(data, max_len, pad_tokenID, cls_tokenID, mask_ratio=0.15):
     mask_positions_sample, mlm_valid_lens, mlm_labels_sample = [], [], []
     nsp_labels = []
 
-    for toknIDs, mask_positions, mlmLabels, segments, nspLabels in data:
+    # token ID list, segments 01 list, mask positions list, masked token ID list, is_next T/F
+    for toknIDs, segments, mask_positions, mlmLabels, nspLabels in data:
         # 取单条样本
 
         # 当前样本 sequence 的 valid length

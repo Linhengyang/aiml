@@ -8,9 +8,10 @@ if __name__ == "__main__":
     from Code.projs.bert._jobs import prepare_job, pretrain_job, embed_job
     vocab_path = prepare_job()
 
-    # saved_params_fpath = train_job(eng_vocab_path, fra_vocab_path)
-    # saved_params_fpath = "../model/text_translator/saved_params_2025-05-20_14:10.pth"
-    print(vocab_path)
+    # saved_params_fpath = pretrain_job(vocab_path)
+    saved_params_fpath = "../model/bert/saved_params_2025-05-23_10:08.pth"
+
+    embed_job(saved_params_fpath, vocab_path)
 
     # bert tested
 

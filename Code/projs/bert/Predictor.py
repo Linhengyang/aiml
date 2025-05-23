@@ -26,7 +26,6 @@ def get_bert_embedding(
         tokens += tokens_next + [eos_token]
         segments += [1]*(len(tokens_next) + 1)
 
-
     valid_lens = torch.tensor([len(tokens)], dtype=torch.int32) #(1,)
 
     tokens = truncate_pad(tokens, max_len, pad_tokne) # token list with length max_len
@@ -44,7 +43,9 @@ def get_bert_embedding(
 
     # segments: (batch_size, max_len)01 indicating seq1 & seq2 | None, None 代表当前 batch 不需要进入 NSP task
     # mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task
-    embd_ = net(input, valid_lens, segments)[0] # (batch_size, max_len, num_hiddens)
+    with torch.no_grad():
+        embd_, _, _ = net(input, valid_lens, segments, None) # (batch_size, max_len, num_hiddens)
+
 
     return embd_.squeeze(0).cpu().numpy() # (max_len, num_hiddens) move to cpu & numpy
 
@@ -92,6 +93,8 @@ class tokensEncoder(easyPredictor):
         # only extract embedding matrix for input tokens
         self.embed_array = self.pred_fn(self.net, self._vocab, self.max_len, tokens, tokens_next,
                                         self.device, cls_token, eos_token, pad_tokne)[1:len(tokens)+1]
+        
+        return self.embed_array
         
 
 
