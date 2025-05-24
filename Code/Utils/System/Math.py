@@ -5,7 +5,7 @@ import numpy as np
 
 
 def find_closet_2factors(N:int) -> tuple[int, int]:
-    assert isinstance(N, int) and N > 0, f"N must be a positive integer"
+    assert isinstance(N, int) and N > 1, f"N must be a integer larger than 1"
     
     # 从 N 的平方根开始向下搜索. N 即使是 质数也会得到 (1, N) 的正确结果
     start = int(math.sqrt(N))
