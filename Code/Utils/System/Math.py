@@ -4,7 +4,7 @@ import numpy as np
 
 
 
-def find_closet_2factors(N:int):
+def find_closet_2factors(N:int) -> tuple[int, int]:
     assert isinstance(N, int) and N > 0, f"N must be a positive integer"
     
     # 从 N 的平方根开始向下搜索. N 即使是 质数也会得到 (1, N) 的正确结果
@@ -17,7 +17,9 @@ def find_closet_2factors(N:int):
 
 
 
-def cosine_similarity(a, b):
+def cosine_similarity(a:np.ndarray, b:np.ndarray) -> np.float64:
+    assert a.ndim == b.ndim == 1, f'input arrays must be 1D array'
+
     # a, b: shape (L, )
     dot_prod = np.dot(a, b)
 
