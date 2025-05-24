@@ -53,7 +53,6 @@ also recommend to have:
     ├── app1
     tool
     ├── database
-    │   └── csv2sqliteDB.py
     ├── hf_download.py
     aiml
     ├── Code
