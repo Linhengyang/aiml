@@ -116,6 +116,5 @@ also recommend to have:
     ├── experiment.ipynb
     ├── learn.py
     ├── main.py
-    ├── run.py
     └── test.py
 ---
