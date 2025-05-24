@@ -39,6 +39,7 @@ class BERTEncoder(nn.Module):
         # tokens shape: (batch_size, seq_len)int64
         # valid_lens: (batch_size,)
         # segments shape: (batch_size, seq_len)01 int64
+        
         X = self.token_embedding(tokens) + self.seg_embedding(segments)
         # positions shape: [0, 1, ..., seq_len-1] 1D tensor
         positions = torch.arange(0, X.size(1), dtype=torch.int64, device=X.device)
@@ -156,7 +157,7 @@ class BERT(nn.Module):
             mlm_job_flag = True
         
 
-        embd_X = self.encoder(tokens, segments, valid_lens) # (batch_size, seq_len, num_hiddens)
+        embd_X = self.encoder(tokens, valid_lens, segments) # (batch_size, seq_len, num_hiddens)
 
         if mlm_job_flag:
             mlm_Y_hat = self.mlm(embd_X, mask_positions)# (batch_size, num_masktks, vocab_size)

@@ -3,6 +3,7 @@ import warnings
 warnings.filterwarnings("ignore")
 import torch
 import typing as t
+import pandas as pd
 from .Dataset import wikitextDataset
 from .Network import BERT, BERTLoss
 from .Trainer import bertPreTrainer
@@ -92,8 +93,13 @@ def prepare_job():
     # not use BPE
 
     # 读取全部语料 corpus
-    with open(configs['full_data'], 'r', encoding='utf-8') as f:
-        corpus = f.read() # corpus 中存在 \t \n 等其他空白符
+    train_df = pd.read_parquet(configs['train_data'])
+    valid_df = pd.read_parquet(configs['valid_data'])
+    test_df = pd.read_parquet(configs['test_data'])
+    full_df = pd.concat([train_df, valid_df, test_df], ignore_index=True)
+    del train_df, valid_df, test_df
+    
+    corpus = ' '.join( full_df['text'].tolist() )
 
     uniq_size = len( set(corpus.split(' ')) )
     print(f'unique word size:{uniq_size}')
@@ -103,7 +109,7 @@ def prepare_job():
     glossary_path = os.path.join(glossary_dir, 'wiki.json')
     if not os.path.exists(glossary_path):
         # create wiki glossary
-        glossary = get_BPE_glossary(corpus = corpus, EOW_token = "</w>", merge_times = 15000, save_path = glossary_path)
+        glossary = get_BPE_glossary(corpus = corpus, EOW_token = "</w>", merge_times = 40000, save_path = glossary_path)
 
 
     # vocab
@@ -142,16 +148,16 @@ def pretrain_job(vocab_path):
 
 
     # design net & loss
-    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blks}
+    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout, "seq_len":max_len,
+                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blks":num_blks}
     
-    net = BERT(vocab_size=len(trainset.vocab), **net_args)
+    net = BERT(vocab_size=len(testset.vocab), **net_args)
     loss = BERTLoss()
 
     # init trainer
     trainer = bertPreTrainer(net, loss, num_epochs, batch_size)
 
-    trainer.set_device(torch.device('cpu')) # set the device
+    trainer.set_device(torch.device('cuda')) # set the device
     trainer.set_data_iter(trainset, validset, testset) # set the data iters
     trainer.set_optimizer(lr) # set the optimizer
     trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
@@ -194,8 +200,8 @@ def embed_job(saved_params_fpath, vocab_path):
     device = torch.device('cpu')
   
     # construct model
-    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout,
-                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blk":num_blks}
+    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout, "seq_len":max_len,
+                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blks":num_blks}
     
     net = BERT(vocab_size=len(vocab), **net_args)
 

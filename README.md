@@ -39,6 +39,10 @@ also recommend to have:
 * `cache`: -- to save files may be saved or not
 
 ---
+    cache
+    ├── proj1
+    ├── proj2
+    ├── proj3
     model
     ├── proj1
     ├── proj2
@@ -84,8 +88,11 @@ also recommend to have:
     │   │   │   ├── DataAssemble.py
     │   │   │   ├── DataSplit.py
     │   │   │   └── DataTransform.py
+    │   │   ├── File
+    │   │   │   └── TextSplit.py
     │   │   ├── Image
-    │   │   │   └── Display.py
+    │   │   │   ├── Display.py
+    │   │   │   └── MNIST.py
     │   │   ├── System
     │   │   │   └── Math.py
     │   │   └── Text
@@ -109,5 +116,6 @@ also recommend to have:
     ├── experiment.ipynb
     ├── learn.py
     ├── main.py
+    ├── run.py
     └── test.py
 ---

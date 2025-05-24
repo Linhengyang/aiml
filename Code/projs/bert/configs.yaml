@@ -26,12 +26,11 @@ eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accur
 
 
 # data-params
-full_data: '../../data/text_translator/fra-eng/eng2fra.txt'
-train_data: '../../data/text_translator/fra-eng/eng2fra.txt' # 使用 full data 来 train
-valid_data: '../../data/text_translator/fra-eng/10.txt' # 使用 10% data 来 eval
-test_data: '../../data/text_translator/fra-eng/5.txt' # 使用 5% data 来 test
+train_data: '../../data/WikiText2/raw/train.parquet'
+valid_data: '../../data/WikiText2/raw/validation.parquet'
+test_data: '../../data/WikiText2/raw/test.parquet'
 
-max_len: 20
+max_len: 64
 
 
 

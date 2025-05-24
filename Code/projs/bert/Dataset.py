@@ -1,6 +1,7 @@
 import torch
 import random
 import copy
+import pandas as pd
 from ...Utils.Text.Vocabulize import Vocab
 from ...Utils.Text.Tokenize import line_tokenize_greedy
 from ...Utils.Common.SeqOperation import truncate_pad
@@ -8,12 +9,13 @@ from ...Utils.Common.SeqOperation import truncate_pad
 
 
 
-def _read_shuffle(fpath):
+def _read_shuffle(parquet_fpath):
 
-    with open(fpath, 'r') as f:
-        lines = f.readlines() # list of strings. each string is several sentences(joined by ' . '), that is a paragraph
+    df = pd.read_parquet(parquet_fpath)
+    
+    lines = df['text'].tolist() # list of strings. each string maybe several sentences(joined by ' . '), that is a paragraph
 
-    # 2-D list. lists of list of at least 2 sentences.
+    # 2-D list. lists of list of at least 2 sentences(filter)
     corpus = [line.strip().lower().split(' . ') for line in lines if ' . ' in line]
     random.shuffle(corpus) # 段落之间打乱
 
@@ -212,6 +214,8 @@ def _build_dataset(data, max_len, pad_tokenID, cls_tokenID, mask_ratio=0.15):
             作为单条样本
         
         max_len
+    output:
+        tokenID_sample, valid_lens, segments_sample, mask_positions_sample, mlm_valid_lens, mlm_labels_sample, nsp_labels_sample
     
     分别用 padTokn_ID / 0 pad to 统一 two_sentence_toknIDs_list / two_sentence_segment_01_list 到 max_len
         用 valid lens 记录 valid area 信息
@@ -226,7 +230,8 @@ def _build_dataset(data, max_len, pad_tokenID, cls_tokenID, mask_ratio=0.15):
     mask_positions_sample, mlm_valid_lens, mlm_labels_sample = [], [], []
     nsp_labels = []
 
-    for toknIDs, mask_positions, mlmLabels, segments, nspLabels in data:
+    # token ID list, segments 01 list, mask positions list, masked token ID list, is_next T/F
+    for toknIDs, segments, mask_positions, mlmLabels, nspLabels in data:
         # 取单条样本
 
         # 当前样本 sequence 的 valid length

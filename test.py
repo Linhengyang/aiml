@@ -1,12 +1,29 @@
 # test.py
 
-from Code.Utils.Text.Tokenize import segment_word_BPE_greedy
-
 if __name__ == "__main__":
-    # 测试 segment_word_BPE_greedy
-    # glossary = None
-    word = 'financialest'
-    EOW_token = ''
-    glossary = {'tokens': [EOW_token] + list(set('financialest')) + ['fin', 'finance', 'ial', 'est'], 'EOW_token':EOW_token}
+    def add_():
+        return '''
+def add(a, b):
+    return a + b
+'''
 
-    print(segment_word_BPE_greedy(word, EOW_appnd=False, glossary=glossary))
+    def fancy_func_():
+        return '''
+def fancy_func(a, b, c, d):
+    e = add(a, b)
+    f = add(c, d)
+    g = add(e, f)
+    return g
+'''
+
+    def evoke_():
+        return add_() + fancy_func_() + 'print(fancy_func(1, 2, 3, 4))'
+
+    prog = evoke_()
+
+    print(prog)
+
+    y = compile(prog, '', 'exec')
+
+    exec(y)
+
