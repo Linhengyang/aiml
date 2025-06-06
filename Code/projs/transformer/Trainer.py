@@ -156,12 +156,16 @@ class transformerTrainer(easyTrainer):
         self.net.apply(xavier_init_weights) # net.apply 递归式地调用 fn 到 inner object
     
     
-    def set_optimizer(self, lr, optim_type='adam'):
+    def set_optimizer(self, lr, optim_type='AdamW', w_decay=None):
         '''set the optimizer at attribute optimizer'''
         assert type(lr) == float, 'learning rate should be a float'
 
-        if optim_type == 'adam':
-            self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
+        if optim_type == 'AdamW' and isinstance(w_decay, float):
+            self.optimizer = torch.optim.AdamW(self.net.parameters(), lr=lr, weight_decay=w_decay)
+        elif optim_type == 'AdamW':
+            self.optimizer = torch.optim.AdamW(self.net.parameters(), lr=lr)
+        else:
+            raise NotImplementedError(f'optimizer {optim_type} not implemented')
     
 
     def set_grad_clipping(self, grad_clip_val:None|float = None):

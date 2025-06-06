@@ -41,16 +41,19 @@ also recommend to have:
 ---
     cache
     ├── proj1
-    ├── proj2
-    ├── proj3
+    ├── app1
     model
     ├── proj1
-    ├── proj2
-    ├── proj3
+    ├── app1
     logs
     ├── proj1
-    ├── proj2
-    ├── proj3
+    ├── app1
+    tmp
+    ├── proj1
+    ├── app1
+    tool
+    ├── database
+    ├── hf_download.py
     aiml
     ├── Code
     │   ├── Base
