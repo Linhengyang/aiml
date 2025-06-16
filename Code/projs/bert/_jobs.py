@@ -11,7 +11,7 @@ from .Evaluator import bertEpochEvaluator
 from .Predictor import tokensEncoder
 import yaml
 from ...Utils.Text.Vocabulize import Vocab
-from ...Utils.Text.BytePairEncoding import get_BPE_glossary
+from ...Utils.Text.Glossary import get_BPE_glossary
 from ...Utils.System.Math import cosine_similarity
 
 configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)

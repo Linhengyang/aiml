@@ -5,7 +5,7 @@
 import typing as t
 import re
 from .TextPreprocess import preprocess_space, attach_EOW_token
-from .BytePairEncoding import Glossary
+from .Glossary import Glossary
 
 # a segmenter, which greedily splits a raw word(no space inside) into subwords
 def word_segment_greedy(    
