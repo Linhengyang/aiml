@@ -215,6 +215,14 @@ def get_maxfreq_token_pair(
     return token_pairs_w_maxfreq, maxfreq
 
 
+from typing import List, TypedDict
+
+class Glossary(TypedDict):
+    tokens: List[str]
+    EOW_token: str
+
+
+
 
 def get_BPE_glossary(
         corpus,
@@ -228,7 +236,7 @@ def get_BPE_glossary(
         separate_puncs: str = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
         normalize_whitespace: bool = True,
         bind_EOW_lastCHAR: bool = False
-        ) -> t.Dict:
+        ) -> Glossary:
     '''
     output:
         glossary, dict of
@@ -302,9 +310,9 @@ def get_BPE_glossary(
 
 # 不同的 glossary 之间可以 merge, 只需要 保证它们用同一个 EOW_token
 def merge_glossary(
-        glossary_lst:t.List[t.Dict],
+        glossary_lst:t.List[Glossary],
         save_path:str|None = None,
-        ) -> t.Dict:
+        ) -> Glossary:
 
     check = [glossary['tokens'][0] == glossary['EOW_token'] for glossary in glossary_lst]
     assert all(check), f'glossary EOW not same with first token. Check code'
@@ -320,6 +328,7 @@ def merge_glossary(
     
     merge_tokens = [EOW_token] + list(merge_tokens)
     merged = {'tokens':merge_tokens, 'EOW_token':EOW_token}
+    
     if isinstance(save_path, str):
         with open(save_path, 'w') as f:
             json.dump(merged, f)
