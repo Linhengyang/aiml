@@ -7,3 +7,20 @@
 # 3. 可扩展
 # 4. 高效
 # 5. 
+
+
+# meta-class
+from abc import ABC
+import typing as t
+
+class Tokenizer(ABC):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+    
+    def encoder(self, string: str) -> t.List[int]:
+        raise NotImplementedError
+    
+    def decode(self, indices: t.List[int]) -> str:
+        raise NotImplementedError
+    
+
