@@ -1,7 +1,7 @@
 # Vocabulize.py
 import typing as t
 from .TextPreprocess import preprocess_space, attach_EOW_token, count_corpus
-from .Tokenize import line_tokenize_greedy
+from .StringSegment import sentence_segment_greedy
 import json
 import os
 import copy
@@ -47,13 +47,13 @@ class Vocab:
                  ):
 
         # 将 corpus 作为 一条string 输入, normalize 空白格式,独立化每个 punc
-        # line_tokenize_greedy 要求 glossary 要么为 None, 要么 EOW_token 不为空
-        tokens = line_tokenize_greedy(corpus, glossary, unk_token,
-                                      flatten = True,
-                                      need_preprocess = True,
-                                      need_lower = need_lower,
-                                      separate_puncs = separate_puncs,
-                                      normalize_whitespace = True)[0]
+        # sentence_segment_greedy 要求 glossary 要么为 None, 要么 EOW_token 不为空
+        tokens = sentence_segment_greedy(corpus, glossary, unk_token,
+                                         flatten = True,
+                                         need_preprocess = True,
+                                         need_lower = need_lower,
+                                         separate_puncs = separate_puncs,
+                                         normalize_whitespace = True)[0]
         # 使用 给定的 glossary 切割 corpus, 得到 tokens: list of tokens
 
         # 如果 glossary 不为 None, 那么:

@@ -1,16 +1,17 @@
-# Tokenize.py
+# StringSegment.py
 # 本文件收录了各种 tokenize 工具。
 # 至少要输入一条语句 sentence(string)，和一个词汇集 glossary。至少输出一个列表 list of tokens(list of string)
 
 import typing as t
 import re
 from .TextPreprocess import preprocess_space, attach_EOW_token
+from .BytePairEncoding import Glossary
 
-# a segmenter, which tokenizes a raw sentences
+# a segmenter, which greedily splits a raw word(no space inside) into subwords
 def word_segment_greedy(    
         word:str,
         EOW_appnd: bool = True,
-        glossary: t.Dict|None = None,
+        glossary: Glossary|None = None,
         UNK_token:str = "<unk>"
         ):
     '''
@@ -91,10 +92,10 @@ def word_segment_greedy(
     return segmented, word[start:]
 
 
-
-def line_tokenize_greedy(
+# a segmenter, which greedily segments a sentence(space inside) into list of subwords
+def sentence_segment_greedy(
         sentence:str,
-        glossary:t.Dict | None,
+        glossary:Glossary|None,
         UNK_token:str,
         flatten:bool,
         need_preprocess:bool = False,
@@ -103,8 +104,8 @@ def line_tokenize_greedy(
         ):
     '''
     如果输入 glossary 是 None, 那么说明用 不切割以整体 word 作为 token 的方式来 tokenize
-    贪心地用 BPE 标准流程 配合参数 EOW_token 生成的 glossary('tokens' key --> all tokens list, 'EOW_token' key --> EOW_token), 
-    分割输入的 sentence
+    如果输入 glossary 不是 None, 则 默认它为 参数 EOW_token 生成的 glossary
+    贪心地用 分割输入的 sentence 中的 每一个 word
     
     根据是否 flatten, 返回 segmented_output: list of segmented tokens or list of list of segmented tokens
     
@@ -129,7 +130,7 @@ def line_tokenize_greedy(
         # [] represents unsegmented part of sentence
         return segmented_output, []
     else:
-        # 确保 EOW_token 不为空, 且不出现再 sentence里. 因为 sentence 极大概率存在单空格, nullstring 的EOW_token 无法分辨word/subword间的空格
+        # 确保 EOW_token 不为空, 且不出现再 sentence里. 因为 sentence 极大概率存在单空格, nullstring 的 EOW_token 无法分辨word/subword间的空格
         assert glossary['EOW_token'] not in sentence, \
             f"glossary's EOW_token {glossary['EOW_token']} cannot be null string, neither should exist in sentence {sentence}"
 

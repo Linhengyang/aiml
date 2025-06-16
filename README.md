@@ -101,7 +101,7 @@ also recommend to have:
     │   │   └── Text
     │   │       ├── BytePairEncoding.py
     │   │       ├── TextPreprocess.py
-    │   │       ├── Tokenize.py
+    │   │       ├── StringSegment.py
     │   │       └── Vocabulize.py
     │   ├── apps
     │   │   ├── semantic_segmentation

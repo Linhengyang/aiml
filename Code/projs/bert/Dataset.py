@@ -3,7 +3,7 @@ import random
 import copy
 import pandas as pd
 from ...Utils.Text.Vocabulize import Vocab
-from ...Utils.Text.Tokenize import line_tokenize_greedy
+from ...Utils.Text.StringSegment import sentence_segment_greedy
 from ...Utils.Common.SeqOperation import truncate_pad
 
 
@@ -41,8 +41,8 @@ def _preprocess_tokenize(corpus, glossary, UNK_token,
         
         for sentence in paragraph:
             if sentence:
-                tokens = line_tokenize_greedy(sentence, glossary, UNK_token, flatten=True,
-                                              need_preprocess=True, need_lower=need_lower, separate_puncs=separate_puncs)[0]
+                tokens = sentence_segment_greedy(sentence, glossary, UNK_token, flatten=True,
+                                                 need_preprocess=True, need_lower=need_lower, separate_puncs=separate_puncs)[0]
                 _tokens_paragraph.append( tokens )
         
 

@@ -7,7 +7,7 @@ import typing as t
 from ...Compute.PredictTools import easyPredictor
 from ...Compute.EvaluateTools import bleu
 from ...Utils.Text.TextPreprocess import preprocess_space
-from ...Utils.Text.Tokenize import line_tokenize_greedy
+from ...Utils.Text.StringSegment import sentence_segment_greedy
 from ...Utils.Common.SeqOperation import truncate_pad
 
 
@@ -326,7 +326,7 @@ class sentenceTranslator(easyPredictor):
         else:
             src_glossary = None
 
-        source, _ = line_tokenize_greedy(
+        source, _ = sentence_segment_greedy(
             self.src_sentence,
             glossary = src_glossary,
             UNK_token = self._src_vocab.to_tokens(self._src_vocab.unk),

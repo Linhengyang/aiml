@@ -1,7 +1,7 @@
 from ...Utils.Text.TextPreprocess import preprocess_space
 from ...Utils.Text.Vocabulize import Vocab
 from ...Utils.Common.SeqOperation import truncate_pad
-from ...Utils.Text.Tokenize import line_tokenize_greedy
+from ...Utils.Text.StringSegment import sentence_segment_greedy
 import torch
 import typing as t
 import re
@@ -66,9 +66,9 @@ def tokenize_seq2seqText(
         try:
             src_sentence, tgt_sentence = line.split(seq_sep) # 每一行分成两部分, 前半是 source sentence，后半是 target sentence
             # source list append tokenized src_seq token list
-            source.append( line_tokenize_greedy(src_sentence, src_glossary, UNK_token, flatten=True)[0] )
+            source.append( sentence_segment_greedy(src_sentence, src_glossary, UNK_token, flatten=True)[0] )
             # target list append tokenized src_seq token list
-            target.append( line_tokenize_greedy(tgt_sentence, tgt_glossary, UNK_token, flatten=True)[0] )
+            target.append( sentence_segment_greedy(tgt_sentence, tgt_glossary, UNK_token, flatten=True)[0] )
         except ValueError:
             raise ValueError(f"line {i+1} of text unpack wrong. line text as {line[:100]}")
 
