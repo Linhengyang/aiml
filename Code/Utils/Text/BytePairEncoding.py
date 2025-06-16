@@ -312,11 +312,13 @@ def merge_glossary(
     EOW_token = glossary_lst[0]['EOW_token']
     same_EOW = [glossary['EOW_token'] == EOW_token for glossary in glossary_lst]
     assert all(same_EOW), f'glossaries have different EOW_token, cannot merge. Check code'
-
-    merge_tokens = [EOW_token]
-    for glossary in glossary_lst:
-        merge_tokens.extend( glossary['tokens'][1:] )
     
+    merge_tokens = set()
+    for glossary in glossary_lst:
+        # union 去重. union 各个 glossary 的 tokens(除去第一个 EOW_token)
+        merge_tokens.union( set(glossary['tokens'][1:]) )
+    
+    merge_tokens = [EOW_token] + list(merge_tokens)
     merged = {'tokens':merge_tokens, 'EOW_token':EOW_token}
     if isinstance(save_path, str):
         with open(save_path, 'w') as f:
