@@ -1,7 +1,7 @@
 # Vocabulize.py
 import typing as t
-from .TextPreprocess import preprocess_space, attach_EOW_token, count_corpus
-from .StringSegment import sentence_segment_greedy
+from .TextPreprocess import count_corpus
+from .StringSegment import sentence_segment_greedy, Glossary
 import json
 import os
 import copy
@@ -38,7 +38,7 @@ class Vocab:
     '''
     def __init__(self,
                  corpus:str='',
-                 glossary:t.Dict|None=None,
+                 glossary:Glossary|None=None,
                  need_lower:bool=True,
                  reserved_tokens:t.List[str]=[],
                  unk_token='<unk>',
