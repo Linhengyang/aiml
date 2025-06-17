@@ -70,7 +70,21 @@ class ByteTokenizer(Tokenizer):
 
 
 
-# 一个 经典的 字符级 BPE 生产的 Tokenizer, 
+def get_compression_ratio(string: str, indices: list[int]) -> float:
+    """Given `string` that has been tokenized into `indices`, ."""
+    num_bytes = len(bytes(string, encoding="utf-8"))  # @inspect num_bytes
+    num_tokens = len(indices)                       # @inspect num_tokens
+    return num_bytes / num_tokens
+
+
+# 一个 经典的 字符级 BPE 生产的 Tokenizer
+# train 过程与 Glossary 的 区别在于 使用 GPT2_TOKENIZER_REGEX 来 pre-tokenization
+# infer 过程与 Glossray 的 区别在于 使用 tree 以 从头到尾的方向作 split
+GPT2_TOKENIZER_REGEX = \
+    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+
 class tradTokenizer(Tokenizer):
     def __init__(self, *args, **kwargs):
         super().__init__()
+    
