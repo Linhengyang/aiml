@@ -109,7 +109,7 @@ def beam_search_single_step(net, vocab_size, src_enc_info, k, parrallel,
 
     # k_KV_Caches: list of dicts, 考虑每个 dict, 
     #   对于 第 1 次predict, 为空 {}
-    #   对于第 t > 1 次predict, keys 是 block_inds, values 是 tensors shape as (1, t-1, d_dim), i-1 维包含 timestep 0 到 i-2
+    #   对于第 t > 1 次predict, keys 是 block_inds, values 是 tensors shape as (1, t-1, d_dim), t-1 维包含 timestep 0 到 t-2
     # k_KV_Caches 从原理上来说, 没有必要输入, 因为beam search记录了k条 timestep 0-t-1 的历史结果在 k_seq_mat,
     # 所以理论上, k 条 seq 对应的 decoder block caches 都可以用 seq 里的tokens 逐一重新算一遍. 但这样会造成极大的算力浪费.
 
