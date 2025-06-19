@@ -11,7 +11,7 @@ from .Evaluator import transformerEpochEvaluator
 from .Predictor import sentenceTranslator
 import yaml
 from ...Utils.Text.Vocabulize import Vocab
-from ...Utils.Text.BytePairEncoding import get_BPE_glossary
+from ...Utils.Text.Glossary import get_BPE_glossary
 
 configs = yaml.load(open('Code/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 

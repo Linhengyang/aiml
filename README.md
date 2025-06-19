@@ -99,9 +99,10 @@ also recommend to have:
     │   │   ├── System
     │   │   │   └── Math.py
     │   │   └── Text
-    │   │       ├── BytePairEncoding.py
+    │   │       ├── Glossary.py
+    │   │       ├── StringSegment.py
     │   │       ├── TextPreprocess.py
-    │   │       ├── Tokenize.py
+    │   │       ├── Tokenizer.py
     │   │       └── Vocabulize.py
     │   ├── apps
     │   │   ├── semantic_segmentation
