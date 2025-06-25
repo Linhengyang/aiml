@@ -46,8 +46,10 @@ for i in range(num_merges):
     # 在 tokens list 中，merged pair 被一个 彻底全新的 new_token 替代，所以在下一轮 merge 中，能确保已经被 merge 过的 pair 绝对不会再在 tokens 中出现
     merges[top_pair] = new_token # 记录 merge 记录.
 
-# merges:
-# 按 insertion 的顺序，merges 记录了 各pair(as key) merge 的 target as value
+
+
+# merges: 一个 指向性 mapping table
+# 按 insertion 的顺序，merges 记录了 各pair of ID(as key) merge后 的 target ID (as value)
 # 遍历 tokens 和 遍历 merges，哪个在外？哪个在内？
 # 遍历tokens 在外，即从 tokens 的 i 位置开始：检查tokens[i], tokens[i+1]，看它是否是 merges 匹配。若匹配，则 merge。在内侧遍历 merges。
 #   遍历完之后，tokens 更新。要回到 i 位置，重新检测。直到 遍历 merges 都找不到匹配。那么 i+=1。
@@ -57,14 +59,14 @@ for i in range(num_merges):
 #   遍历完之后，tokens 更新。k+=1
 # merge order 优先
 
-# 采用第二种
+# 采用第二种的等价算法：列出 当前 tokens sequence 中所有的 consecutive 2 tokens pair，找到在 merges 中最早出现的那个 pair
+# 把 这个 pair 用 merges 中记录的 target ID 代替。一直持续这个循环，直到tokens sequence 的长度不再可 merge，或不再有 pair 出现在 merges 表
 # encode
 def encode(text):
     tokens_bytes = text.encode('utf-8')
     tokens_ints = list(map(int, tokens_bytes))
-    # [116, 32, 98, 101, 32, 97, 32, 114]
-    # merges {(101, 32): 256, (256, 105):257, (114, 101):258}
-    while True:
+    # tokens_ints 如果 更新到 只有 一个 token integer，那么此时已经完成了 encode
+    while len(tokens_ints) >= 2:
         counts = get_counts_of_pair(tokens_ints) # all {consecutive pair: occurance}
         # find the pair in counts with min rank in merge
         # 找到 counts 中，最早在 merges 中出现的 pair（意味着最早被 merge 的pair) 
