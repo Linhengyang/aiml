@@ -47,18 +47,21 @@ class Tokenizer(ABC):
     def __init__(self, *args, **kwargs):
         super().__init__()
     
-    def encoder(self, string: str) -> t.List[int]:
+    def encode(self, string: str) -> t.List[int]:
         raise NotImplementedError
     
     def decode(self, indices: t.List[int]) -> str:
         raise NotImplementedError
-    
 
 
 
 class CharacterTokenizer(Tokenizer):
-
-    def encoder(self, string:str) -> t.List[int]:
+    '''
+    A tokenizer mapping between unicode characters and its unicode number as tokens
+    encode: char --> integer between 0 and 0x10FFFF
+    decode: integer between 0 and 0x10FFFF --> char
+    '''
+    def encode(self, string:str) -> t.List[int]:
         return list( map(ord, string) )
     
     def decode(self, indices: t.List[int]) -> str:
@@ -69,47 +72,132 @@ class CharacterTokenizer(Tokenizer):
 
 
 class ByteTokenizer(Tokenizer):
-
-    def encoder(self, string:str) -> t.List[int]:
+    '''
+    A tokenizer splits string into bytes, and use integers between 0 and 255 as tokens
+    encode: string --> integer(between 0 and 255) sequence
+    decode: integer(between 0 and 255) sequence --utf-8--> string with possible replacement
+    '''
+    def encode(self, string: str) -> t.List[int]:
         string_bytes = string.encode("utf-8") # 返回 utf-8 规范编码的 字节byte 序列. 所以返回的 string_bytes 是一个序列
         # 可以求 len, 返回 字节数量; 可以索引 index，返回各个 字节的整数值(0-255)
         # 英文 1 字节，欧洲字符 2字节，中日韩字符 3字节，罕见字符 4字节
         indices = list( map(int, string_bytes) ) # list of integers btw 0-255
         return indices
     
-    def decode(self, indices):
+    def decode(self, indices: t.List[int]) -> str:
         # filter valid unicode index
         try:
             string_bytes = bytes(indices) # bytes 其中一种使用方式: 输入 list of integers, 要求每个 integer 0-255
-            return string_bytes.decode('utf-8')
+            return string_bytes.decode('utf-8', errors='replace')
         except ValueError:
             print(f'input indices {indices} has wrong values. must be 0-255')
-        except UnicodeDecodeError:
-            print(f'decode error for {indices}')
 
 
 
 
-def get_compression_ratio(string: str, indices: list[int]) -> float:
-    """Given `string` that has been tokenized into `indices`, ."""
-    num_bytes = len(bytes(string, encoding="utf-8"))  # @inspect num_bytes
-    num_tokens = len(indices)                       # @inspect num_tokens
-    return num_bytes / num_tokens
 
 
-# 一个 现代的 BPE 生产的 Tokenizer from scratch. 支持 char-level / byte-level 训练；空格将以"token首"的方式参与token生成；
-# infer 过程与 Glossray 的 区别在于 使用 trie 结构 以 从头到尾的方向作 split
-GPT2_TOKENIZER_REGEX = \
-    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    # 逐一优先 匹配下列
-    # 匹配 's 'd 'm 't 'll 've 're
-    # 可选空格+一个或多个unicode字母（非空）
-    # 可选空格+一个或多个数字（非空）
-    # 可选空格+一个或多个（既不是空格也不是字母也不是数字）标点符号or特殊字符
-    # 一个或多个空格（行尾的空格or连续的纯空格序列）
-    # 兜底匹配任何剩余的空格序列
+import regex as re
+from ..Common.SeqOperation import check_monotonic
 
-class scratchTokenizer(Tokenizer):
-    pass
+## deprecated split-pattern for GPT2. use GPT4 version
+# GPT2_TOKENIZER_REGEX = \
+#     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+GPT4_TOKENIZER_REGEX = \
+    r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
+
+ENDOFTEXT = '<|endoftext|>'
+FIM_PREFIX = '<|fim_prefix|>'
+FIM_MIDDLE = '<|fim_middle|>'
+FIM_SUFFIX = '<|fim_suffix|>'
+ENDOFPROMPT = '<|endofprompt|>'
+
+
+
+
+
+class BBPETokenizer(Tokenizer):
+    def __init__(
+            self,
+            name: str,
+            pat_str: str = GPT4_TOKENIZER_REGEX,
+            merge_ranks: dict[tuple[int, int], int] = {},
+            special_marks: list[str] = [ENDOFTEXT, FIM_PREFIX, FIM_MIDDLE, FIM_SUFFIX, ENDOFPROMPT],
+            explicit_n_vocab: int | None = None
+            ):
+
+        self.name = name
+        self._pat_str = pat_str
+        self._merge_ranks = merge_ranks
+        self._special_marks = special_marks
+        # special marks 必须都能被 pat_str 切开，不然可能会导致 merge-generated in BPE
+        assert all([ len(re.findall(pat_str, mark)) > 1 for mark in special_marks ])
+
+        if merge_ranks: # 如果输入了非空的 merge_ranks
+            # merge_ranks 的 RANK 应该是 0 至 MAX_RANK 的连续正整数: 递增 且 len(merge_ranks) = MAX_RANK + 1 且 首元素 = 0
+            ranks_seq = merge_ranks.values()
+            assert check_monotonic(ranks_seq, mode='increase', strict=True) and len(ranks_seq) == ranks_seq[-1] + 1 and ranks_seq[0] == 0
+            # 可以直接 注册 special_tokens，因为已经有 merge_ranks，无需 BPE train
+            self.register_special_tokens()
+            # 总的 vocab_size, 即 explicit_n_vocab 也随之 确定。不过若输入了 explicit_n_vocab，检查是否和 merge+special 匹配
+            if explicit_n_vocab:
+                assert explicit_n_vocab == len(merge_ranks) + len(special_marks) # 总 vocab size 应该等于 merge tokens size + n_special_tokens
+            self.explicit_n_vocab = len(merge_ranks) + len(special_marks)
+        else: # 如果 没有输入非空的 merge_ranks
+            # 那么需要 run BPE train process to build merges_ranks forrest. corpus text 将随后输入，但在这里可以 确定 number of merges
+            # 必须输入 explicit_n_vocab
+            assert explicit_n_vocab >= 256 + len(special_marks), \
+                f'pretrained merge_ranks forrest empty.\
+                  input explicit_n_vocab (shall be at least greater than 256+{len(special_marks)}(num_special_marks))'
+            self.explicit_n_vocab = explicit_n_vocab
+            self._num_merges = explicit_n_vocab - 256 - len(special_marks)
+
+
+    def register_special_tokens(self):
+        self.special_tokens: dict[str, int] = {}
+        # special tokens 的 token ID 应该 紧接着 merge_ranks 的 MAX RANK，即 MAX_RANK + 1 开始
+        # 这样 所有tokens的 mapping value 应该是 0 至 explicit_n_vocab-1 = len(merge_ranks) + len(special_marks) - 1 的连续正整数
+
+        # 所以 注册 special_tokens 的工作应该在 获得 有效的 merge_ranks 之后
+        if self._merge_ranks:
+            MAX_MERGE_RANK = self._merge_ranks.values()[-1]
+            for i, sp_mark in enumerate(self._special_marks):
+                self.special_tokens[sp_mark] = MAX_MERGE_RANK + i + 1
+        else:
+            raise RuntimeError(f'merge_ranks not build. run BPE train process to build merge_ranks forrest before register special tokens')
+        
+        self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()}
+
+
+    def train_bpe(self, corpus, verbose=False):
+        #TODO
+
+        # 得到 merge_ranks forrest 之后，注册 special_tokens
+        self.register_special_tokens()
+
+
+    def encode(self, string):
+        #TODO
+        pass
+
+
+    def decode(self, indices):
+        #TODO
+        pass
+    
+
+    def save(self, f_prefix):
+        #TODO
+        pass
+    
+
+    def load(self, f_name):
+        #TODO
+        pass
+
+    
+    def view(self, dir_path):
+        #TODO
+        pass
 
