@@ -250,35 +250,44 @@ class BBPETokenizer(Tokenizer):
         self.register_special_tokens()
 
 
-    def _encode_chunk(self, chunk:t.List[int]) -> t.List[int]:
+    def _encode_chunk(self, tokens:t.List[int]) -> t.List[int]:
         '''
-        对 chunk 作持续的 merge, 直至 无可merge
+        对 chunk(tokens) 作持续的 merge, 直至 无可merge
         '''
-        while len(chunk) > 1: # 在循环体内不断更新 chunk
-            p_counts: t.Dict[tuple[int, int], int] = get_pair_counts(chunk)
+        while len(tokens) > 1: # 在循环体内不断更新 tokens
+            p_counts: t.Dict[tuple[int, int], int] = get_pair_counts(tokens)
 
             min_rank_pair: tuple[int, int] = min(p_counts, key=lambda p: self._merge_ranks.get(p, float('inf')))
 
-            if min_rank_pair not in self._merge_ranks: # 如果 求出 的 self._merge_ranks 不在 _merge_ranks 里
+            if min_rank_pair not in self._merge_ranks: # 如果 求出 的 min_rank_pair 不在 _merge_ranks 里
                 break
-            # 更新 chunk
-            chunk = merge_pair(chunk, min_rank_pair, self._merge_ranks[min_rank_pair])
-
-        return chunk
+            # 更新 tokens
+            tokens = merge_pair(tokens, min_rank_pair, self._merge_ranks[min_rank_pair])
+        
+        return tokens
 
     
-    def encode_ordinary(self, string:str) -> t.List[int]:
+    def encode_ordinary(self, text:str) -> t.List[int]:
+        '''
+        encoding text that ignores any special tokens
+        '''
         # raw
-        chunks_str: t.List[str] = re.findall(self.pat_str, string) # pre-split to list of string
-        pass
+        chunks_str: t.List[str] = re.findall(self.pat_str, text) # pre-split to list of string
+        # initial tokens: 可多线程加速
+        chunks_tokens: t.List[list[int]] = [list( chunk.encode('utf-8') ) for chunk in chunks_str] # list of int(0..255)_list
+
+        encoded_output: t.List[int] = []
+        for tokens in chunks_tokens:
+            encoded_output.extend( self._encode_chunk(tokens) )
+        
+        return encoded_output
 
 
-
-    def encode(self, string):
+    def encode(self, text:str, allowed_special) -> t.List[int]:
         #TODO
         pass
 
-
+    
     def decode(self, indices:t.List[int]) -> str:
         parts = []
         for idx in indices:
