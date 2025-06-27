@@ -2,5 +2,4 @@
 **/*.tok
 *.tok
 *.vocab
-**/__pycache__
 **/.pytest_cache
