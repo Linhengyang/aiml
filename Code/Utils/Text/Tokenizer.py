@@ -489,3 +489,21 @@ class BBPETokenizer(Tokenizer):
                     s_L, s_R = render_bytes(self._vocab[L]), render_bytes(self._vocab[R])
                     f.write(f"[{s_L}] {L} , [{s_R}] {R} -> [{s}] {idx}\n")
 
+    @property
+    def vocab_size(self) -> int:
+        return self.explicit_n_vocab
+    
+
+    @property
+    def eot_token(self, eot:str = ENDOFTEXT) -> int:
+        return self.special_tokens[eot]
+
+
+    @functools.cached_property
+    def special_marks_set(self) -> set[str]:
+        return set(self.special_tokens.keys())
+    
+
+    def is_special_token(self, token: int) -> bool:
+        assert isinstance(token, int)
+        return token in self.inverse_special_tokens
