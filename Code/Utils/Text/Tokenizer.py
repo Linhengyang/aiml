@@ -234,9 +234,6 @@ class BBPETokenizer(Tokenizer):
 
 
     def train_bpe(self, corpus:str, verbose:bool=False):
-        if not corpus:
-            raise ValueError(f'corpus to train bpe tokenizer cannot be null string')
-        
         merge_ranks: dict[tuple[int, int], int] = {} # 初始化 _merge_ranks
         vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
         # raw
