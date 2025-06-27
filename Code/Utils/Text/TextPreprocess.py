@@ -3,7 +3,7 @@ import random
 import math
 import typing as t
 import re
-
+import unicodedata
 
 
 def count_corpus(sentences: list|tuple|set) -> t.Dict:
@@ -179,3 +179,25 @@ def text_atomize(text, reserved_combos:t.List[str]=[], uniq=False) -> t.List[str
         result = list( set(result) )
     
     return result
+
+
+
+
+
+def replace_control_characters(text: str) -> str:
+    chars = []
+    for ch in text:
+        if unicodedata.category(ch)[0] != 'C':
+            chars.append( ch ) # ch is ok
+        else:
+            chars.append( f"\\u{ord(ch):04x}" ) # escape
+    return "".join(chars)
+
+
+
+def render_bytes(b: bytes) -> str:
+    '''
+    pretty print bytes, escaping control characters
+    '''
+    text = b.decode('utf-8', errors='replace')
+    return replace_control_characters(text)

@@ -1,3 +1,5 @@
+import typing as t
+
 
 def truncate_pad(line, num_steps, padding_token):
     '''
@@ -18,7 +20,11 @@ def truncate_pad(line, num_steps, padding_token):
 
 
 
-def check_monotonic(seq: list, mode:str='increase', strict:bool=True) -> bool:
+def check_monotonic(
+        seq: list,
+        mode:t.Literal['increase', 'decrease'],
+        strict:bool=True
+        ) -> bool:
 
     if mode == 'increase' and strict:
         for i in range(len(seq) - 1): # 0 至 len(seq) - 2
