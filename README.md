@@ -97,7 +97,8 @@ also recommend to have:
     │   │   │   ├── Display.py
     │   │   │   └── MNIST.py
     │   │   ├── System
-    │   │   │   └── Math.py
+    │   │   │   ├── Math.py
+    │   │   │   └── Statistics.py
     │   │   └── Text
     │   │       ├── Glossary.py
     │   │       ├── StringSegment.py
@@ -116,8 +117,11 @@ also recommend to have:
     │       ├── transformer
     │       ├── vit
     │       └── word2vec
+    ├── tests
+    ├── pynb
+    │   ├── experiment.ipynb
+    │   └── tokenizer.ipynb
     ├── README.md
-    ├── experiment.ipynb
     ├── learn.py
     ├── main.py
     └── test.py
