@@ -47,18 +47,21 @@ class Tokenizer(ABC):
     def __init__(self, *args, **kwargs):
         super().__init__()
     
-    def encoder(self, string: str) -> t.List[int]:
+    def encode(self, string: str) -> t.List[int]:
         raise NotImplementedError
     
     def decode(self, indices: t.List[int]) -> str:
         raise NotImplementedError
-    
 
 
 
 class CharacterTokenizer(Tokenizer):
-
-    def encoder(self, string:str) -> t.List[int]:
+    '''
+    A tokenizer mapping between unicode characters and its unicode number as tokens
+    encode: char --> integer between 0 and 0x10FFFF
+    decode: integer between 0 and 0x10FFFF --> char
+    '''
+    def encode(self, string:str) -> t.List[int]:
         return list( map(ord, string) )
     
     def decode(self, indices: t.List[int]) -> str:
@@ -69,47 +72,449 @@ class CharacterTokenizer(Tokenizer):
 
 
 class ByteTokenizer(Tokenizer):
-
-    def encoder(self, string:str) -> t.List[int]:
+    '''
+    A tokenizer splits string into bytes, and use integers between 0 and 255 as tokens
+    encode: string --> integer(between 0 and 255) sequence
+    decode: integer(between 0 and 255) sequence --utf-8--> string with possible replacement
+    '''
+    def encode(self, string: str) -> t.List[int]:
         string_bytes = string.encode("utf-8") # 返回 utf-8 规范编码的 字节byte 序列. 所以返回的 string_bytes 是一个序列
         # 可以求 len, 返回 字节数量; 可以索引 index，返回各个 字节的整数值(0-255)
         # 英文 1 字节，欧洲字符 2字节，中日韩字符 3字节，罕见字符 4字节
         indices = list( map(int, string_bytes) ) # list of integers btw 0-255
         return indices
     
-    def decode(self, indices):
+    def decode(self, indices: t.List[int]) -> str:
         # filter valid unicode index
         try:
             string_bytes = bytes(indices) # bytes 其中一种使用方式: 输入 list of integers, 要求每个 integer 0-255
-            return string_bytes.decode('utf-8')
+            return string_bytes.decode('utf-8', errors='replace')
         except ValueError:
             print(f'input indices {indices} has wrong values. must be 0-255')
-        except UnicodeDecodeError:
-            print(f'decode error for {indices}')
 
 
 
 
-def get_compression_ratio(string: str, indices: list[int]) -> float:
-    """Given `string` that has been tokenized into `indices`, ."""
-    num_bytes = len(bytes(string, encoding="utf-8"))  # @inspect num_bytes
-    num_tokens = len(indices)                       # @inspect num_tokens
-    return num_bytes / num_tokens
 
 
-# 一个 现代的 BPE 生产的 Tokenizer from scratch. 支持 char-level / byte-level 训练；空格将以"token首"的方式参与token生成；
-# infer 过程与 Glossray 的 区别在于 使用 trie 结构 以 从头到尾的方向作 split
+import regex as re
+from ..Common.SeqOperation import check_monotonic
+import functools
+
+# deprecated split-pattern for GPT2. use GPT4 version
 GPT2_TOKENIZER_REGEX = \
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    # 逐一优先 匹配下列
-    # 匹配 's 'd 'm 't 'll 've 're
-    # 可选空格+一个或多个unicode字母（非空）
-    # 可选空格+一个或多个数字（非空）
-    # 可选空格+一个或多个（既不是空格也不是字母也不是数字）标点符号or特殊字符
-    # 一个或多个空格（行尾的空格or连续的纯空格序列）
-    # 兜底匹配任何剩余的空格序列
 
-class scratchTokenizer(Tokenizer):
-    pass
+GPT4_TOKENIZER_REGEX = \
+    r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
+
+ENDOFTEXT = '<|endoftext|>'
+FIM_PREFIX = '<|fim_prefix|>'
+FIM_MIDDLE = '<|fim_middle|>'
+FIM_SUFFIX = '<|fim_suffix|>'
+ENDOFPROMPT = '<|endofprompt|>'
 
 
+
+
+def get_pair_counts(tokens:t.List[int], p_counts:t.Dict[tuple[int, int], int]|None = None):
+    '''
+    p_counts 如果是 None: init a p_counts and return
+        给定 tokens list, 计算它的 pair-tokens counts, 返回一个 pair counts dict
+    p_counts 如果不是 None: in-place update p_counts
+        给定 tokens list, 计算它的 pair-tokens counts, 更新 到 输入的 p_counts 里
+    '''
+    if p_counts is None:
+        p_counts = {}
+    for pair in zip(tokens, tokens[1:]):
+        p_counts[pair] = p_counts.get(pair, 0) + 1
+
+    return p_counts
+
+
+
+def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token):
+    new_tokens = [] # 返回一个 new_tokens, 而不是对 tokens 作 in-place 更新
+    i = 0
+    while i < len(tokens):
+        if i < len(tokens) - 1 and tokens[i] == pair[0] and tokens[i+1] == pair[1]:
+            new_tokens.append( new_token )
+            i += 2
+        else:
+            new_tokens.append( tokens[i] )
+            i += 1
+    return new_tokens
+
+
+
+# 缓存这个函数, 因为预计会用完全相同的输入，调用很多次这个函数。缓存函数调用结果，下次遇到相同输入时，避免计算直接返回缓存结果
+@functools.lru_cache(maxsize=128)
+def _special_token_regex(tokens: frozenset[str]) -> "re.Pattern[str]":
+    inner = "|".join(re.escape(token) for token in tokens)
+    # 返回诸如 "(<pad>|<eos>|<bos>)" 之类的 special tokens 或运算符 拼接的 compiled regex
+    # compiled regex 可以直接调用 .search(text) 方法
+    return re.compile(f"({inner})")
+
+
+
+
+class BBPETokenizer(Tokenizer):
+    def __init__(
+            self,
+            name: str,
+            pat_str: str = GPT4_TOKENIZER_REGEX,
+            merge_ranks: dict[tuple[int, int], int] = {},
+            special_marks: list[str] = [ENDOFTEXT, FIM_PREFIX, FIM_MIDDLE, FIM_SUFFIX, ENDOFPROMPT],
+            explicit_n_vocab: int | None = None
+            ):
+
+        self.name = name
+        self.pat_str = pat_str
+        self._merge_ranks = merge_ranks
+        self._special_marks = special_marks
+        # special marks 必须都能被 pat_str 切开，不然可能会导致 merge-generated in BPE
+        assert all([ len(re.findall(pat_str, mark)) > 1 for mark in special_marks ])
+
+        if merge_ranks: # 如果输入了非空的 merge_ranks
+            # merge_ranks 的 RANK 应该是 256 至 MAX_RANK 的连续正整数: 递增 且 len(merge_ranks) = MAX_RANK - 255 且 首元素 = 256
+            ranks_seq = list( merge_ranks.values() )
+            assert check_monotonic(ranks_seq, mode='increase', strict=True) and len(ranks_seq) == ranks_seq[-1]-255 and ranks_seq[0] == 256
+
+            # 可以直接 构建 vocab: token_ID --> bytes
+            self._build_vocab()
+            
+            # 可以直接 注册 special_tokens，因为已经有 merge_ranks，无需 BPE train
+            self._register_special_tokens()
+
+            # 总的 vocab_size, 即 explicit_n_vocab 也随之 确定。不过若输入了 explicit_n_vocab，检查是否和 merge+special 匹配
+            if explicit_n_vocab:
+                assert explicit_n_vocab == 256 + len(merge_ranks) + len(special_marks) # 总 vocab size 应该等于 256 + merge tokens size + n_special_tokens
+            self.explicit_n_vocab = 256 + len(merge_ranks) + len(special_marks)
+
+        else: # 如果 没有输入非空的 merge_ranks
+            # 那么需要 run BPE train process to build merges_ranks forrest. corpus text 将随后输入，但在这里可以 确定 number of merges
+            # 必须输入 explicit_n_vocab
+            assert explicit_n_vocab >= 256 + len(special_marks), \
+                f'pretrained merge_ranks forrest empty.\n' + \
+                f'input explicit_n_vocab (shall be at least greater than 256+{len(special_marks)}(num_special_marks)={256+len(special_marks)}\n' + \
+                f'e.g, GPT2 tokenizer has explicit_n_vocab as 50257, with 1 special marks and 50000 merges'
+            
+            # 需要执行 merge 的次数。但不一定能执行到，因为可能存在 run out of corpus 的情况（即所有 corpus 被merge到一起了）
+            self._num_merges = explicit_n_vocab - 256 - len(self._special_marks)
+
+
+    def _build_vocab(self):
+        # vocab: token_ID --> bytes
+        assert hasattr(self, "_merge_ranks")
+        self._vocab = {i: bytes([i]) for i in range(256)} # initialize 0 - 255 --> bytes
+        for (L_int, R_int), merged_int in self._merge_ranks.items():
+            self._vocab[merged_int] = self._vocab[L_int] + self._vocab[R_int] # two bytes concatenate
+
+
+    def _register_special_tokens(self):
+        assert hasattr(self, "_merge_ranks") and hasattr(self, "_special_marks")
+        # vocab key 是 int, value 是 bytes
+        # inverse special tokens key 是 int, value 是 str
+        # special tokens key 是 str, value 是 int
+        # 不统一，是因为 special tokens 要保持 str, 以便作 正则分割操作
+        self.special_tokens: dict[str, int] = {} # speical mark str --> special token id
+
+        # special tokens 的 token ID 应该 紧接着 merge_ranks 的 MAX RANK，即 MAX_RANK + 1 开始
+        # 这样 所有tokens的 mapping value 应该是 0 至 explicit_n_vocab-1 = len(merge_ranks) + len(special_marks) - 1 的连续正整数
+
+        # 所以 注册 special_tokens 的工作应该在 获得 有效的 merge_ranks 之后
+        if self._merge_ranks:
+            MAX_MERGE_RANK = max( self._merge_ranks.values() ) # MAX_MERGE_RANK = 255 + num_merges
+            for i, sp_mark in enumerate(self._special_marks):
+                self.special_tokens[sp_mark] = MAX_MERGE_RANK + i + 1
+        else:
+            raise RuntimeError(f'merge_ranks not build. run BPE train process to build merge_ranks forrest before register special tokens')
+        
+        self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()} # special token id --> special mark str
+
+
+    def train_bpe(self, corpus:str, verbose:bool=False):
+        if not corpus:
+            raise ValueError(f'corpus to train bpe tokenizer cannot be null string')
+        
+        merge_ranks: dict[tuple[int, int], int] = {} # 初始化 _merge_ranks
+        vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
+        # raw
+        chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
+        # initial tokens: 可多线程加速
+        chunks_tokens: t.List[list[int]] = [list( chunk.encode('utf-8') ) for chunk in chunks_str] # list of int(0..255)_list
+
+        for i in range(self._num_merges):
+            p_counts:t.Dict[tuple[int, int], int] = {} # 本次merge: 首先要针对当前 tokens list 作 pair counts accumulatively
+            # 可多线程加速：对每个 tokens 作get_pair_counts（多进程加速），得到所有 p_counts 后，再一起累加
+            for tokens in chunks_tokens:
+                get_pair_counts(tokens, p_counts) # 从当前 tokens 提取 pairs，更新 p_counts
+
+            # 如果 经过 chunks_tokens 累积更新 p_counts, p_counts 仍然是 {}, 说明 corpus 已经全部 merge 到一起, 无可 merge
+            if not p_counts:
+                break
+
+            # 从 p_counts 找到 occur-most pair of tokens（two IDs） as top_pair
+            occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get) 
+            new_token: int = i + 256 # 以 rank 为 new token
+
+            merge_ranks[occur_most_pair] = new_token # 记录 merge: rank as new token
+            vocab[new_token] = vocab[occur_most_pair[0]] + vocab[occur_most_pair[1]] # 记录 new token 对应的 bytes
+
+            # 更新 chunks_tokens 的所有 tokens: occur-most pair of tokens 要 merge 成 new_token. 可多线程加速
+            chunks_tokens = [merge_pair(tokens, occur_most_pair, new_token) for tokens in chunks_tokens]
+
+            if verbose:
+                print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}\
+                       [{vocab[new_token]}] had {p_counts[occur_most_pair]} occurences')
+                
+        self._merge_ranks = merge_ranks
+        self._vocab = vocab
+
+        # explicit_n_vocab = num_actual_merges + 256 + num_specials
+        # 循环正常结束时, num_actual_merges = _num_merges, i = _num_merges - 1 ---> n_vocab = i + 1 + 256 + num_specials
+        # 循环提前结束时, num_actual_merges = i                                ---> n_vocab = i + 256 + num_specials
+        # 不过不管如何，都等于最近的 new_token + 1 + num_specials
+        self.explicit_n_vocab = new_token + 1 + len(self._special_marks)
+
+        # 得到 merge_ranks forrest 之后，注册 special_tokens
+        self._register_special_tokens()
+
+
+    def _encode_chunk(self, tokens:t.List[int]) -> t.List[int]:
+        '''
+        对 chunk(tokens) 作持续的 merge, 直至 无可merge
+        '''
+        while len(tokens) > 1: # 在循环体内不断更新 tokens
+            p_counts: t.Dict[tuple[int, int], int] = get_pair_counts(tokens)
+
+            min_rank_pair: tuple[int, int] = min(p_counts, key=lambda p: self._merge_ranks.get(p, float('inf')))
+
+            if min_rank_pair not in self._merge_ranks: # 如果 求出 的 min_rank_pair 不在 _merge_ranks 里
+                break
+            # 更新 tokens
+            tokens = merge_pair(tokens, min_rank_pair, self._merge_ranks[min_rank_pair])
+        
+        return tokens
+
+    
+    def encode_ordinary(self, text:str) -> t.List[int]:
+        '''
+        encoding text that ignores any special tokens
+        无视任何 special tokens / marks, 纯粹从 utf-8 编码后的字节流 作持续不断的 merge, 以 tokenize
+        '''
+        assert self._merge_ranks
+
+        # raw
+        chunks_str: t.List[str] = re.findall(self.pat_str, text) # pre-split to list of string
+        # initial tokens: 可多线程加速
+        chunks_tokens: t.List[list[int]] = [list( chunk.encode('utf-8') ) for chunk in chunks_str] # list of int(0..255)_list
+
+        encoded_output: t.List[int] = []
+        for tokens in chunks_tokens:
+            encoded_output.extend( self._encode_chunk(tokens) )
+        
+        return encoded_output
+
+
+    def encode_special(
+            self,
+            text:str,
+            allowed_special:t.Literal["all"] | t.AbstractSet[str]
+            ) -> t.List[int]:
+        '''
+        encoding text that first mapping registered and allowed special marks to special_token_ID, then tokenize the rest
+        输入的 allowed_special 和 注册的 special_tokens 取交集.
+            交集内的 special 若出现在 text 中, 则mapping as 注册的 special token ID
+            text 其他部分采用 encode_ordinary 方式 编码
+        '''
+        assert hasattr(self, 'special_tokens') # 要求本 tokenizer 已完成 specials 注册. special_tokens is dict of {str: int}
+        if allowed_special == 'all':
+            specials = self.special_tokens
+        else:
+            # allowed_special 交集 registered_special  如果 allowed_special 为空, 那么 specials 也为 空
+            specials = {k:v for k, v in self.special_tokens.items() if k in allowed_special} # dict of str: int
+
+        if not specials: # 如果 specials 为 空
+            return self.encode_ordinary(text)
+        
+        special_pat = '(' + '|'.join(re.escape(k) for k in specials) + ')'
+        chunks = re.split(special_pat, text) # special tokens 从 text 中分离出来: list of str
+
+        tokens = []
+        for chunk in chunks:
+            if chunk in specials: # 如果是 special mark, 直接匹配 注册的 special token ID
+                tokens.append( self.special_tokens[chunk] )
+            else: # 如果是 plain text, 使用 encode ordinary 编码成 tokens
+                tokens.extend( self.encode_ordinary(chunk) )
+        
+        return tokens
+    
+    
+    def encode(self, text:str,
+               allowed_special:t.Literal["all"] | t.AbstractSet[str] = set(),
+               disallowed_special:t.Literal["all"] | t.Collection[str] = "all"
+               ) -> t.List[int]:
+        '''
+        按理来说, special tokens 是拿来控制 LLM 的, 不应该出现在 text 中。这里 额外处理special的逻辑与 OpenAI tiktoken 保持一致。
+        即：如果在 text 中检测到 special tokens, 则 raise error。
+        
+        通过 allowed_special, disallowed_special 来 控制 special tokens 的粒度。allow 和 disallow 的区别在于是否 raise error:
+
+        第一步 确定 disallowed specials, 以此 判断本次 encode 要不要 raise error: 若 text 中出现了 disallowed specials, 则 raise error; 否则进入第二步
+        第二步 用 encode_special 方法来 encode text: 即 allowed specials 和 注册 specials 的交集会被 map to special token ID
+        
+        1. 确定 disallowed specials。若 text 里包含 disallowed specials, 则 raise error。不包含则进入下一步
+            如何确定 disallowed specials?
+                1. input arg disallowed_special = all: 意味着 该tokenizer 注册的 special tokens 减去 arg allowed_special, 就是 disallowed specials
+                （此时若 arg allowed_special = all, 则 disallowed_special 为 空，即 没有 disallow 的 special。）
+                2. input arg disallowed_special = (): 意味着 disallowed_special 为 空，即 没有 disallow 的 special。
+                3. input arg disallowed_special = set of str marks: 意味着 disallowed_special 是一个 valid 集合
+        
+        2. 若在 第1步没有 raise error, 则采用 encode with special on text
+        '''
+        assert self._merge_ranks
+        # allowed speicals: 如果 disallowed_special = all, 需要 allowed speicals 来确定 disallowed specials
+        if allowed_special == "all":
+            allowed_special = set( self.special_tokens ) # dict of {str: int} ---> set of str
+
+        if disallowed_special == "all":
+            disallowed_special = set( self.special_tokens ) - allowed_special # set - set ---> set of str
+
+        if disallowed_special: # 如果到这里, disallowed_special 非空, 那么要对 text 作检测，保证其不出现 disallowed_special, 不然 raise error
+            if not isinstance(disallowed_special, frozenset):
+                disallowed_special = frozenset(disallowed_special) # set --> frozenset
+
+            if match := _special_token_regex(disallowed_special).search(text):
+                raise ValueError(
+                    f'disallowed specials {match.group()} found in text.\n'
+                    f'expand `allowed_special` if you want to encode the disallowed marks into special tokens.\n'
+                    f'narrow `disallowed_special` if you want to encode the disallowed marks as plain.\n'
+                    f'you can expand `allowed_special` to "all" or narrow `disallowed_special` to (),'
+                    f'both will ignore specials and tokenize the text as plain'
+                    )
+
+        return self.encode_special(text, allowed_special)
+
+    
+    def decode(self, tokens:t.List[int], errors: str = "replace") -> str:
+        assert hasattr(self, '_vocab')
+
+        parts = []
+        for idx in tokens:
+            if idx in self._vocab:
+                parts.append( self._vocab[idx] ) # append bytes
+            elif idx in self.inverse_special_tokens:
+                parts.append( self.inverse_special_tokens[idx].encode('utf-8') ) # append bytes
+            else:
+                raise ValueError(f'invalid index {idx} out-of-vocab')
+        concat_bytes = b''.join( parts )
+        # 容错：错误的字节序列使用一个 replacement char 来替代
+        return concat_bytes.decode('utf-8', errors=errors)
+    
+
+    def save(self, f_prefix):
+        '''
+        保存 name
+        保存 pat_str
+        保存 special_marks
+        保存 merge_ranks (只需要保存 keys 即可，因为 values 是从 256 的递增序列)
+        ---> 即保存了一个 tokenizer 的全部信息
+        '''
+        with open(f_prefix+'.tok', 'w') as f:
+            # write the name of the tokenizer as version
+            f.write(f"{self.name}\n")
+            # write the split pattern
+            f.write(f"{self.pat_str}\n")
+            # write the special_marks: first line number of special marks, then each line with a special mark
+            f.write(f"{len(self._special_marks)}\n")
+            for mark in self._special_marks:
+                f.write(f"{mark}\n")
+            # write the merge_ranks' keys
+            for L, R in self._merge_ranks:
+                f.write(f"{L} {R}\n")
+
+    
+
+    def load(self, f_name):
+        '''
+        读取 name: line 1
+        读取 pat_str: line 2
+        读取 num_of_special_marks: line 3
+        读取接下来 num_of_special_marks 行 --> special marks
+        按序读取剩下所有行: pair tokens, 依次存入 merge_ranks[pair tokens] = 256 ++
+        构建剩余所有其他, register special tokens / vocab / explicit_n_vocab
+        '''
+        assert f_name.endswith(".tok")
+        # read .tok file
+        self._special_marks = []
+        self._merge_ranks = {}
+        with open(f_name, 'r', encoding='utf-8') as f:
+            # read the name of the tokenizer as version
+            self.name = f.readline().strip()
+            # read the split pattern
+            self.pat_str = f.readline().strip()
+            # read the num_special
+            num_special = int(f.readline().strip())
+            # read next num_special lines
+            for _ in range(num_special):
+                self._special_marks.append( f.readline().strip() )
+            # read all remained lines as pair merged, split and store them in order
+            for i, line in enumerate(f):
+                L, R = map(int, line.split())
+                self._merge_ranks[(L, R)] = 256 + i # i 从 0 开始, rank 从 256 开始
+
+            # 循环结束时, i = num_lines_of_merge_ranks - 1
+            self.explicit_n_vocab = 256 + i + 1 + num_special # explicit_n_vocab = 256 + num_merges + num_specials
+        
+        # 构建 vocab: token_ID --> bytes
+        self._build_vocab()
+
+        # 注册 special_tokens
+        self._register_special_tokens()
+
+
+
+    
+    def view(self, tmpsave_path):
+        # _vocab: int(0 至 MAX_MERGE_RANK) --> bytes
+        # _merge_ranks: (int, int) --> merged_int(256 至 MAX_MERGE_RANK)
+        # special_tokens: (str, int)
+        assert hasattr(self, "_vocab") and hasattr(self, "_merge_ranks") and hasattr(self, "special_tokens")
+        reverse_merge = {v:k for k, v in self._merge_ranks.items()} # merged_int --> (int, int)
+
+        from .TextPreprocess import render_bytes
+        import os
+
+        with open(os.path.join(tmpsave_path, f'tmp_{self.name}.vocab'), 'w', encoding='utf-8') as f:
+            # 首先打印 special marks:
+            for mark, idx in self.special_tokens.items():
+                f.write(f"[{mark}] {idx}\n")
+
+            for idx, token in self._vocab.items():
+                s = render_bytes(token)
+                if idx < 256:
+                    f.write(f"[{s}] {idx}\n")
+                else:
+                    L, R = reverse_merge[idx]
+                    s_L, s_R = render_bytes(self._vocab[L]), render_bytes(self._vocab[R])
+                    f.write(f"[{s_L}] {L} , [{s_R}] {R} -> [{s}] {idx}\n")
+
+    @property
+    def vocab_size(self) -> int:
+        return self.explicit_n_vocab
+    
+
+    @property
+    def eot_token(self) -> int:
+        return self.special_tokens[ENDOFTEXT]
+
+
+    @functools.cached_property
+    def special_marks_set(self) -> set[str]:
+        return set(self.special_tokens.keys())
+    
+
+    def is_special_token(self, token: int) -> bool:
+        assert isinstance(token, int)
+        return token in self.inverse_special_tokens
