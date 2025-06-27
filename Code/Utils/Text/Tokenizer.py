@@ -220,15 +220,19 @@ class BBPETokenizer(Tokenizer):
         self.special_tokens: dict[str, int] = {} # speical mark str --> special token id
 
         # special tokens 的 token ID 应该 紧接着 merge_ranks 的 MAX RANK，即 MAX_RANK + 1 开始
-        # 这样 所有tokens的 mapping value 应该是 0 至 explicit_n_vocab-1 = len(merge_ranks) + len(special_marks) - 1 的连续正整数
-
+        # 这样 所有tokens的 mapping value 应该是 0 至 explicit_n_vocab-1 = 256 + len(merge_ranks) + len(special_marks) - 1 的连续正整数
         # 所以 注册 special_tokens 的工作应该在 获得 有效的 merge_ranks 之后
         if self._merge_ranks:
-            MAX_MERGE_RANK = max( self._merge_ranks.values() ) # MAX_MERGE_RANK = 255 + num_merges
-            for i, sp_mark in enumerate(self._special_marks):
-                self.special_tokens[sp_mark] = MAX_MERGE_RANK + i + 1
+            SPECIAL_RANK_START = max( self._merge_ranks.values() ) + 1 # special starts from MAX_MERGE_RANK + 1
         else:
-            raise RuntimeError(f'merge_ranks not build. run BPE train process to build merge_ranks forrest before register special tokens')
+            import warnings
+            warnings.warn(
+                f'merge_ranks is Empty. now register special tokens right after 0 - 255 bytes.\n'
+                f'run valid BPE train process to build merge_ranks forrest before register special tokens')
+            SPECIAL_RANK_START = 256 # special starts from 255 + 1
+
+        for i, sp_mark in enumerate(self._special_marks):
+            self.special_tokens[sp_mark] = SPECIAL_RANK_START + i
         
         self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()} # special token id --> special mark str
 
@@ -307,8 +311,8 @@ class BBPETokenizer(Tokenizer):
         encoding text that ignores any special tokens
         无视任何 special tokens / marks, 纯粹从 utf-8 编码后的字节流 作持续不断的 merge, 以 tokenize
         '''
-        assert self._merge_ranks
-
+        # encode 方法必须先检查有无 special_tokens. special_tokens 可以空, 也可以不在 encode 中用到.
+        assert hasattr(self, 'special_tokens') # 有 / 无 special_tokens 属性, 可以区分 tokenizer 的 merge_ranks-empty / merge_ranks not-generated
         # raw
         chunks_str: t.List[str] = re.findall(self.pat_str, text) # pre-split to list of string
         # initial tokens: 可多线程加速
@@ -332,7 +336,8 @@ class BBPETokenizer(Tokenizer):
             交集内的 special 若出现在 text 中, 则mapping as 注册的 special token ID
             text 其他部分采用 encode_ordinary 方式 编码
         '''
-        assert hasattr(self, 'special_tokens') # 要求本 tokenizer 已完成 specials 注册. special_tokens is dict of {str: int}
+        # 要求本 tokenizer 已完成 specials 注册. special_tokens is dict of {str: int}
+        assert hasattr(self, 'special_tokens') # 有 / 无 special_tokens 属性, 可以区分 tokenizer 的 merge_ranks-empty / merge_ranks not-generated
         if allowed_special == 'all':
             specials = self.special_tokens
         else:
@@ -377,8 +382,8 @@ class BBPETokenizer(Tokenizer):
         
         2. 若在 第1步没有 raise error, 则采用 encode with special on text
         '''
-        assert self._merge_ranks
-        # allowed speicals: 如果 disallowed_special = all, 需要 allowed speicals 来确定 disallowed specials
+        assert hasattr(self, 'special_tokens') # 有 / 无 special_tokens 属性, 可以区分 tokenizer 的 merge_ranks-empty / merge_ranks not-generated
+
         if allowed_special == "all":
             allowed_special = set( self.special_tokens ) # dict of {str: int} ---> set of str
 
@@ -439,7 +444,6 @@ class BBPETokenizer(Tokenizer):
                 f.write(f"{L} {R}\n")
 
     
-
     def load(self, f_name):
         '''
         读取 name: line 1
@@ -468,16 +472,14 @@ class BBPETokenizer(Tokenizer):
                 L, R = map(int, line.split())
                 self._merge_ranks[(L, R)] = 256 + i # i 从 0 开始, rank 从 256 开始
 
-            # 循环结束时, i = num_lines_of_merge_ranks - 1
-            self.explicit_n_vocab = 256 + i + 1 + num_special # explicit_n_vocab = 256 + num_merges + num_specials
+            # 循环结束时, i = num_lines_of_merge_ranks - 1 , explicit_n_vocab = 256 + num_merges + num_specials
+            self.explicit_n_vocab = 257 + i + num_special
         
         # 构建 vocab: token_ID --> bytes
         self._build_vocab()
 
         # 注册 special_tokens
         self._register_special_tokens()
-
-
 
     
     def view(self, tmpsave_path):

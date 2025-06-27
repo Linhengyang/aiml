@@ -14,7 +14,7 @@ test_strings = [
     "", # empty string
     "?", # single character
     "hello world!!!? (안녕하세요!) lol123 😉", # messy string
-    r"FILE:../../../data/test/timemachine.txt", # FILE: is handled as a special string in unpack()
+    r"FILE:../../../data/test/text/timemachine.txt", # FILE: is handled as a special string in unpack()
 ]
 
 
@@ -22,8 +22,9 @@ def unpack(text):
     # we do this because `pytest -v .` prints the arguments to console, and we don't
     # want to print the entire contents of the file, it creates a mess. So here we go.
     if text.startswith("FILE:"):
-        dirname = os.path.dirname(os.path.abspath(__file__))
-        target_file = os.path.join(dirname, text[5:])
+        # dirname = os.path.dirname(os.path.abspath(__file__))
+        # target_file = os.path.join(dirname, text[5:])
+        target_file = text[5:]
         contents = open(target_file, "r", encoding="utf-8").read()
         return contents
     else:
@@ -63,7 +64,7 @@ The ancestors of llamas are thought to have originated from the Great Plains of 
 @pytest.mark.parametrize("text", test_strings)
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
-    tokenizer = tokenizer_factory(explicit_n_vocab = 261) # 256 + 5, zero-merge
+    tokenizer = tokenizer_factory(name='test', explicit_n_vocab = 261) # 256 + 5, zero-merge
     tokenizer.train_bpe(corpus='')
     ids = tokenizer.encode(text)
     decoded = tokenizer.decode(ids)
