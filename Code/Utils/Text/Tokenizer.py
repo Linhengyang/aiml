@@ -495,8 +495,8 @@ class BBPETokenizer(Tokenizer):
     
 
     @property
-    def eot_token(self, eot:str = ENDOFTEXT) -> int:
-        return self.special_tokens[eot]
+    def eot_token(self) -> int:
+        return self.special_tokens[ENDOFTEXT]
 
 
     @functools.cached_property
