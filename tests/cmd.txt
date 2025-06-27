@@ -1,0 +1,3 @@
+
+# copy to run all test functions under directory `aiml/tests`:
+PYTHONDONTWRITEBYTECODE=1 pytest -v .

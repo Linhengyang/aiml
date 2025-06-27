@@ -2,3 +2,4 @@
 **/*.tok
 *.tok
 *.vocab
+**/.pytest_cache
