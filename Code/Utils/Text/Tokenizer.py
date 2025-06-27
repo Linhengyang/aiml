@@ -177,7 +177,7 @@ class BBPETokenizer(Tokenizer):
 
         if merge_ranks: # 如果输入了非空的 merge_ranks
             # merge_ranks 的 RANK 应该是 256 至 MAX_RANK 的连续正整数: 递增 且 len(merge_ranks) = MAX_RANK - 255 且 首元素 = 256
-            ranks_seq = merge_ranks.values()
+            ranks_seq = list( merge_ranks.values() )
             assert check_monotonic(ranks_seq, mode='increase', strict=True) and len(ranks_seq) == ranks_seq[-1]-255 and ranks_seq[0] == 256
 
             # 可以直接 构建 vocab: token_ID --> bytes
@@ -199,8 +199,8 @@ class BBPETokenizer(Tokenizer):
                 f'input explicit_n_vocab (shall be at least greater than 256+{len(special_marks)}(num_special_marks)={256+len(special_marks)}\n' + \
                 f'e.g, GPT2 tokenizer has explicit_n_vocab as 50257, with 1 special marks and 50000 merges'
             
-            self.explicit_n_vocab = explicit_n_vocab
-            self._num_merges = self.explicit_n_vocab - 256 - len(self._special_marks)
+            # 需要执行 merge 的次数。但不一定能执行到，因为可能存在 run out of corpus 的情况（即所有 corpus 被merge到一起了）
+            self._num_merges = explicit_n_vocab - 256 - len(self._special_marks)
 
 
     def _build_vocab(self):
@@ -224,7 +224,7 @@ class BBPETokenizer(Tokenizer):
 
         # 所以 注册 special_tokens 的工作应该在 获得 有效的 merge_ranks 之后
         if self._merge_ranks:
-            MAX_MERGE_RANK = self._merge_ranks.values()[-1] # MAX_MERGE_RANK = 255 + num_merges
+            MAX_MERGE_RANK = max( self._merge_ranks.values() ) # MAX_MERGE_RANK = 255 + num_merges
             for i, sp_mark in enumerate(self._special_marks):
                 self.special_tokens[sp_mark] = MAX_MERGE_RANK + i + 1
         else:
@@ -250,6 +250,10 @@ class BBPETokenizer(Tokenizer):
             for tokens in chunks_tokens:
                 get_pair_counts(tokens, p_counts) # 从当前 tokens 提取 pairs，更新 p_counts
 
+            # 如果 经过 chunks_tokens 累积更新 p_counts, p_counts 仍然是 {}, 说明 corpus 已经全部 merge 到一起, 无可 merge
+            if not p_counts:
+                break
+
             # 从 p_counts 找到 occur-most pair of tokens（two IDs） as top_pair
             occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get) 
             new_token: int = i + 256 # 以 rank 为 new token
@@ -262,10 +266,16 @@ class BBPETokenizer(Tokenizer):
 
             if verbose:
                 print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}\
-                       ({self._vocab[new_token]}) had {p_counts[occur_most_pair]} occurences')
+                       [{vocab[new_token]}] had {p_counts[occur_most_pair]} occurences')
                 
         self._merge_ranks = merge_ranks
         self._vocab = vocab
+
+        # explicit_n_vocab = num_actual_merges + 256 + num_specials
+        # 循环正常结束时, num_actual_merges = _num_merges, i = _num_merges - 1 ---> n_vocab = i + 1 + 256 + num_specials
+        # 循环提前结束时, num_actual_merges = i                                ---> n_vocab = i + 256 + num_specials
+        # 不过不管如何，都等于最近的 new_token + 1 + num_specials
+        self.explicit_n_vocab = new_token + 1 + len(self._special_marks)
 
         # 得到 merge_ranks forrest 之后，注册 special_tokens
         self._register_special_tokens()
@@ -403,7 +413,7 @@ class BBPETokenizer(Tokenizer):
         return concat_bytes.decode('utf-8', errors=errors)
     
 
-    def save(self, f_name):
+    def save(self, f_prefix):
         '''
         保存 name
         保存 pat_str
@@ -411,7 +421,7 @@ class BBPETokenizer(Tokenizer):
         保存 merge_ranks (只需要保存 keys 即可，因为 values 是从 256 的递增序列)
         ---> 即保存了一个 tokenizer 的全部信息
         '''
-        with open(f_name, 'w') as f:
+        with open(f_prefix+'.tok', 'w') as f:
             # write the name of the tokenizer as version
             f.write(f"{self.name}\n")
             # write the split pattern
@@ -435,6 +445,8 @@ class BBPETokenizer(Tokenizer):
         按序读取剩下所有行: pair tokens, 依次存入 merge_ranks[pair tokens] = 256 ++
         构建剩余所有其他, register special tokens / vocab / explicit_n_vocab
         '''
+        assert f_name.endswith(".tok")
+        # read .tok file
         self._special_marks = []
         self._merge_ranks = {}
         with open(f_name, 'r', encoding='utf-8') as f:
@@ -474,10 +486,9 @@ class BBPETokenizer(Tokenizer):
         from .TextPreprocess import render_bytes
         import os
 
-        with open(os.path.join(tmpsave_path, f'tmp_{self.name}'), 'w', encoding='utf-8') as f:
-            f.write(f"tokenizer {self.name}\n")
+        with open(os.path.join(tmpsave_path, f'tmp_{self.name}.vocab'), 'w', encoding='utf-8') as f:
             # 首先打印 special marks:
-            for idx, mark in self.special_tokens.items():
+            for mark, idx in self.special_tokens.items():
                 f.write(f"[{mark}] {idx}\n")
 
             for idx, token in self._vocab.items():
