@@ -69,3 +69,61 @@ def test_encode_decode_identity(tokenizer_factory, text):
     ids = tokenizer.encode(text)
     decoded = tokenizer.decode(ids)
     assert text == decoded
+
+
+# test bpe basic logic
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+def test_wikipedia_example(tokenizer_factory):
+    """
+    Quick unit test, following along the Wikipedia example:
+    https://en.wikipedia.org/wiki/Byte_pair_encoding
+
+    According to Wikipedia, running bpe on the input string:
+    "aaabdaaabac"
+
+    for 3 merges will result in string:
+    "XdXac"
+
+    where:
+    X=ZY
+    Y=ab
+    Z=aa
+
+    Keep in mind that for us a=97, b=98, c=99, d=100 (ASCII values)
+    so Z will be 256, Y will be 257, X will be 258.
+
+    So we expect the output list of ids to be [258, 100, 258, 97, 99]
+    """
+    tokenizer = tokenizer_factory(name='test', explicit_n_vocab=256+3+5)
+    text = "aaabdaaabac"
+    tokenizer.train_bpe(text, verbose=True)
+    tokens = tokenizer.encode(text)
+    assert tokens == [258, 100, 258, 97, 99]
+    assert tokenizer.decode(tokens) == text
+
+
+
+# # test save/load/view
+# @pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+# @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
+# def test_save_load(tokenizer_factory, special_marks):
+#     # take a bit more complex piece of text and train the tokenizer, chosen at random
+#     # create a Tokenizer and do 1000+ merges
+#     tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, explicit_n_vocab=1261)
+#     tokenizer.train_bpe(corpus=llama_text)
+#     # verify that decode(encode(x)) == x
+#     assert tokenizer.decode(tokenizer.encode(llama_text, "all")) == llama_text
+#     # verify that save/load work as expected
+#     ids = tokenizer.encode(llama_text, "all")
+#     # save the tokenizer (TODO use a proper temporary directory)
+#     tokenizer.save("test_tokenizer_tmp")
+#     # re-load the tokenizer
+#     tokenizer = RegexTokenizer()
+#     tokenizer.load("test_tokenizer_tmp.model")
+#     # verify that decode(encode(x)) == x
+#     assert tokenizer.decode(ids) == text
+#     assert tokenizer.decode(tokenizer.encode(text, "all")) == text
+#     assert tokenizer.encode(text, "all") == ids
+#     # delete the temporary files
+#     for file in ["test_tokenizer_tmp.model", "test_tokenizer_tmp.vocab"]:
+#         os.remove(file)
