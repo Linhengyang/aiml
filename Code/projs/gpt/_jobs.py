@@ -101,7 +101,7 @@ def prepare_job():
     if not os.path.exists(tokenizer_path):
         # create tokenizer
         gpt_tokenizer = BBPETokenizer(name='gpt')
-        gpt_tokenizer.train_bpe(corpus, num_merges=30000)
+        gpt_tokenizer.train_bpe(corpus, num_merges=30000, verbose=True)
         gpt_tokenizer.save(tokenizer_path)
     # 当 tokenizer_path 存在时
     else:
