@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import math
-from ..functions.mask import mask_on_last_dim
+from ...base.functions.mask import mask_on_last_dim
 
 
 

@@ -1,4 +1,4 @@
-# Math.py
+# math.py
 import math
 import numpy as np
 
