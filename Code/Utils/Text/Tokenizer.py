@@ -43,6 +43,7 @@
 from abc import ABC
 import typing as t
 
+
 class Tokenizer(ABC):
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -98,8 +99,11 @@ class ByteTokenizer(Tokenizer):
 
 
 import regex as re
-from ..Common.SeqOperation import check_monotonic
+import os
 import functools
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from ..Common.SeqOperation import check_monotonic
+
 
 # deprecated split-pattern for GPT2. use GPT4 version
 GPT2_TOKENIZER_REGEX = \
@@ -237,7 +241,7 @@ class BBPETokenizer(Tokenizer):
         self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()} # special token id --> special mark str
 
 
-    def train_bpe(self, corpus:str, num_merges:int|None = None, verbose:bool=False):
+    def train_bpe(self, corpus:str, num_merges:int|None = None, num_workers:int=5, verbose:bool=False):
         if not hasattr(self, '_num_merges'): # if _num_merges not set, must input num_merges here
             assert isinstance(num_merges, int) and num_merges >= 0, f'num merges not set. must input num_merges >= 0.'
             self._num_merges = num_merges
@@ -264,12 +268,13 @@ class BBPETokenizer(Tokenizer):
                 get_pair_counts(tokens, p_counts) # 从当前 tokens 提取 pairs，更新 p_counts
 
             # 如果 经过 chunks_tokens 累积更新 p_counts, p_counts 仍然是 {}, 说明 corpus 已经全部 merge 到一起, 无可 merge
-            # 不提前结束 merge 循环, 而是报错, 提示 更换参数 explicit_n_vocab 或 语料 corpus。原因是参数 explicit_n_vocab 语意 明确的 vocab_size，
+            # 不提前结束 merge 循环, 而是报错, 提示 更换参数 explicit_n_vocab 或 语料 corpus。
+            # 原因是参数 explicit_n_vocab 语意 明确的 vocab_size，
             # 所以不应引入不确定性：当 explicit_n_vocab 和 corpus 冲突时，raise error而不是根据 corpus 确定 explicit_n_vocab
             if not p_counts:
                 raise RuntimeError(f'run out of corpus(all merged together) after {i} merges.\n'
                                    f'the maximum valid `explicit_n_vocab` for this corpus is {256+i+len(self._special_marks)}.\n'
-                                   f're-initialize the tokenizer with lower `explicit_n_vocab` in between {256+len(self._special_marks)}'
+                                   f're-init the tokenizer with lower `explicit_n_vocab` in between {256+len(self._special_marks)}'
                                    f'(zero-merge) & {256+i+len(self._special_marks)}(exactly-ran-out-of current corpus), '
                                    f'or with enlarged corpus.')
 
@@ -280,8 +285,11 @@ class BBPETokenizer(Tokenizer):
             merge_ranks[occur_most_pair] = new_token # 记录 merge: rank as new token
             vocab[new_token] = vocab[occur_most_pair[0]] + vocab[occur_most_pair[1]] # 记录 new token 对应的 bytes
 
-            # 更新 chunks_tokens 的所有 tokens: occur-most pair of tokens 要 merge 成 new_token. 可多线程加速
-            chunks_tokens = [merge_pair(tokens, occur_most_pair, new_token) for tokens in chunks_tokens]
+            # <多线程> 更新 chunks_tokens 的所有 tokens: 把 occur-most pair of tokens merge 成 new_token.
+            # chunks_tokens = [merge_pair(tokens, occur_most_pair, new_token) for tokens in chunks_tokens]
+            merge = functools.partial(merge_pair, pair=occur_most_pair, new_token=new_token)
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                chunks_tokens = list( executor.map(merge, chunks_tokens) )
 
             if verbose:
                 print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}'
@@ -487,7 +495,7 @@ class BBPETokenizer(Tokenizer):
 
             try: # 循环结束时, i = num_lines_of_merge_ranks - 1 , explicit_n_vocab = 256 + num_merges + num_specials
                 self.explicit_n_vocab = 257 + i + num_special
-            except UnboundLocalError: # TODO: fix rare situation when no remained lines, that is no pair merged
+            except UnboundLocalError: # fix rare situation when no remained lines, that is no pair merged
                 self.explicit_n_vocab = 256 + num_special
 
         
