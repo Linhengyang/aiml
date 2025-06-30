@@ -1,4 +1,4 @@
-# 相对位置的起点, 是执行python的文件位置. 规定：总是在autodl下, 执行main.py或test.py
+# 相对位置的起点, 是执行python的文件位置. 规定：总是在aiml/下, 执行main.py或test.py
 # 日志log、参数params暂存总是在logs、model文件（logs/model/aiml/cache/tmp 五个文件平行放在 workspace 中）
 
 
