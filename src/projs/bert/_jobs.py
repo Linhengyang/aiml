@@ -4,15 +4,15 @@ warnings.filterwarnings("ignore")
 import torch
 import typing as t
 import pandas as pd
-from .Dataset import wikitextDataset
-from .Network import BERT, BERTLoss
-from .Trainer import bertPreTrainer
-from .Evaluator import bertEpochEvaluator
-from .Predictor import tokensEncoder
+from .dataset import wikitextDataset
+from .network import BERT, BERTLoss
+from .trainer import bertPreTrainer
+from .evaluator import bertEpochEvaluator
+from .predictor import tokensEncoder
 import yaml
-from ...core.Utils.Text.Vocabulize import Vocab
-from ...core.Utils.Text.Glossary import get_BPE_glossary
-from ...core.Utils.System.Math import cosine_similarity
+from ...core.utils.text.vocabulize import Vocab
+from ...core.utils.text.glossary import get_BPE_glossary
+from ...core.utils.system.math import cosine_similarity
 
 configs = yaml.load(open('src/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 

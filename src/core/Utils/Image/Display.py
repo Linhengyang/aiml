@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import typing as t
 import pandas as pd
-from ..System.Math import find_closet_2factors
+from ..system.math import find_closet_2factors
 
 
 

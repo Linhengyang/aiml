@@ -1,9 +1,9 @@
 import warnings
 warnings.filterwarnings("ignore")
 import re
-from src.projs.transformer.Dataset import *
+from src.projs.transformer.dataset import *
 import os
-from src.Utils.Text.Vocabulize import Vocab
+from src.core.utils.text.vocabulize import Vocab
 import math
 
 if __name__ == "__main__":

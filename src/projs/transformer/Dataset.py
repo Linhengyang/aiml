@@ -1,7 +1,7 @@
-from ...core.Utils.Text.text_preprocess import preprocess_space
-from ...core.Utils.Text.Vocabulize import Vocab
-from ...core.Utils.common.seq_operation import truncate_pad
-from ...core.Utils.Text.string_segment import sentence_segment_greedy
+from ...core.utils.text.text_preprocess import preprocess_space
+from ...core.utils.text.vocabulize import Vocab
+from ...core.utils.common.seq_operation import truncate_pad
+from ...core.utils.text.string_segment import sentence_segment_greedy
 import torch
 import typing as t
 import re

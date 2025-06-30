@@ -3,11 +3,11 @@ import warnings
 warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
-from .Dataset import FMNISTDatasetOnline, FMNISTDatasetLocal
-from .Network import ViTEncoder
-from .Trainer import vitTrainer
-from .Evaluator import vitEpochEvaluator
-from .Predictor import fmnistClassifier
+from .dataset import FMNISTDatasetOnline, FMNISTDatasetLocal
+from .network import ViTEncoder
+from .trainer import vitTrainer
+from .evaluator import vitEpochEvaluator
+from .predictor import fmnistClassifier
 import yaml
 import json
 

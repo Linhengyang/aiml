@@ -3,15 +3,15 @@ import warnings
 warnings.filterwarnings("ignore")
 import torch
 import typing as t
-from .Dataset import seq2seqDataset
-from .Network import TransformerEncoder, TransformerDecoder, Transformer
+from .dataset import seq2seqDataset
+from .network import TransformerEncoder, TransformerDecoder, Transformer
 from ...core.Loss.mask_ce_loss import MaskedCrossEntropyLoss
-from .Trainer import transformerTrainer
-from .Evaluator import transformerEpochEvaluator
-from .Predictor import sentenceTranslator
+from .trainer import transformerTrainer
+from .evaluator import transformerEpochEvaluator
+from .predictor import sentenceTranslator
 import yaml
-from ...core.Utils.Text.Vocabulize import Vocab
-from ...core.Utils.Text.Glossary import get_BPE_glossary
+from ...core.utils.text.vocabulize import Vocab
+from ...core.utils.text.glossary import get_BPE_glossary
 
 configs = yaml.load(open('src/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 

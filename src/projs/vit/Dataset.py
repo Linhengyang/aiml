@@ -1,7 +1,7 @@
 import torch
 import torchvision
 from torchvision import transforms
-from ...core.Utils.Image.MNIST import decode_idx3_ubyte, decode_idx1_ubyte
+from ...core.utils.image.mnist import decode_idx3_ubyte, decode_idx1_ubyte
 
 
 

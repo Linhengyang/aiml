@@ -5,8 +5,8 @@ import torch
 import typing as t
 import pandas as pd
 import yaml
-from ...core.Utils.Text.Vocabulize import Vocab
-from ...core.Utils.Text.Tokenizer import BBPETokenizer, ENDOFTEXT
+from ...core.utils.text.vocabulize import Vocab
+from ...core.utils.text.tokenizer import BBPETokenizer, ENDOFTEXT
 
 
 configs = yaml.load(open('src/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)

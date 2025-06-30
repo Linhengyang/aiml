@@ -1,6 +1,6 @@
 from ...core.base.meta_frames import Encoder, AttentionDecoder, EncoderDecoder
-from ...core.base.RootLayers.positional_encodings import TrigonoAbsPosEnc
-from ...core.Modules._transformer import TransformerEncoderBlock, TransformerDecoderBlock
+from ...core.base.root_layers.positional_encodings import TrigonoAbsPosEnc
+from ...core.modules._transformer import TransformerEncoderBlock, TransformerDecoderBlock
 import torch.nn as nn
 import math
 import torch
