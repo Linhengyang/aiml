@@ -4,24 +4,19 @@ warnings.filterwarnings("ignore")
 import torch
 import typing as t
 import pandas as pd
-from .Dataset import wikitextDataset
-from .Network import BERT, BERTLoss
-from .Trainer import bertPreTrainer
-from .Evaluator import bertEpochEvaluator
-from .Predictor import tokensEncoder
 import yaml
 from ...Utils.Text.Vocabulize import Vocab
-from ...Utils.Text.Glossary import get_BPE_glossary
-from ...Utils.System.Math import cosine_similarity
+from ...Utils.Text.Tokenizer import BBPETokenizer, ENDOFTEXT
 
-configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+
+configs = yaml.load(open('Code/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## directories ##################
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
 
 ################## symbols and vocabs in workspace/cache ##################
-glossary_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'glossary' )
-vocab_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'vocab' )
+tokenizer_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'tokenizer' )
+vocab_dir = os.path.join( configs['tmp_dir'], configs['proj_name'], 'vocab' )
 
 
 
@@ -85,43 +80,38 @@ def prepare_job():
     print('prepare job begin')
 
     # create all related directories if not existed
-    for dir_name in [glossary_dir, vocab_dir, model_dir, log_dir]:
+    for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir]:
         os.makedirs(dir_name, exist_ok=True)
         print(f'directory {dir_name} created')
 
-    # generate glossary of source/target language and save them
+    # generate tokenizer
     # not use BPE
 
     # 读取全部语料 corpus
     train_df = pd.read_parquet(configs['train_data'])
     valid_df = pd.read_parquet(configs['valid_data'])
-    test_df = pd.read_parquet(configs['test_data'])
-    full_df = pd.concat([train_df, valid_df, test_df], ignore_index=True)
-    del train_df, valid_df, test_df
+    full_df = pd.concat([train_df, valid_df], ignore_index=True)
+    del train_df, valid_df
     
-    corpus = ' '.join( full_df['text'].tolist() )
+    corpus = ENDOFTEXT.join( full_df['text'].tolist() )
 
-    uniq_size = len( set(corpus.split(' ')) )
-    print(f'unique word size:{uniq_size}')
-
-    # glossary
-    # 当 glossary_path 文件不存在时, 生产并保存 wiki_glossary 到 glossary_dir/wiki.json
-    glossary_path = os.path.join(glossary_dir, 'wiki.json')
-    if not os.path.exists(glossary_path):
-        # create wiki glossary
-        glossary = get_BPE_glossary(corpus = corpus, EOW_token = "</w>", merge_times = 40000, save_path = glossary_path)
-
+    # tokenizer
+    # 当 tokenizer_path 文件不存在时, 生产并保存 tokenizer 到 tokenizer_dir/gpt.tok
+    tokenizer_path = os.path.join(tokenizer_dir, 'gpt.tok')
+    if not os.path.exists(tokenizer_path):
+        # create tokenizer
+        gpt_tokenizer = BBPETokenizer(name='gpt')
+        gpt_tokenizer.train_bpe(corpus, num_merges=30000)
+        gpt_tokenizer.save(tokenizer_path)
+    # 当 tokenizer_path 存在时
+    else:
+        gpt_tokenizer.load(tokenizer_path)
 
     # vocab
-    # 当 vocab_path 文件不存在时, 生产并保存 wiki_vocab 到 vocab_dir/wiki.json
-    vocab_path = os.path.join(vocab_dir, 'wiki.json')
-    if not os.path.exists(vocab_path):
-        vocab = Vocab(corpus=corpus, glossary=glossary, need_lower=True, reserved_tokens=['<pad>', '<mask>', '<cls>', '<sep>'],
-                      unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|', min_freq=5)
-        vocab.save(vocab_path)
+    gpt_tokenizer.view(vocab_dir)
 
     print('prepare job complete')
-    return vocab_path
+    return tokenizer_path
 
 
 

@@ -22,9 +22,9 @@ eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accur
 
 
 # data-params
-train_data: '../../data/{}/raw/train.parquet'
-valid_data: '../../data/{}/raw/validation.parquet'
-test_data: '../../data/{}/raw/test.parquet'
+train_data: '../../data/TinyStory/raw/train.parquet'
+valid_data: '../../data/TinyStory/raw/validation.parquet'
+
 
 max_len: 64
 
