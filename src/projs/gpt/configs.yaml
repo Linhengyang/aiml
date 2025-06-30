@@ -1,0 +1,38 @@
+# 相对位置的起点, 是执行python的文件位置. 规定：总是在aiml/下, 执行main.py或test.py
+# 日志log、参数params暂存总是在log、model文件（log/artifact/model/aiml/cache/tmp 六个文件平行放在 workspace 中）
+
+
+# 日志log、参数params(模型)、缓存文件cache、临时文件tmp的文件夹地址如下：
+######################### 一级文件地址, 对任意proj适用 ######################### 
+log_dir: '../log'
+artifact_dir: '../artifact'
+model_dir: '../model'
+cache_dir: '../cache'
+tmp_dir: '../tmp'
+
+
+
+
+
+
+
+######################## 数据、外部资源地址和项目信息 ######################## 
+proj_name: 'gpt' # /logs /model /tmp /cache 的项目目录
+reveal_cnt_in_train: 5 # 训练过程中披露次数, train loss/train accuracy等
+eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accuracy等
+
+
+# data-params
+train_data: '../../data/TinyStories/raw/train.parquet'
+valid_data: '../../data/TinyStories/raw/validation.parquet'
+
+
+max_len: 64
+
+
+
+# resource
+resource_dir: '../../resource'
+
+
+# network-params

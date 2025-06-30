@@ -3,48 +3,55 @@
 * a `__init__.py` file shows that the package imports all from underlying modules.  
 * always run `python -B xxx.py` file under `aiml` directory in case of relative importing  
 * always check ideas in `experiment.ipynb`, test code chunk in `test.py`
-* after successful tests, wrap code chunk to `_jobs.py` under `Code/projs/xxxx`
+* after successful tests, wrap code chunk to `_jobs.py` under `src/projs/xxxx`
 * invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
 
-## Code Note:
-* Base:  
-&nbsp;&nbsp;&nbsp;&nbsp;model & layer & frames
-* Compute:  
-&nbsp;&nbsp;&nbsp;&nbsp;performance & tools & hardware-sensitive  
-* Utils:  
-&nbsp;&nbsp;&nbsp;&nbsp;data & algo & preprocess  
-* Modules:  
-&nbsp;&nbsp;&nbsp;&nbsp;customized module blocks/bulks for projs
-* Loss:  
-&nbsp;&nbsp;&nbsp;&nbsp;customized loss functions for projs
+## src:
+* core:
+    * base:  
+    &nbsp;&nbsp;&nbsp;&nbsp;model & layer & frames
+    * compute:  
+    &nbsp;&nbsp;&nbsp;&nbsp;performance & tools & hardware-sensitive  
+    * utils:  
+    &nbsp;&nbsp;&nbsp;&nbsp;data & algo & preprocess  
+    * modules:  
+    &nbsp;&nbsp;&nbsp;&nbsp;customized module blocks/bulks for projs
+    * loss:  
+    &nbsp;&nbsp;&nbsp;&nbsp;customized loss functions for projs
 * projs:  
 &nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:
-    * Dataset
-    * Network
-    * Trainer
-    * Evaluator
-    * Predictor
+    * function
+    * dataset
+    * network
+    * trainer
+    * evaluator
+    * predictor
+    * optimizer
+    * loss
     * configs
     * _jobs
+
 
 ## Work Note:
 
 the online working space must contain following directories:  
-* `model`: consisting directory named by the `proj_name` -- save trained params
-* `logs`: consisting directory named by the `proj_name`  -- save logs
 * `aiml`: `git clone https://github.com/Linhengyang/aiml.git`
+* `model`: consisting directory named by the `proj_name` -- save trained params
+* `log`: consisting directory named by the `proj_name`  -- save logs
+
 
 also recommend to have:
+* `artifact`: -- to save useful outputs
 * `tmp`: -- temporary results to be deleted safely
 * `cache`: -- to save files may be saved or not
 
 ---
+    artifact
+    ├── app1
     cache
-    ├── proj1
-    ├── app1
+    ├── proj2
     model
-    ├── proj1
-    ├── app1
+    ├── proj3
     logs
     ├── proj1
     ├── app1
@@ -55,71 +62,69 @@ also recommend to have:
     ├── database
     ├── hf_download.py
     aiml
-    ├── Code
-    │   ├── Base
-    │   │   ├── Functions
-    │   │   │   ├── Mask.py
-    │   │   │   └── PatchOperation.py
-    │   │   ├── MetaFrames
-    │   │   │   ├── __init__.py
-    │   │   │   └── Architectures.py
-    │   │   ├── RootLayers
-    │   │   │   ├── AttentionPools.py
-    │   │   │   ├── MultiCategFeatEmbedding.py
-    │   │   │   └── PositionalEncodings.py
-    │   │   └── SubModules
-    │   │       ├── AddLNorm.py
-    │   │       └── Patchify.py
-    │   ├── Compute
-    │   │   ├── EvaluateTools.py
-    │   │   ├── PredictTools.py
-    │   │   ├── SamplingTools.py
-    │   │   ├── TrainTools.py
-    │   │   └── VisualizeTools.py
-    │   ├── Loss
-    │   │   ├── BPRankingLoss.py
-    │   │   ├── L2PenaltyMSELoss.py
-    │   │   └── MaskedCELoss.py
-    │   ├── Modules
-    │   │   ├── _recsys.py
-    │   │   ├── _transformer.py
-    │   │   └── _vit.py
-    │   ├── Utils
-    │   │   ├── Common
-    │   │   │   └── SeqOperation.py
-    │   │   ├── Data
-    │   │   │   ├── DataAssemble.py
-    │   │   │   ├── DataSplit.py
-    │   │   │   └── DataTransform.py
-    │   │   ├── File
-    │   │   │   └── TextSplit.py
-    │   │   ├── Image
-    │   │   │   ├── Display.py
-    │   │   │   └── MNIST.py
-    │   │   ├── System
-    │   │   │   ├── Math.py
-    │   │   │   └── Statistics.py
-    │   │   └── Text
-    │   │       ├── Glossary.py
-    │   │       ├── StringSegment.py
-    │   │       ├── TextPreprocess.py
-    │   │       ├── Tokenizer.py
-    │   │       └── Vocabulize.py
+    ├── src
+    │   ├── core
+    │   │   ├── base
+    │   │   │   ├── functions
+    │   │   │   │   ├── mask.py
+    │   │   │   │   └── patch_operation.py
+    │   │   │   ├── meta_frames
+    │   │   │   │   ├── __init__.py
+    │   │   │   │   └── architectures.py
+    │   │   │   ├── root_layers
+    │   │   │   │   ├── attention_pools.py
+    │   │   │   │   ├── mc_feat_emb.py
+    │   │   │   │   └── positional_encodings.py
+    │   │   │   └── sub_modules
+    │   │   │       ├── add_layer_norm.py
+    │   │   │       └── patchify.py
+    │   │   ├── compute
+    │   │   │   ├── evaluate_tools.py
+    │   │   │   ├── predict_tools.py
+    │   │   │   ├── sampling_tools.py
+    │   │   │   ├── train_tools.py
+    │   │   │   └── visualize_tools.py
+    │   │   ├── loss
+    │   │   │   ├── bp_ranking_loss.py
+    │   │   │   ├── l2penalty_mse_loss.py
+    │   │   │   └── mask_ce_loss.py
+    │   │   ├── modules
+    │   │   │   ├── _recsys.py
+    │   │   │   ├── _transformer.py
+    │   │   │   └── _vit.py
+    │   │   └── utils
+    │   │       ├── common
+    │   │       │   └── seq_operation.py
+    │   │       ├── data
+    │   │       │   ├── data_assemble.py
+    │   │       │   ├── data_split.py
+    │   │       │   └── data_transform.py
+    │   │       ├── file
+    │   │       │   └── text_split.py
+    │   │       ├── image
+    │   │       │   ├── display.py
+    │   │       │   └── mnist.py
+    │   │       ├── system
+    │   │       │   ├── math.py
+    │   │       │   └── statistics.py
+    │   │       └── text
+    │   │           ├── glossary.py
+    │   │           ├── string_segment.py
+    │   │           ├── text_preprocess.py
+    │   │           ├── tokenizer.py
+    │   │           └── vocabulize.py
     │   ├── apps
     │   │   ├── semantic_segmentation
     │   │   └── sentiment_analysis
     │   └── projs
-    │       ├── _demo
     │       ├── bert
-    │       ├── gan
     │       ├── gpt
-    │       ├── recsys
     │       ├── transformer
-    │       ├── vit
-    │       └── word2vec
+    │       └── vit
     ├── tests
-    ├── pynb
+    ├── notebooks
     │   ├── experiment.ipynb
+    │   ├── speedup.ipynb
     │   └── tokenizer.ipynb
     ├── README.md
     ├── learn.py

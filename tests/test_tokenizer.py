@@ -3,7 +3,7 @@ import tiktoken
 import os
 
 
-from Code.Utils.Text.Tokenizer import BBPETokenizer
+from src.core.utils.text.tokenizer import BBPETokenizer
 
 
 # -----------------------------------------------------------------------------

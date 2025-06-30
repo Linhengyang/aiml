@@ -1,1 +1,0 @@
-这个project是李沐教科书中GAN(Generative Adversarial Network)的pytorch版实现, 包括简单的线性回归数据生成和图像生成
