@@ -279,7 +279,7 @@ class BBPETokenizer(Tokenizer):
                                    f'or with enlarged corpus.')
 
             # 从 p_counts 找到 occur-most pair of tokens（two IDs） as top_pair
-            occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get) 
+            occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get)
             new_token: int = i + 256 # 以 rank 为 new token
 
             merge_ranks[occur_most_pair] = new_token # 记录 merge: rank as new token
