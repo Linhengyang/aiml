@@ -1,5 +1,5 @@
-from ...core.Base.Compute.EvaluateTools import Timer, Accumulator, epochEvaluator, metric_summary
-from ...core.Base.Compute.VisualizeTools import Animator
+from ...core.base.compute.evaluate_tools import Timer, Accumulator, epochEvaluator, metric_summary
+from ...core.base.compute.visualize_tools import Animator
 import yaml
 import typing as t
 

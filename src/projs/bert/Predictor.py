@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from ...core.Base.Compute.PredictTools import easyPredictor
+from ...core.base.compute.predict_tools import easyPredictor
 from ...core.Utils.Common.SeqOperation import truncate_pad
 
 

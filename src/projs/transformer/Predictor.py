@@ -4,8 +4,8 @@ import math
 import re
 from operator import itemgetter
 import typing as t
-from ...core.Base.Compute.PredictTools import easyPredictor
-from ...core.Base.Compute.EvaluateTools import bleu
+from ...core.base.compute.predict_tools import easyPredictor
+from ...core.base.compute.evaluate_tools import bleu
 from ...core.Utils.Text.TextPreprocess import preprocess_space
 from ...core.Utils.Text.StringSegment import sentence_segment_greedy
 from ...core.Utils.Common.SeqOperation import truncate_pad
