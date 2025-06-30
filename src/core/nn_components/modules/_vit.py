@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from ..base.root_layers.attention_pools import MultiHeadAttention
+from ..root_layers.attention_pools import MultiHeadAttention
 
 class ViTMLP(nn.Module):
     def __init__(self, mlp_num_hiddens, mlp_num_outputs, dropout=0.5):

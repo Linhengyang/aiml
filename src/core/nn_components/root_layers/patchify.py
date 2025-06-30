@@ -1,7 +1,7 @@
 import numbers
 import torch
 from torch import nn
-from ..functions.patch_operation import patchify, calc_patchifed_sizes
+from ...base.functions.patch_operation import patchify, calc_patchifed_sizes
 
 class Patchify(nn.Module):
     '''

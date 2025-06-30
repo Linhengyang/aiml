@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from ..base.sub_modules.add_layer_norm import AddLNorm
-from ..base.root_layers.attention_pools import MultiHeadAttention
+from ..root_layers.add_layer_norm import AddLNorm
+from ..root_layers.attention_pools import MultiHeadAttention
 
 class PositionWiseFFN(nn.Module):
     '''
