@@ -257,7 +257,7 @@ if __name__ == "__main__":
 
             if valid_lens:
                 # 如果有 valid_lens, 需要用 mask 确保只有 valid logits 参与生成 概率分布
-                from src.Base.Functions.Mask import mask_first_n_valid
+                from src.core.base.functions.mask import mask_first_n_valid
 
                 mask = mask_first_n_valid(logits.shape, valid_lens)
                 logits[~mask] = -1e20 # invalid logits 用 负无穷 slice-reset. 此操作梯度可反传
