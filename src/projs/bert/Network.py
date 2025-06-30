@@ -1,9 +1,9 @@
 import torch.nn as nn
 from torch import Tensor
 import torch
-from ...Modules._transformer import TransformerEncoderBlock
-from ...Base.RootLayers.PositionalEncodings import LearnAbsPosEnc, TrigonoAbsPosEnc
-from ...Loss.MaskedCELoss import MaskedCrossEntropyLoss
+from ...core.Modules._transformer import TransformerEncoderBlock
+from ...core.Base.RootLayers.PositionalEncodings import LearnAbsPosEnc, TrigonoAbsPosEnc
+from ...core.Loss.MaskedCELoss import MaskedCrossEntropyLoss
 
 
 

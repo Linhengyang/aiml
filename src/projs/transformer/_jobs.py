@@ -5,13 +5,13 @@ import torch
 import typing as t
 from .Dataset import seq2seqDataset
 from .Network import TransformerEncoder, TransformerDecoder, Transformer
-from ...Loss.MaskedCELoss import MaskedCrossEntropyLoss
+from ...core.Loss.MaskedCELoss import MaskedCrossEntropyLoss
 from .Trainer import transformerTrainer
 from .Evaluator import transformerEpochEvaluator
 from .Predictor import sentenceTranslator
 import yaml
-from ...Utils.Text.Vocabulize import Vocab
-from ...Utils.Text.Glossary import get_BPE_glossary
+from ...core.Utils.Text.Vocabulize import Vocab
+from ...core.Utils.Text.Glossary import get_BPE_glossary
 
 configs = yaml.load(open('src/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 

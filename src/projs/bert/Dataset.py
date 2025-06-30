@@ -2,9 +2,9 @@ import torch
 import random
 import copy
 import pandas as pd
-from ...Utils.Text.Vocabulize import Vocab
-from ...Utils.Text.StringSegment import sentence_segment_greedy
-from ...Utils.Common.SeqOperation import truncate_pad
+from ...core.Utils.Text.Vocabulize import Vocab
+from ...core.Utils.Text.StringSegment import sentence_segment_greedy
+from ...core.Utils.Common.SeqOperation import truncate_pad
 
 
 

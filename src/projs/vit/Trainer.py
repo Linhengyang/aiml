@@ -1,7 +1,7 @@
 import torch
 from torch import nn as nn
 from torch.utils.data.dataloader import default_collate
-from ...Compute.TrainTools import easyTrainer
+from ...core.Base.Compute.TrainTools import easyTrainer
 
 
 

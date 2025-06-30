@@ -4,11 +4,11 @@ import math
 import re
 from operator import itemgetter
 import typing as t
-from ...Compute.PredictTools import easyPredictor
-from ...Compute.EvaluateTools import bleu
-from ...Utils.Text.TextPreprocess import preprocess_space
-from ...Utils.Text.StringSegment import sentence_segment_greedy
-from ...Utils.Common.SeqOperation import truncate_pad
+from ...core.Base.Compute.PredictTools import easyPredictor
+from ...core.Base.Compute.EvaluateTools import bleu
+from ...core.Utils.Text.TextPreprocess import preprocess_space
+from ...core.Utils.Text.StringSegment import sentence_segment_greedy
+from ...core.Utils.Common.SeqOperation import truncate_pad
 
 
 

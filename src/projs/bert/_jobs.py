@@ -10,9 +10,9 @@ from .Trainer import bertPreTrainer
 from .Evaluator import bertEpochEvaluator
 from .Predictor import tokensEncoder
 import yaml
-from ...Utils.Text.Vocabulize import Vocab
-from ...Utils.Text.Glossary import get_BPE_glossary
-from ...Utils.System.Math import cosine_similarity
+from ...core.Utils.Text.Vocabulize import Vocab
+from ...core.Utils.Text.Glossary import get_BPE_glossary
+from ...core.Utils.System.Math import cosine_similarity
 
 configs = yaml.load(open('src/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 

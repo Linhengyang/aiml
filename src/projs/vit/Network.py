@@ -1,7 +1,7 @@
-from ...Base.MetaFrames import Encoder
-from ...Base.RootLayers.PositionalEncodings import LearnAbsPosEnc
-from ...Base.SubModules.Patchify import Patchify
-from ...Modules._vit import ViTEncoderBlock
+from ...core.Base.MetaFrames import Encoder
+from ...core.Base.RootLayers.PositionalEncodings import LearnAbsPosEnc
+from ...core.Base.SubModules.Patchify import Patchify
+from ...core.Modules._vit import ViTEncoderBlock
 import torch.nn as nn
 import torch
 
