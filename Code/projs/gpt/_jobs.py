@@ -75,9 +75,9 @@ num_epochs, batch_size, lr = 20, 512, 0.00015
 
 
 
-# 生产 symbols 和 vocab
-def prepare_job():
-    print('prepare job begin')
+# 生产 tokenizer, 可视化 view
+def build_tokenizer_job():
+    print('build_tokenizer_job begin')
 
     # create all related directories if not existed
     for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir]:
@@ -88,8 +88,11 @@ def prepare_job():
     # not use BPE
 
     # 读取全部语料 corpus
+    print('read train')
     train_df = pd.read_parquet(configs['train_data'])
+    print('read validation')
     valid_df = pd.read_parquet(configs['valid_data'])
+    print('get full corpus')
     full_df = pd.concat([train_df, valid_df], ignore_index=True)
     del train_df, valid_df
     
@@ -100,17 +103,20 @@ def prepare_job():
     tokenizer_path = os.path.join(tokenizer_dir, 'gpt.tok')
     if not os.path.exists(tokenizer_path):
         # create tokenizer
+        print('bpe train begin')
         gpt_tokenizer = BBPETokenizer(name='gpt')
         gpt_tokenizer.train_bpe(corpus, num_merges=30000, verbose=True)
+        print('bpe train close')
         gpt_tokenizer.save(tokenizer_path)
     # 当 tokenizer_path 存在时
     else:
         gpt_tokenizer.load(tokenizer_path)
 
     # vocab
+    print('bpe view')
     gpt_tokenizer.view(vocab_dir)
 
-    print('prepare job complete')
+    print('build_tokenizer_job complete')
     return tokenizer_path
 
 
