@@ -15,7 +15,7 @@ configs = yaml.load(open('Code/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullL
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
 
 ################## symbols and vocabs in workspace/cache ##################
-tokenizer_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'tokenizer' )
+tokenizer_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'tokenizer' )
 vocab_dir = os.path.join( configs['tmp_dir'], configs['proj_name'], 'vocab' )
 
 

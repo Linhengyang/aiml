@@ -18,7 +18,7 @@ class transformerTrainer(easyTrainer):
     def log_topology(self, logfile_path):
         '''
         日志打印网络拓扑结构
-        file path: /workspace/logs/[proj_name]/[XXX_topo].txt
+        file path: /workspace/log/[proj_name]/[XXX_topo].txt
         '''
         with open(logfile_path, 'w') as f:
             print(self.net, file=f)

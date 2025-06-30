@@ -1,11 +1,11 @@
-# 相对位置的起点, 是执行python的文件位置. 规定：总是在aiml下, 执行main.py或test.py
-# 日志log、参数params暂存总是在logs、model文件（logs/model/aiml/cache/tmp 五个文件平行放在 workspace 中）
-
+# 相对位置的起点, 是执行python的文件位置. 规定：总是在aiml/下, 执行main.py或test.py
+# 日志log、参数params暂存总是在log、model文件（log/artifact/model/aiml/cache/tmp 六个文件平行放在 workspace 中）
 
 
 # 日志log、参数params(模型)、缓存文件cache、临时文件tmp的文件夹地址如下：
 ######################### 一级文件地址, 对任意proj适用 ######################### 
-log_dir: '../logs'
+log_dir: '../log'
+artifact_dir: '../artifact'
 model_dir: '../model'
 cache_dir: '../cache'
 tmp_dir: '../tmp'

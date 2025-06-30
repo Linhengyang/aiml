@@ -20,8 +20,8 @@ configs = yaml.load(open('Code/projs/bert/configs.yaml', 'rb'), Loader=yaml.Full
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
 
 ################## symbols and vocabs in workspace/cache ##################
-glossary_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'glossary' )
-vocab_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'vocab' )
+glossary_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'glossary' )
+vocab_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'vocab' )
 
 
 
