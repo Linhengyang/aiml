@@ -8,16 +8,22 @@
 
 ## src:
 * core:
-    * base:  
-    &nbsp;&nbsp;&nbsp;&nbsp;model & layer & frames
-    * compute:  
-    &nbsp;&nbsp;&nbsp;&nbsp;performance & tools & hardware-sensitive  
+    * base: 
+        * compute:  
+        &nbsp;&nbsp;&nbsp;&nbsp;performance & tools & hardware-sensitive  
+        * functions:  
+        &nbsp;&nbsp;&nbsp;&nbsp;fundamental functions  
+    * loss:  
+    &nbsp;&nbsp;&nbsp;&nbsp;customized useful loss functions  
+    * nn_components:  
+        * meta_frames:  
+        &nbsp;&nbsp;&nbsp;&nbsp;frameworks  
+        * root_layers:  
+        &nbsp;&nbsp;&nbsp;&nbsp;nn layers  
+        * sub_modules:  
+        &nbsp;&nbsp;&nbsp;&nbsp;customized module blocks/bulks for projs
     * utils:  
     &nbsp;&nbsp;&nbsp;&nbsp;data & algo & preprocess  
-    * modules:  
-    &nbsp;&nbsp;&nbsp;&nbsp;customized module blocks/bulks for projs
-    * loss:  
-    &nbsp;&nbsp;&nbsp;&nbsp;customized loss functions for projs
 * projs:  
 &nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:
     * function
@@ -68,30 +74,30 @@ also recommend to have:
     │   │   │   ├── functions
     │   │   │   │   ├── mask.py
     │   │   │   │   └── patch_operation.py
-    │   │   │   ├── meta_frames
-    │   │   │   │   ├── __init__.py
-    │   │   │   │   └── architectures.py
-    │   │   │   ├── root_layers
-    │   │   │   │   ├── attention_pools.py
-    │   │   │   │   ├── mc_feat_emb.py
-    │   │   │   │   └── positional_encodings.py
-    │   │   │   └── sub_modules
-    │   │   │       ├── add_layer_norm.py
-    │   │   │       └── patchify.py
-    │   │   ├── compute
-    │   │   │   ├── evaluate_tools.py
-    │   │   │   ├── predict_tools.py
-    │   │   │   ├── sampling_tools.py
-    │   │   │   ├── train_tools.py
-    │   │   │   └── visualize_tools.py
+    │   │   │   └── compute
+    │   │   │   │   ├── evaluate_tools.py
+    │   │   │   │   ├── predict_tools.py
+    │   │   │   │   ├── sampling_tools.py
+    │   │   │   │   ├── train_tools.py
+    │   │   │   │   └── visualize_tools.py
     │   │   ├── loss
     │   │   │   ├── bp_ranking_loss.py
     │   │   │   ├── l2penalty_mse_loss.py
     │   │   │   └── mask_ce_loss.py
-    │   │   ├── modules
-    │   │   │   ├── _recsys.py
-    │   │   │   ├── _transformer.py
-    │   │   │   └── _vit.py
+    │   │   ├── nn_components
+    │   │   │   ├── meta_frames
+    │   │   │   │   ├── __init__.py
+    │   │   │   │   └── architectures.py
+    │   │   │   ├── root_layers
+    │   │   │   │   ├── add_layer_norm.py
+    │   │   │   │   ├── attention_pools.py
+    │   │   │   │   ├── mc_feat_emb.py
+    │   │   │   │   ├── patchify.py
+    │   │   │   │   └── positional_encodings.py
+    │   │   │   └── modules
+    │   │   │       ├── _recsys.py
+    │   │   │       ├── _transformer.py
+    │   │   │       └── _vit.py
     │   │   └── utils
     │   │       ├── common
     │   │       │   └── seq_operation.py
@@ -123,7 +129,6 @@ also recommend to have:
     │       └── vit
     ├── tests
     ├── notebooks
-    │   ├── experiment.ipynb
     │   ├── speedup.ipynb
     │   └── tokenizer.ipynb
     ├── README.md
