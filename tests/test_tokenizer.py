@@ -103,27 +103,65 @@ def test_wikipedia_example(tokenizer_factory):
 
 
 
-# # test save/load/view
-# @pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
-# @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
-# def test_save_load(tokenizer_factory, special_marks):
-#     # take a bit more complex piece of text and train the tokenizer, chosen at random
-#     # create a Tokenizer and do 1000+ merges
-#     tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, explicit_n_vocab=1261)
-#     tokenizer.train_bpe(corpus=llama_text)
-#     # verify that decode(encode(x)) == x
-#     assert tokenizer.decode(tokenizer.encode(llama_text, "all")) == llama_text
-#     # verify that save/load work as expected
-#     ids = tokenizer.encode(llama_text, "all")
-#     # save the tokenizer (TODO use a proper temporary directory)
-#     tokenizer.save("test_tokenizer_tmp")
-#     # re-load the tokenizer
-#     tokenizer = RegexTokenizer()
-#     tokenizer.load("test_tokenizer_tmp.model")
-#     # verify that decode(encode(x)) == x
-#     assert tokenizer.decode(ids) == text
-#     assert tokenizer.decode(tokenizer.encode(text, "all")) == text
-#     assert tokenizer.encode(text, "all") == ids
-#     # delete the temporary files
-#     for file in ["test_tokenizer_tmp.model", "test_tokenizer_tmp.vocab"]:
-#         os.remove(file)
+# test save/load/view
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
+def test_save_load(tokenizer_factory, special_marks):
+    num_specials = len(special_marks)
+    # do 3 merges on "aaabdaaabac"
+    tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, explicit_n_vocab=256+3+num_specials)
+    # test on text "aaabdaaabac"
+    text = "aaabdaaabac"
+    tokenizer.train_bpe(corpus=text)
+    # verify that save/load work as expected
+    tokens = tokenizer.encode(text)
+    # save the tokenizer (TODO use a proper temporary directory)
+    tokenizer.save("test_tokenizer_tmp.tok")
+    # re-load the tokenizer
+    tokenizer = BBPETokenizer(name='reload')
+    tokenizer.load("test_tokenizer_tmp.tok")
+    # verify that decode(encode(x)) == x
+    assert tokenizer.decode(tokens) == text
+    assert tokenizer.decode(tokenizer.encode(text)) == text
+    assert tokenizer.encode(text) == tokens
+    # delete the temporary files
+    for file in ["test_tokenizer_tmp.tok"]:
+        os.remove(file)
+
+
+
+
+# test save/load
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
+def test_complicated_text(tokenizer_factory, special_marks):
+    num_specials = len(special_marks)
+    tokenizer = tokenizer_factory(name='llama', special_marks=special_marks)
+    # test on llama_text, with 495 merges
+    text = llama_text
+    tokenizer.train_bpe(corpus=text, num_merges=495)
+    # verify the vocab_size
+    assert tokenizer.vocab_size == 495+num_specials+256
+    # verify that save/load work as expected
+    tokens = tokenizer.encode(text, 'all')
+    # save the tokenizer (TODO use a proper temporary directory)
+    tokenizer.save("test_llama.tok")
+    # re-load the tokenizer
+    tokenizer = BBPETokenizer(name='reload')
+    tokenizer.load("test_llama.tok")
+    # verify that reload is good as well
+    assert tokenizer.vocab_size == 495+num_specials+256
+    assert tokenizer.decode(tokens) == text
+    assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
+    assert tokenizer.encode(text, 'all') == tokens
+
+
+
+
+
+# test view
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+def test_view(tokenizer_factory):
+    tokenizer = tokenizer_factory(name='llama', special_marks={})
+    tokenizer.load("test_llama.tok")
+    tokenizer.view('.')
