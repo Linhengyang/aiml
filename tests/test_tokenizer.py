@@ -116,16 +116,16 @@ def test_save_load(tokenizer_factory, special_marks):
     # verify that save/load work as expected
     tokens = tokenizer.encode(text)
     # save the tokenizer (TODO use a proper temporary directory)
-    tokenizer.save("test_tokenizer_tmp.tok")
+    tokenizer.save("temp/test_tokenizer_tmp.tok")
     # re-load the tokenizer
     tokenizer = BBPETokenizer(name='reload')
-    tokenizer.load("test_tokenizer_tmp.tok")
+    tokenizer.load("temp/test_tokenizer_tmp.tok")
     # verify that decode(encode(x)) == x
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text)) == text
     assert tokenizer.encode(text) == tokens
     # delete the temporary files
-    for file in ["test_tokenizer_tmp.tok"]:
+    for file in ["temp/test_tokenizer_tmp.tok"]:
         os.remove(file)
 
 
@@ -144,11 +144,11 @@ def test_complicated_text(tokenizer_factory, special_marks):
     assert tokenizer.vocab_size == 495+num_specials+256
     # verify that save/load work as expected
     tokens = tokenizer.encode(text, 'all')
-    # save the tokenizer (TODO use a proper temporary directory)
-    tokenizer.save("test_llama.tok")
+    # save the tokenizer (use a proper temporary directory)
+    tokenizer.save("temp/test_llama.tok")
     # re-load the tokenizer
     tokenizer = BBPETokenizer(name='reload')
-    tokenizer.load("test_llama.tok")
+    tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
     assert tokenizer.vocab_size == 495+num_specials+256
     assert tokenizer.decode(tokens) == text
@@ -163,5 +163,16 @@ def test_complicated_text(tokenizer_factory, special_marks):
 @pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
 def test_view(tokenizer_factory):
     tokenizer = tokenizer_factory(name='llama', special_marks={})
-    tokenizer.load("test_llama.tok")
-    tokenizer.view('.')
+    tokenizer.load("temp/test_llama.tok")
+    tokenizer.view('temp/')
+
+
+
+
+
+# test empty .tok
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+def test_empty(tokenizer_factory):
+    tokenizer = tokenizer_factory(name='empty', special_marks={})
+    tokenizer.load("temp/test_empty.tok")
+    tokenizer.view('temp/')

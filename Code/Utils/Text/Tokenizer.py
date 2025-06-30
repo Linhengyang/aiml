@@ -481,13 +481,15 @@ class BBPETokenizer(Tokenizer):
             for _ in range(num_special):
                 self._special_marks.append( f.readline().strip() )
             # all remained lines as pair merged, if exists: split and store them in order
-            # TODO: fix rare situation when no remained lines
             for i, line in enumerate(f):
                 L, R = map(int, line.split())
                 self._merge_ranks[(L, R)] = 256 + i # i 从 0 开始, rank 从 256 开始
 
-            # 循环结束时, i = num_lines_of_merge_ranks - 1 , explicit_n_vocab = 256 + num_merges + num_specials
-            self.explicit_n_vocab = 257 + i + num_special
+            try: # 循环结束时, i = num_lines_of_merge_ranks - 1 , explicit_n_vocab = 256 + num_merges + num_specials
+                self.explicit_n_vocab = 257 + i + num_special
+            except UnboundLocalError: # TODO: fix rare situation when no remained lines, that is no pair merged
+                self.explicit_n_vocab = 256 + num_special
+
         
         # 构建 vocab: token_ID --> bytes
         self._build_vocab()
