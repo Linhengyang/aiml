@@ -9,14 +9,14 @@
 ## src:
 * core:
     * base: 
-        * compute:  performance & tools & hardware-sensitive  
-        * functions:  fundamental functions  
-    * loss:  customized useful loss functions  
+        * compute:&nbsp;&nbsp;performance & tools & hardware-sensitive  
+        * functions:&nbsp;&nbsp;fundamental functions  
+    * loss:&nbsp;&nbsp;customized useful loss functions  
     * nn_components:  
-        * meta_frames:  frameworks  
-        * root_layers:  nn layers  
-        * sub_modules:  customized module blocks/bulks for projs
-    * utils:  data & algo & preprocess  
+        * meta_frames:&nbsp;&nbsp;frameworks  
+        * root_layers:&nbsp;&nbsp;nn layers  
+        * sub_modules:&nbsp;&nbsp;customized module blocks/bulks for projs
+    * utils:&nbsp;&nbsp;data & algo & preprocess  
 * projs:  
 &nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:
     * function
