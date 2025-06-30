@@ -54,7 +54,7 @@ num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2,
 
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 5, 128, 0.0005
+num_epochs, batch_size, lr = 2, 128, 0.0005
 
 
 
