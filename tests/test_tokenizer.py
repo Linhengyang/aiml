@@ -1,5 +1,4 @@
 import pytest
-import tiktoken
 import os
 
 

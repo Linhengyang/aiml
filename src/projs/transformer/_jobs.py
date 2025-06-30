@@ -5,7 +5,7 @@ import torch
 import typing as t
 from .dataset import seq2seqDataset
 from .network import TransformerEncoder, TransformerDecoder, Transformer
-from ...core.Loss.mask_ce_loss import MaskedCrossEntropyLoss
+from ...core.loss.mask_ce_loss import MaskedCrossEntropyLoss
 from .trainer import transformerTrainer
 from .evaluator import transformerEpochEvaluator
 from .predictor import sentenceTranslator
