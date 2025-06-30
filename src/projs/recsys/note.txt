@@ -1,0 +1,142 @@
+一. 协同过滤 Collaborative Filtering
+这个部分是协同过滤推荐「collaborative filtering recommender(cfrec)」算法的 pytorch版实现, 包括 matrix factorization/AutoRec/SeqAwareRecsys
+目的是 「基于用户行为的推荐」, 行为即"interaction", based on explicit显性/implicit隐形 interactions. 显性action有打分、点赞、不喜欢等, 隐性action有点击、曝光不点击等
+
+协同过滤collaborative filtering的本质, 是为了构建「user-item interaction matrix」, 即用户-物品交互矩阵.
+矩阵的元素可以是显性行为, 比如打分/是否点赞/是否喜欢等;也可以是隐性行为, 比如是否点击/是否浏览等.
+
+对于显性explicit interactions, 一般认为: 数值本身有意义, 并且0代表Null而不是0分(从而在训练时从来不关注0元素)
+interaction matrix中 0代表「完全未知」元, 即「i,j」元是0, 代表用户i对物品j的显性行为未知, 可能是反面行为, 也可能是尚未接触到.
+目标是预测这些未知元, 但是在模型训练的时候, 这些0元素的信息是没有被用到模型和loss里的, 模型和loss只关注非0位置的值
+一般用rmse去构造「值」的损失
+
+例子1. Matrix Factorizationn
+本质是用户id特征, embedd为k维的latent vector; 物品id特征, embedd为k维的latent vector; 最后用两个latent vector的内积作为interaction的预测
+
+例子2. AutoRec(ItemBased or UserBased)
+本质是一个自编码器(完成恒等映射的MLP). 用已知的interaction元素作为label, 更新MLP中的参数.
+最后将原已有的interaction矩阵作为输入, 输出同形状矩阵, 其在原interaction矩阵为0的位置的填充, 即是预测
+简而言之: 完成已知interaction元素到自身的恒等映射MLP, 那么这个MLP作用在0元素上, 预计得到该位置的score(感觉不是很有道理).
+
+
+对于隐性implicit interactions, 一般认为: 数值本身无意义, 但数值之间的序有意义, 并且0代表0而不是Null
+interaction matrix中 0代表「不足以做出行为」元, 即「i,j」元是0, 代表用户i对物品j没有做出行为(至于是不是负向行为, 看具体定义)
+用相对距离去构造「序」的损失: 最大化 正向行为和负向行为之间的相对距离. 负向行为由负采样定义(未点击/未浏览等算负向)
+    当前一般关注pairwise的排序, 即两个item之间的序.
+    N(N>2)个物品之间的排序可以转化成两两之间的序, 但由于计算复杂度过高, 一般作pointwise的模型, 然后直接看sigmoid preds的序, 不会通过专门构造listwise序的损失来训练模型
+
+例子1. NeuralMF
+Generalized MatrixFactorization + MLP
+具体来说, users_idx和items_idx分别作两个映射, MF latent factor映射, 和MLP embedding表示映射, 步骤如下:
+    1. latent factor: user_idx和item_idx分别表示为 k维latent factor, 作Hadamard乘积后, 得到Generalized MF部分(如果对这部分求和, 即是MF)
+    2. embedding representation: user_idx和item_idx分别表示为 l维embeddings, concat拼接后灌入MLP, 输出得到MLP部分(如果对这部分作到0-1区间的变换, 即是MLP binary-classify)
+    3. concat拼接 Generalized MF部分和MLP部分, 灌入MLP和激活函数, 得到 y_hat_of_user_id_item_id, 即该user user_idx和item_idx之间的interaction(显性/隐性)的预测
+本proj中跳过NeuralMF
+
+例子2. SeqAwareRecsys
+Sequence-Aware Recommender Systems
+〈待完成〉
+
+
+
+
+二. 基于富特征的个性化推荐 feature-rich recommender system
+这个部分是个性化推荐「feature-rich recommender」算法的 pytorch版实现, 包括 factorization machine/deepFM
+目的是 「基于特征的推荐」
+数据集的构建一般是tabular dataset, 每一行是一次用户行为记录, 包含 features & labels. 
+labels比较简单, 是否曝光/是否点击/是否购买/购买金额等等
+features比较复杂, 按照特征的来源分类, 包括
+    1. 用户特征: 用户自身的属性和行为数据统计, 包括user id/行为数据统计/用户画像. 通过user id join
+    2. 产品特征: 产品自身的属性和统计信息, 包括item id/价格/ctr cvr. 通过item id join
+    3. 环境特征: labels行为发生时的context特征, 包括时间/场景/文案信息. 通过labels清洗
+    4. 匹配特征: 用户和产品/用户和环境/产品和环境之间的交互信息, 一般是字典形式. 比如「用户-产品」, 即u2i特征, 一般是key是items_id, value是这个user和key item id的交互次数
+按照特征的属性分类, 包括
+    1. categorical特征: 值是离散的
+        使用前要做:
+            1. level-index映射处理
+            2. 特征交叉(可选)
+            3. 进模型时必须要二值化处理(即onehot成value_size个dummy variable feature, 此时原categorical特征被称为一个field)
+        进模型后一般第一步就是embedding(二值化后就是乘以embedding weight的意思), 整体看, 一个scalar值(比如user_id=0001)变成了k维的vector进入模型
+    2. 数值特征: 值是实数, 使用时要等categorical特征做完二值化处理之后, 再concat上去.
+    3. 字典不定特征(一般是为了匹配特征): 值是字典, 不定, 使用时要定义好HitByKey算子.
+    比如某user id 0001的u2i特征: {'itemID001':0, 'itemID002':3}, 那么在user id=0001, item id=001的行, 这个特征进模型时值是0; 在user id = 0001, item id=002的行, 这个特征进模型时值是3
+
+参考文章: https://tech.meituan.com/2016/03/03/deep-understanding-of-ffm-principles-and-practices.html
+
+例子1: factorization machine
+本质是用特征交叉参与"线性解释用户行为", 即(user, item, label)这一record中, 用 linear combination of (user & item features) + global_bias之外,
+还有 quatratic term of (user & item features). 该二次项是 两两features的 embeddings representation的内积之和.
+通过数学的办法, 可以将factorization machine这个模型的计算复杂度下降为线性的.
+
+例子2: deepFM
+类似wide&deep, 在features作factorization machine的操作之后, features的 embeddings representation除了去计算FM term, 还要作为MLP部分的输入,
+进过DNN和FC层后, 得到MLP term. FM term + MLP term, sigmoid之后得到 hat_label
+
+
+
+
+
+
+
+Feature Engineer: 
+
+categorical特征的特征交叉:
+比如prov_id和age_id, value_size分别为prov_size和age_size. 那么一般是:
+1 分别onehot成prov_size维和age_size维的onehot vectors, 
+2 特征交叉, 笛卡尔乘积出一个 prov_size*age_size 维度的onehot vector, 可以看作是新特征 prov-age_id 的onehot表示,
+
+
+onehot和embedding的数据预处理
+在onehot和embed使用前, 都要对categorical data作 level-index 映射,
+比如在vocab中, 对tokens按使用频次高低映射到0至vocab_size-1的index值;在user_id中, 对原user_id减1, 映射到0至u_size-1的index值
+
+理解one-hot: nn.functional.one_hot(level_index, num_levels)
+level-index值 ----> length为 num_levels的vector, 其中level-index值的位置填1, 其余位置都是0
+
+理解embed:
+单个categorical特征, 以user_id即users_tensor为例:
+    users_tensor: (batch_size, ) ---embed---> (batch_size, k)
+    理解方式1: 查表, 即 (user_size, k)的全表, indexing users_tensor里的index值, 得到（batch_size, k）的子表
+    理解方式2: 线性映射, 即 users_tensor(batch_size,) ---onehot---> (batch_size, user_size) ---linear transfer W---> (batch_size, k)
+    其中方式2的线性映射表W, 就是方式1中的全表
+
+即:
+「大类别中的类别单值」--->「低维dense向量」, 中间如果经过「高维onehot向量」,即为理解方式2
+    「大类别中的类别单值」 --embed--> 「低维dense向量」
+     scalar_value      --------->  [d1, d2, ..dk] dense vector
+
+    「大类别中的类别单值」--onehot--> 「高维onehot 0-1向量」             -----linear----> 「低维dense向量」
+     scalar_value     ---------->  [0, 0, ..,1,...0] onehot vector  -------------->  [d1, d2, ..dk] dense vector
+
+
+多个categorical特征, 以user_id/item_id/device_id/context_id为例:
+    (batch_size, 4(分别是uid, itemid, deviceid, contextid))
+    与token embedding不同, token index是同一个特征, one-hot后特征维度是唯一的, 即vocab_size. 而多个categorical特征, 各自one-hot后特征维度是不同的.
+    单个sample: (uid, iid, did, cid), one-hot后维度分别是(u_size, i_size, d_size, c_size)
+    可以分别embed成 Eu, Ei, Ed, Ec 维度的dense vector, 那么该样本由length=4的1-D categorical vector变成length=Eu+Ei+Ed+Ec的1-D dense vector
+    那么这样需要4个embedding, 分别是nn.embedding(u_size, Eu), nn.embedding(i_size, Ei), nn.embedding(d_size, Ed), nn.embedding(c_size, Ec), 然后拼接起来,
+    最后的结果shape是: (batch_size, Eu+Ei+Ed+Ec)
+
+    也可以统一embed成k维度的dense vector, 那么该样本由length=4的1-D level-index vector变成shape=(4, k)的2-D dense tensor, 可以继续摊平变成length=4*k的1-D dense vector
+    这样只需要一个embedding, 是nn.embedding(u_size+i_size+d_size+c_size, k).
+    理解方式: 1-D level-index vector [0001, 001, 01, 1] --onehot_concat--> [0,1,0,...,0,  0,1,0,...,0,  0,1,0,..,0,  0,1]这样一个sparse tensor(只在各特征相应位置是1)
+    --linear transfer W或查表--> shape为(4, k)的dense tensor --flatten--> length为(4*k, )的dense vector 
+    (这样理解下来, 其实就是让Eu=Ei=Ed=Ec=k, 分别embed后concat.)
+    onehot_concat不能由nn.functional.one_hot函数实现, 因为这个函数只能实现单个categorical特征的onehot变换.参见src.Utils.Common.onehot_for_multi_labels
+
+总结:
+1. 有一张统一的embedding权重表weights.
+    对于「单个categorical特征」, 这张weights表的统一性是天然的, 形状是(value_size, k)
+    对于「多个不同categorical特征」, weights表的统一性并不天然. 什么叫统一? 对每个特征的每个value值, 有唯一的k维向量值对应. 
+    幸运的是, 经过offset操作, 这张统一的weights表也可以得到, 形状是(value_size_feat1+...+value_size_featN, k)
+2. onehot操作(并concat) + onehot向量乘以权重表weights操作 ---> embedd操作
+    对于「单个categorical特征」, onehot操作后, 得到shape为(value_size, )的独热行向量, 
+    然后右乘weights表, 得到embeddings结果, shape为(k, )
+    
+    对于「N个同一categorical特征」, onehot操作后, 得到shape为(N, value_size)的独热行向量们, 
+    然后右乘weights表, 得到embeddings结果, shape为(N, k)
+
+    对于「M个不同categorical特征」, 各自onehot操作并concat后, 得到shape为(value_size_feat1+...+value_size_featM, )的稀疏行向量,
+    然后右乘weights表, 得到embeddings结果, shape为(M, k). 考虑属于同一样本, 可以选择摊平为(M*k, )的结果
+
+由此可见, 只有在onehot操作后, embedding操作和右乘weights矩阵是一回事, 因为独热行向量x 右乘 embedding weights等于embdding结果.

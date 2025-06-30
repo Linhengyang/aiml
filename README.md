@@ -3,10 +3,10 @@
 * a `__init__.py` file shows that the package imports all from underlying modules.  
 * always run `python -B xxx.py` file under `aiml` directory in case of relative importing  
 * always check ideas in `experiment.ipynb`, test code chunk in `test.py`
-* after successful tests, wrap code chunk to `_jobs.py` under `Code/projs/xxxx`
+* after successful tests, wrap code chunk to `_jobs.py` under `src/projs/xxxx`
 * invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
 
-## Code Note:
+## src:
 * Base:  
 &nbsp;&nbsp;&nbsp;&nbsp;model & layer & frames
 * Compute:  
@@ -55,7 +55,7 @@ also recommend to have:
     ├── database
     ├── hf_download.py
     aiml
-    ├── Code
+    ├── src
     │   ├── Base
     │   │   ├── Functions
     │   │   │   ├── Mask.py
