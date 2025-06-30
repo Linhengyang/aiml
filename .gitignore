@@ -3,3 +3,4 @@
 *.tok
 *.vocab
 **/.pytest_cache
+tests/temp
