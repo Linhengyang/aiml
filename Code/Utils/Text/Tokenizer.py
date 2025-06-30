@@ -193,14 +193,14 @@ class BBPETokenizer(Tokenizer):
 
         else: # 如果 没有输入非空的 merge_ranks
             # 那么需要 run BPE train process to build merges_ranks forrest. corpus text 将随后输入，但在这里可以 确定 number of merges
-            # 必须输入 explicit_n_vocab
-            assert explicit_n_vocab >= 256 + len(special_marks), \
-                f'pretrained merge_ranks forrest empty.\n' + \
-                f'input explicit_n_vocab (shall be at least greater than 256+{len(special_marks)}(num_special_marks)={256+len(special_marks)}\n' + \
-                f'e.g, GPT2 tokenizer has explicit_n_vocab as 50257, with 1 special marks and 50000 merges'
-            
-            # 需要执行 merge 的次数。但不一定能执行到，因为可能存在 run out of corpus 的情况（即所有 corpus 被merge到一起了）。此时 raise error
-            self._num_merges = explicit_n_vocab - 256 - len(special_marks)
+            if isinstance(explicit_n_vocab, int): # 如果输入了 explicit_n_vocab
+                assert explicit_n_vocab >= 256 + len(special_marks), \
+                    f'pretrained merge_ranks forrest empty.\n' + 'input explicit_n_vocab (shall be at least greater ' + \
+                    f'than 256+{len(special_marks)}(num_special_marks)={256+len(special_marks)}.\n' + \
+                    f'e.g, GPT2 tokenizer has explicit_n_vocab as 50257, with 1 special marks and 50000 merges.'
+                
+                # 需要执行 merge 的次数。但不一定能执行到，因为可能存在 run out of corpus 的情况（即所有 corpus 被merge到一起了）。此时 raise error
+                self._num_merges = explicit_n_vocab - 256 - len(special_marks)
 
 
     def _build_vocab(self):
@@ -237,7 +237,19 @@ class BBPETokenizer(Tokenizer):
         self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()} # special token id --> special mark str
 
 
-    def train_bpe(self, corpus:str, verbose:bool=False):
+    def train_bpe(self, corpus:str, num_merges:int|None = None, verbose:bool=False):
+        if not hasattr(self, '_num_merges'): # if _num_merges not set, must input num_merges here
+            assert isinstance(num_merges, int) and num_merges >= 0, f'num merges not set. must input num_merges >= 0.'
+            self._num_merges = num_merges
+        elif isinstance(num_merges, int) and self._num_merges != num_merges: # if _num_merges already set, but not equal to num_merges
+            # warning. used pre-set _num_merges
+            import warnings
+            warnings.warn(
+                f'input `num_merges`{num_merges} is not consistent with `explicit_n_vocab` from initialization.\n'
+                f'merge times from `explicit_n_vocab` shall be `explicit_n_vocab` - num_specials - 256 = {self._num_merges}.\n'
+                f'ignore `num_merges`, use `explicit_n_vocab` to run BPE.')
+            
+        
         merge_ranks: dict[tuple[int, int], int] = {} # 初始化 _merge_ranks
         vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
         # raw
@@ -422,7 +434,7 @@ class BBPETokenizer(Tokenizer):
         return concat_bytes.decode('utf-8', errors=errors)
     
 
-    def save(self, f_prefix):
+    def save(self, f_name):
         '''
         保存 name
         保存 pat_str
@@ -430,7 +442,8 @@ class BBPETokenizer(Tokenizer):
         保存 merge_ranks (只需要保存 keys 即可，因为 values 是从 256 的递增序列)
         ---> 即保存了一个 tokenizer 的全部信息
         '''
-        with open(f_prefix+'.tok', 'w') as f:
+        assert f_name.endswith(".tok")
+        with open(f_name, 'w') as f:
             # write the name of the tokenizer as version
             f.write(f"{self.name}\n")
             # write the split pattern
@@ -458,22 +471,25 @@ class BBPETokenizer(Tokenizer):
         self._special_marks = []
         self._merge_ranks = {}
         with open(f_name, 'r', encoding='utf-8') as f:
-            # read the name of the tokenizer as version
+            # line 1: the name of the tokenizer as version
             self.name = f.readline().strip()
-            # read the split pattern
+            # line 2: the split pattern
             self.pat_str = f.readline().strip()
-            # read the num_special
+            # line 3: the num_special
             num_special = int(f.readline().strip())
-            # read next num_special lines
+            # at line 4, next num_special lines
             for _ in range(num_special):
                 self._special_marks.append( f.readline().strip() )
-            # read all remained lines as pair merged, split and store them in order
+            # all remained lines as pair merged, if exists: split and store them in order
             for i, line in enumerate(f):
                 L, R = map(int, line.split())
                 self._merge_ranks[(L, R)] = 256 + i # i 从 0 开始, rank 从 256 开始
 
-            # 循环结束时, i = num_lines_of_merge_ranks - 1 , explicit_n_vocab = 256 + num_merges + num_specials
-            self.explicit_n_vocab = 257 + i + num_special
+            try: # 循环结束时, i = num_lines_of_merge_ranks - 1 , explicit_n_vocab = 256 + num_merges + num_specials
+                self.explicit_n_vocab = 257 + i + num_special
+            except UnboundLocalError: # TODO: fix rare situation when no remained lines, that is no pair merged
+                self.explicit_n_vocab = 256 + num_special
+
         
         # 构建 vocab: token_ID --> bytes
         self._build_vocab()

@@ -2,8 +2,11 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
-import torch.nn as nn
+import typing as t
+import pandas as pd
 import yaml
+from ...Utils.Text.Vocabulize import Vocab
+from ...Utils.Text.Tokenizer import BBPETokenizer, ENDOFTEXT
 
 
 configs = yaml.load(open('Code/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
@@ -11,51 +14,107 @@ configs = yaml.load(open('Code/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullL
 ################## directories ##################
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
 
+################## symbols and vocabs in workspace/cache ##################
+tokenizer_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'tokenizer' )
+vocab_dir = os.path.join( configs['tmp_dir'], configs['proj_name'], 'vocab' )
+
+
+
 ################## params saved in workspace/model ##################
-model_proj_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
+model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 
 
 
 ################## log file in workspace/logs ##################
-log_proj_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
+log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 ################## data-params ##################
+max_len = configs['max_len']
+
+
 
 
 
 ################## network-params ##################
+num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias = 2, 2, 128, 0.1, 256, False
+
+
+
 
 
 
 ################## train-params ##################
+num_epochs, batch_size, lr = 20, 512, 0.00015
 
 
 
 
 
+
+
+
+# num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
+# batch_size
+# ---------------------> 4GB 显存
+
+
+
+
+
+# 生产 symbols 和 vocab
 def prepare_job():
     print('prepare job begin')
-    pass
-    outputs = 1
+
+    # create all related directories if not existed
+    for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir]:
+        os.makedirs(dir_name, exist_ok=True)
+        print(f'directory {dir_name} created')
+
+    # generate tokenizer
+    # not use BPE
+
+    # 读取全部语料 corpus
+    train_df = pd.read_parquet(configs['train_data'])
+    valid_df = pd.read_parquet(configs['valid_data'])
+    full_df = pd.concat([train_df, valid_df], ignore_index=True)
+    del train_df, valid_df
+    
+    corpus = ENDOFTEXT.join( full_df['text'].tolist() )
+
+    # tokenizer
+    # 当 tokenizer_path 文件不存在时, 生产并保存 tokenizer 到 tokenizer_dir/gpt.tok
+    tokenizer_path = os.path.join(tokenizer_dir, 'gpt.tok')
+    if not os.path.exists(tokenizer_path):
+        # create tokenizer
+        gpt_tokenizer = BBPETokenizer(name='gpt')
+        gpt_tokenizer.train_bpe(corpus, num_merges=30000)
+        gpt_tokenizer.save(tokenizer_path)
+    # 当 tokenizer_path 存在时
+    else:
+        gpt_tokenizer.load(tokenizer_path)
+
+    # vocab
+    gpt_tokenizer.view(vocab_dir)
+
     print('prepare job complete')
-    return outputs
+    return tokenizer_path
 
 
 
 
-def train_job(outputs, *args, **kwargs):
-    print('train job begin')
+def pretrain_job(vocab_path):
     pass
-    saved_params_fpath = ''
-    print('train job complete')
-    return saved_params_fpath
-
-
-
-
-def infer_job(saved_params_fpath, *args, **kwargs):
-    print('infer job begin')
-    pass
-    print('infer job complete')

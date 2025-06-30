@@ -1,4 +1,4 @@
-# 相对位置的起点, 是执行python的文件位置. 规定：总是在autodl下, 执行main.py或test.py
+# 相对位置的起点, 是执行python的文件位置. 规定：总是在aiml/下, 执行main.py或test.py
 # 日志log、参数params暂存总是在logs、model文件（logs/model/aiml/cache/tmp 五个文件平行放在 workspace 中）
 
 
@@ -17,17 +17,17 @@ tmp_dir: '../tmp'
 
 ######################## 数据、外部资源地址和项目信息 ######################## 
 proj_name: 'gpt' # /logs /model /tmp /cache 的项目目录
-reveal_cnt_in_train: 10 # 训练过程中披露次数, train loss/train accuracy等
+reveal_cnt_in_train: 5 # 训练过程中披露次数, train loss/train accuracy等
 eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accuracy等
 
 
 # data-params
-full_data: '../../data/demo/.../...'
-train_data: '../../data/demo/traindata/...'
-valid_data: '../../data/demo/validdata/...'
-test_data: '../../data/demo/testdata/...'
+train_data: '../../data/TinyStory/raw/train.parquet'
+valid_data: '../../data/TinyStory/raw/validation.parquet'
 
-num_steps: 20
+
+max_len: 64
+
 
 
 # resource
