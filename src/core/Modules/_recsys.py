@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 import math
-from ..Base.RootLayers.MultiCategFeatEmbedding import MultiCategFeatEmbedding
+from ..Base.RootLayers.mc_feat_emb import MultiCategFeatEmbedding
 
 def interaction_weights(U, I, users_idx, items_idx):
     weights = torch.zeros(U, I, device=users_idx.device)

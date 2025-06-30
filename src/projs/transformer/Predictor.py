@@ -6,9 +6,9 @@ from operator import itemgetter
 import typing as t
 from ...core.base.compute.predict_tools import easyPredictor
 from ...core.base.compute.evaluate_tools import bleu
-from ...core.Utils.Text.TextPreprocess import preprocess_space
-from ...core.Utils.Text.StringSegment import sentence_segment_greedy
-from ...core.Utils.Common.SeqOperation import truncate_pad
+from ...core.Utils.Text.text_preprocess import preprocess_space
+from ...core.Utils.Text.string_segment import sentence_segment_greedy
+from ...core.Utils.common.seq_operation import truncate_pad
 
 
 

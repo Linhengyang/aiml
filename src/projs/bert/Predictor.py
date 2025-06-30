@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from ...core.base.compute.predict_tools import easyPredictor
-from ...core.Utils.Common.SeqOperation import truncate_pad
+from ...core.Utils.common.seq_operation import truncate_pad
 
 
 

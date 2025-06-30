@@ -102,7 +102,7 @@ import regex as re
 import os
 import functools
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from ..Common.SeqOperation import check_monotonic
+from ..common.seq_operation import check_monotonic
 
 
 # deprecated split-pattern for GPT2. use GPT4 version
@@ -513,7 +513,7 @@ class BBPETokenizer(Tokenizer):
         assert hasattr(self, "_vocab") and hasattr(self, "_merge_ranks") and hasattr(self, "special_tokens")
         reverse_merge = {v:k for k, v in self._merge_ranks.items()} # merged_int --> (int, int)
 
-        from .TextPreprocess import render_bytes
+        from .text_preprocess import render_bytes
         import os
 
         with open(os.path.join(tmpsave_path, f'tmp_{self.name}.vocab'), 'w', encoding='utf-8') as f:

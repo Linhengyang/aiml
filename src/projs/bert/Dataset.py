@@ -3,8 +3,8 @@ import random
 import copy
 import pandas as pd
 from ...core.Utils.Text.Vocabulize import Vocab
-from ...core.Utils.Text.StringSegment import sentence_segment_greedy
-from ...core.Utils.Common.SeqOperation import truncate_pad
+from ...core.Utils.Text.string_segment import sentence_segment_greedy
+from ...core.Utils.common.seq_operation import truncate_pad
 
 
 

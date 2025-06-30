@@ -1,7 +1,7 @@
 # Vocabulize.py
 import typing as t
-from .TextPreprocess import count_corpus
-from .StringSegment import sentence_segment_greedy, Glossary
+from .text_preprocess import count_corpus
+from .string_segment import sentence_segment_greedy, Glossary
 import json
 import os
 import copy

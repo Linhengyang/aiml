@@ -3,7 +3,7 @@ import collections
 import typing as t
 import re
 import json
-from .TextPreprocess import count_corpus, preprocess_space, attach_EOW_token, text_atomize
+from .text_preprocess import count_corpus, preprocess_space, attach_EOW_token, text_atomize
 
 
 
