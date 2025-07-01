@@ -101,7 +101,7 @@ class ByteTokenizer(Tokenizer):
 import regex as re
 import os
 import functools
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from ..common.seq_operation import check_monotonic
 
 
@@ -162,7 +162,7 @@ def _special_token_regex(tokens: frozenset[str]) -> "re.Pattern[str]":
 
 
 
-class BBPETokenizer(Tokenizer):
+class baseBBPETokenizer(Tokenizer):
     def __init__(
             self,
             name: str,
@@ -285,7 +285,9 @@ class BBPETokenizer(Tokenizer):
 
             # 从 p_counts 找到 occur-most pair of tokens（two IDs） as top_pair
             occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get)
+            occurance: int = p_counts[occur_most_pair] # occurance
             new_token: int = i + 256 # 以 rank 为 new token
+            del p_counts
 
             merge_ranks[occur_most_pair] = new_token # 记录 merge: rank as new token
             vocab[new_token] = vocab[occur_most_pair[0]] + vocab[occur_most_pair[1]] # 记录 new token 对应的 bytes
@@ -298,7 +300,7 @@ class BBPETokenizer(Tokenizer):
 
             if verbose:
                 print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}'
-                      f'[{vocab[new_token]}] had {p_counts[occur_most_pair]} occurences')
+                      f'[{vocab[new_token]}] had {occurance} occurences')
                 
         self._merge_ranks = merge_ranks
         self._vocab = vocab
@@ -554,3 +556,136 @@ class BBPETokenizer(Tokenizer):
     def is_special_token(self, token: int) -> bool:
         assert isinstance(token, int)
         return token in self.inverse_special_tokens
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def bpe_single_merge(merge_rank:int, token_chunks:t.Generator, num_specials:int):
+    # merge_rank 从 0 开始
+    p_counts:t.Dict[tuple[int, int], int] = {}
+    # tmp-store tokens from token_chunks. since generator is one-time traverse, and token_chunks is going to update
+    tmp_chunks = []
+    for tokens in token_chunks:
+        get_pair_counts(tokens, p_counts)
+        # store tokens to update token_chunks. since generator is one-time traverse
+        tmp_chunks.append( tokens )
+    
+    if not p_counts:
+        raise RuntimeError(f'run out of corpus(all merged together) after {merge_rank} merges.\n'
+                            f'the maximum valid `explicit_n_vocab` for this corpus is {256+merge_rank+num_specials}.\n'
+                            f're-init the tokenizer with lower `explicit_n_vocab` in between {256+num_specials}'
+                            f'(zero-merge) & {256+merge_rank+num_specials}(exactly-ran-out-of current corpus), '
+                            f'or with enlarged corpus.')
+    
+    occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get)
+    occurance = p_counts[occur_most_pair]
+    new_token: int = merge_rank + 256
+    del p_counts
+
+    yield occur_most_pair, occurance, new_token # first yield
+
+    # update token_chunks
+    for tokens in tmp_chunks:
+        yield merge_pair(tokens, occur_most_pair, new_token) # remained as new token_chunks
+
+
+
+class boostBBPETokenizer(baseBBPETokenizer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+    def train_bpe(self, corpus:str, num_merges:int|None = None, verbose:bool=False):
+        if not hasattr(self, '_num_merges'):
+            assert isinstance(num_merges, int) and num_merges >= 0, f'num merges not set. must input num_merges >= 0.'
+            self._num_merges = num_merges
+        elif isinstance(num_merges, int) and self._num_merges != num_merges:
+            import warnings
+            warnings.warn(
+                f'input `num_merges`{num_merges} is not consistent with `explicit_n_vocab` from initialization.\n'
+                f'merge times from `explicit_n_vocab` shall be `explicit_n_vocab` - num_specials - 256 = {self._num_merges}.\n'
+                f'ignore `num_merges`, use `explicit_n_vocab` to run BPE.')
+            
+        
+        merge_ranks: dict[tuple[int, int], int] = {}
+        vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)}
+        # raw
+        chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
+        
+        # <多线程>
+        utf8_encode = functools.partial(str.encode, encoding='utf-8')
+        with ThreadPoolExecutor(max_workers=8) as e:
+             chunks_tokens = e.map(utf8_encode, chunks_str)
+        
+        # <merge循环有前后依赖，所以不能并行>
+        for i in range(self._num_merges):
+            gen = bpe_single_merge(i, chunks_tokens, len(self._special_marks))
+            occur_most_pair, occurance, new_token = next(gen)
+            
+            merge_ranks[occur_most_pair] = new_token
+            vocab[new_token] = vocab[occur_most_pair[0]] + vocab[occur_most_pair[1]]
+
+            chunks_tokens = gen
+
+            if verbose:
+                print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}'
+                      f'[{vocab[new_token]}] had {occurance} occurences')
+
+
+
+
+
+
+        self._merge_ranks = merge_ranks
+        self._vocab = vocab
+
+        self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
+        self._register_special_tokens()
