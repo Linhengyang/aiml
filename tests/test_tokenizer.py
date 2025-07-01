@@ -131,13 +131,13 @@ def test_save_load(tokenizer_factory, special_marks):
 
 
 # test save/load
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("text", [llama_text, r"FILE:../../../data/test/text/timemachine.txt"])
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
-def test_complicated_text(tokenizer_factory, special_marks):
+def test_complicated_text(text, special_marks):
     num_specials = len(special_marks)
-    tokenizer = tokenizer_factory(name='llama', special_marks=special_marks)
-    # test on llama_text, with 495 merges
-    text = llama_text
+    tokenizer = BBPETokenizer(name='llama', special_marks=special_marks)
+    # test on llama_text & timemachine.txt, with 495 merges
+    text = unpack(text)
     tokenizer.train_bpe(corpus=text, num_merges=495)
     # verify the vocab_size
     assert tokenizer.vocab_size == 495+num_specials+256

@@ -241,7 +241,7 @@ class BBPETokenizer(Tokenizer):
         self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()} # special token id --> special mark str
 
 
-    def train_bpe(self, corpus:str, num_merges:int|None = None, num_workers:int=5, verbose:bool=False):
+    def train_bpe(self, corpus:str, num_merges:int|None = None, verbose:bool=False):
         if not hasattr(self, '_num_merges'): # if _num_merges not set, must input num_merges here
             assert isinstance(num_merges, int) and num_merges >= 0, f'num merges not set. must input num_merges >= 0.'
             self._num_merges = num_merges
@@ -262,11 +262,16 @@ class BBPETokenizer(Tokenizer):
         chunks_tokens: t.List[list[int]] = [list( chunk.encode('utf-8') ) for chunk in chunks_str] # list of int(0..255)_list
 
         for i in range(self._num_merges):
-            p_counts:t.Dict[tuple[int, int], int] = {} # 本次merge: 首先要针对当前 tokens list 作 pair counts accumulatively
-            # 可多线程加速：对每个 tokens 作get_pair_counts（多进程加速），得到所有 p_counts 后，再一起累加
+            # 本次merge, 首先要针对当前 tokens list 作 pair counts accumulatively
+            p_counts:t.Dict[tuple[int, int], int] = {}
+
+            # <单线程>：一直更新 p_counts
             for tokens in chunks_tokens:
                 get_pair_counts(tokens, p_counts) # 从当前 tokens 提取 pairs，更新 p_counts
-
+            
+            # <多线程>：对每个 tokens 作 get_pair_counts，得到所有 p_counts 后，再一起累加, 即 map-reduce
+            # <多线程> 写在 for loop 内部，会有频繁启停线程的额外开销.
+            
             # 如果 经过 chunks_tokens 累积更新 p_counts, p_counts 仍然是 {}, 说明 corpus 已经全部 merge 到一起, 无可 merge
             # 不提前结束 merge 循环, 而是报错, 提示 更换参数 explicit_n_vocab 或 语料 corpus。
             # 原因是参数 explicit_n_vocab 语意 明确的 vocab_size，
@@ -285,11 +290,11 @@ class BBPETokenizer(Tokenizer):
             merge_ranks[occur_most_pair] = new_token # 记录 merge: rank as new token
             vocab[new_token] = vocab[occur_most_pair[0]] + vocab[occur_most_pair[1]] # 记录 new token 对应的 bytes
 
-            # <多线程> 更新 chunks_tokens 的所有 tokens: 把 occur-most pair of tokens merge 成 new_token.
-            # chunks_tokens = [merge_pair(tokens, occur_most_pair, new_token) for tokens in chunks_tokens]
-            merge = functools.partial(merge_pair, pair=occur_most_pair, new_token=new_token)
-            with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                chunks_tokens = list( executor.map(merge, chunks_tokens) )
+            # 更新 chunks_tokens 的所有 tokens: 把 occur-most pair of tokens merge 成 new_token.
+            # <单线程>
+            chunks_tokens = [merge_pair(tokens, occur_most_pair, new_token) for tokens in chunks_tokens]
+
+            # <多线程> 写在 for loop 内部，会有频繁启停线程的额外开销.
 
             if verbose:
                 print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}'
