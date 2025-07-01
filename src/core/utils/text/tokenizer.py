@@ -611,7 +611,7 @@ class boostBBPETokenizer(baseBBPETokenizer):
     的收益非常低。由于 tokens 一般被切得很小, 故 这两个原子操作的计算密度不大, 而超长的 chunks of tokens 的并发数量太大，并发
     带来的开销完全抵消了其提升。
     真正的瓶颈在于 stored_tokens(暂存的tokens以merge top pair) 导致的内存瓶颈。超长的 stored_tokens 是 list of tokens，长
-    度非常长，单机内存很可能放不下。真正的 boost 应该首先处理这个内存瓶颈。
+    度非常长，单机内存很可能放不下。真正的 boost 应该首先处理这个内存瓶颈。-----> 使用 异步编程 来异步读取 
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -629,7 +629,7 @@ class boostBBPETokenizer(baseBBPETokenizer):
         yield next_tokens # 吐出 next tokens
     
     stored_tokens:
-    协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, append tokens to stored_tokens
+    协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, write tokens to stored_tokens
 
     agg_p_counts:
     协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, apply get_pair_counts on tokens, get p_counts, aggregate p_counts in agg_p_counts
