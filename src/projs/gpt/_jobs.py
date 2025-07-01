@@ -6,7 +6,7 @@ import typing as t
 import pandas as pd
 import yaml
 from ...core.utils.text.vocabulize import Vocab
-from ...core.utils.text.tokenizer import BBPETokenizer, ENDOFTEXT
+from ...core.utils.text.tokenizer import baseBBPETokenizer, ENDOFTEXT
 
 
 configs = yaml.load(open('src/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
@@ -104,7 +104,7 @@ def build_tokenizer_job():
     if not os.path.exists(tokenizer_path):
         # create tokenizer
         print('bpe train begin')
-        gpt_tokenizer = BBPETokenizer(name='gpt')
+        gpt_tokenizer = baseBBPETokenizer(name='gpt')
         gpt_tokenizer.train_bpe(corpus, num_merges=30000, verbose=True)
         print('bpe train close')
         gpt_tokenizer.save(tokenizer_path)

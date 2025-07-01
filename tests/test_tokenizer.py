@@ -2,7 +2,7 @@ import pytest
 import os
 
 
-from src.core.utils.text.tokenizer import BBPETokenizer
+from src.core.utils.text.tokenizer import baseBBPETokenizer, boostBBPETokenizer
 
 
 # -----------------------------------------------------------------------------
@@ -59,7 +59,7 @@ The ancestors of llamas are thought to have originated from the Great Plains of 
 # tests
 
 # test encode/decode identity for a few different strings
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
 @pytest.mark.parametrize("text", test_strings)
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
@@ -71,7 +71,7 @@ def test_encode_decode_identity(tokenizer_factory, text):
 
 
 # test bpe basic logic
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
 def test_wikipedia_example(tokenizer_factory):
     """
     Quick unit test, following along the Wikipedia example:
@@ -103,7 +103,7 @@ def test_wikipedia_example(tokenizer_factory):
 
 
 # test save/load/view
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_save_load(tokenizer_factory, special_marks):
     num_specials = len(special_marks)
@@ -117,7 +117,7 @@ def test_save_load(tokenizer_factory, special_marks):
     # save the tokenizer (TODO use a proper temporary directory)
     tokenizer.save("temp/test_tokenizer_tmp.tok")
     # re-load the tokenizer
-    tokenizer = BBPETokenizer(name='reload')
+    tokenizer = boostBBPETokenizer(name='reload')
     tokenizer.load("temp/test_tokenizer_tmp.tok")
     # verify that decode(encode(x)) == x
     assert tokenizer.decode(tokens) == text
@@ -135,7 +135,7 @@ def test_save_load(tokenizer_factory, special_marks):
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_complicated_text(text, special_marks):
     num_specials = len(special_marks)
-    tokenizer = BBPETokenizer(name='llama', special_marks=special_marks)
+    tokenizer = boostBBPETokenizer(name='llama', special_marks=special_marks)
     # test on llama_text & timemachine.txt, with 495 merges
     text = unpack(text)
     tokenizer.train_bpe(corpus=text, num_merges=495)
@@ -146,7 +146,7 @@ def test_complicated_text(text, special_marks):
     # save the tokenizer (use a proper temporary directory)
     tokenizer.save("temp/test_llama.tok")
     # re-load the tokenizer
-    tokenizer = BBPETokenizer(name='reload')
+    tokenizer = boostBBPETokenizer(name='reload')
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
     assert tokenizer.vocab_size == 495+num_specials+256
@@ -159,7 +159,7 @@ def test_complicated_text(text, special_marks):
 
 
 # test view
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
 def test_view(tokenizer_factory):
     tokenizer = tokenizer_factory(name='llama', special_marks={})
     tokenizer.load("temp/test_llama.tok")
@@ -170,7 +170,7 @@ def test_view(tokenizer_factory):
 
 
 # test empty .tok
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
 def test_empty(tokenizer_factory):
     tokenizer = tokenizer_factory(name='empty', special_marks={})
     tokenizer.load("temp/test_empty.tok")
