@@ -2,7 +2,7 @@ import pytest
 import os
 
 
-from src.core.utils.text.tokenizer import baseBBPETokenizer, boostBBPETokenizer
+from src.core.utils.text.tokenizer import boostBBPETokenizer, boostBBPETokenizer
 
 
 # -----------------------------------------------------------------------------
