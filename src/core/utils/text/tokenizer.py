@@ -101,7 +101,7 @@ class ByteTokenizer(Tokenizer):
 import regex as re
 import os
 import functools
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed, Future
 from ..common.seq_operation import check_monotonic
 
 
@@ -109,8 +109,10 @@ from ..common.seq_operation import check_monotonic
 GPT2_TOKENIZER_REGEX = \
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+
 GPT4_TOKENIZER_REGEX = \
     r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
+
 
 ENDOFTEXT = '<|endoftext|>'
 FIM_PREFIX = '<|fim_prefix|>'
@@ -130,6 +132,9 @@ def get_pair_counts(tokens:t.List[int], p_counts:t.Dict[tuple[int, int], int]|No
     '''
     if p_counts is None:
         p_counts = {}
+    if len(tokens) == 1: # 如果只剩下 一个 token, 那么就无需 count pair / 更新 p_counts 
+        return p_counts
+    
     for pair in zip(tokens, tokens[1:]):
         p_counts[pair] = p_counts.get(pair, 0) + 1
 
@@ -140,6 +145,9 @@ def get_pair_counts(tokens:t.List[int], p_counts:t.Dict[tuple[int, int], int]|No
 def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token):
     new_tokens = [] # 返回一个 new_tokens, 而不是对 tokens 作 in-place 更新
     i = 0
+    if len(tokens) == 1: # 如果只剩下 一个 token, 那么就没有 merge pair 的必要
+        return tokens
+    
     while i < len(tokens):
         if i < len(tokens) - 1 and tokens[i] == pair[0] and tokens[i+1] == pair[1]:
             new_tokens.append( new_token )
@@ -284,6 +292,10 @@ class baseBBPETokenizer(Tokenizer):
         p_counts:t.Dict[tuple[int, int], int] = {}
         tmp_store = []
         for tokens in tokens_generator:
+            # 对于最多只有 1个token 的 tokens(即all merged together)
+            # 它从本次 merge开始，不会再贡献影响任何后续 p_counts, 也没有更新的必要
+            if len(tokens) <= 1:
+                continue
             get_pair_counts(tokens, p_counts)
             tmp_store.append( tokens )
         
@@ -340,7 +352,7 @@ class baseBBPETokenizer(Tokenizer):
         # 所以还是用最稳妥的计算方式
         self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
         self._register_special_tokens()
-    
+
 
     def _encode_chunk(self, tokens:t.List[int]) -> t.List[int]:
         '''
@@ -592,42 +604,68 @@ class baseBBPETokenizer(Tokenizer):
 
 
 
+
 class boostBBPETokenizer(baseBBPETokenizer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
-    ## 外层有一个超高次数循环
-    def bpe_single_merge(self, rank:int, tokens_generator:t.Generator, num_specials:int):
+    ## 外层有一个超高次数循环，应该传入 进程池. # 不考虑内存瓶颈
+    def bpe_single_merge(self, rank:int, tokens_chunks:t.List[list[int]],
+                         process_executor:ProcessPoolExecutor, num_specials:int):
         # rank 从 0 开始
+        tmp_store = [] # 不考虑内存瓶颈先
         ##################### 可分布式加速，写入密集，顺序不重要 #####################
-        p_counts:t.Dict[tuple[int, int], int] = {}
-        tmp_store = []
-        for tokens in tokens_generator:
-            get_pair_counts(tokens, p_counts)
-            tmp_store.append( tokens )
+        # 分布式计算 每个 tokens 的 p_counts, 填充 tokens 到 tmp_store. 仅考虑 len > 1 的 tokens
+        futures_counts: t.List[Future] = [] # 异步结果的 list
+        for tokens in tokens_chunks:
+            if len(tokens) > 1:
+                futures_counts.append( process_executor.submit(get_pair_counts, tokens) )
+                tmp_store.append( tokens )
         ##################### ———————————————————————————— #####################
         
-        ##################### 单一行为，主进程该做的事情 #####################
-        if not p_counts:
+        ##################### 聚合，单一行为，主进程该做的事情 #####################
+        agg_p_counts = {}
+        for future in as_completed(futures_counts): # 遍历 异步结果的 list
+            try:
+                partial_p_counts = future.result() # 得到异步结果
+                for k, v in partial_p_counts.items():
+                    agg_p_counts[k] = agg_p_counts.get(k, 0) + v # 聚合
+            except Exception as exc:
+                raise RuntimeError(f"error when aggregating p_counts {partial_p_counts} at merge rank {rank}: {exc}")
+
+        if not agg_p_counts:
             raise_run_out_corpus_error(rank, num_specials)
         
-        occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get)
-        occurance = p_counts[occur_most_pair]
+        occur_most_pair: tuple[int, int] = max(agg_p_counts, key=agg_p_counts.get)
+        occurance = agg_p_counts[occur_most_pair]
         new_token: int = rank + 256
-        del p_counts
-
-        yield occur_most_pair, occurance, new_token # first yield
+        del agg_p_counts
         ##################### —————————————————————— #####################
 
         ##################### 可分布式加速，读取密集+计算密集，顺序不重要 #####################
-        # yield remain as new tokens_generator
+        # futures_tokens: t.List[Future] = []
+        # for tokens in tmp_store:
+        #     futures_tokens.append( process_executor.submit(merge_pair, tokens, occur_most_pair, new_token) )
+        
+        # merged_tokens_chunks = []
+        # for future in as_completed(futures_tokens): # 遍历 异步结果的 list
+        #     try:
+        #         merged_tokens = future.result()
+        #         merged_tokens_chunks.append( merged_tokens )
+        #     except Exception as exc:
+        #         print(f"error when mergeing pair {occur_most_pair} at merge rank {rank}: {exc}")
+        ##################### ——————————————————————————————————— #####################
+        ##################### 可分布式加速，读取密集+计算密集，顺序不重要 #####################
+        merged_tokens_chunks = []
         for tokens in tmp_store:
-            yield merge_pair(tokens, occur_most_pair, new_token)
+            merged_tokens_chunks.append( merge_pair(tokens, occur_most_pair, new_token) )
         ##################### ——————————————————————————————————— #####################
 
+        return occur_most_pair, occurance, new_token, merged_tokens_chunks
 
-    def train_bpe(self, corpus:str, num_merges:int|None = None, verbose:bool=False):
-        super()._prepare_train(num_merges)    
+
+    def train_bpe(self, corpus:str, num_merges:int|None=None, verbose:bool=False):
+        super()._prepare_train(num_merges)
         
         merge_ranks: dict[tuple[int, int], int] = {}
         vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)}
@@ -637,29 +675,28 @@ class boostBBPETokenizer(baseBBPETokenizer):
         # <多线程>
         utf8_encode = functools.partial(str.encode, encoding='utf-8')
         with ThreadPoolExecutor(max_workers=8) as e:
-             gen_tokens = e.map(utf8_encode, chunks_str) # a generator
+             tokens_chunks = list( e.map(utf8_encode, chunks_str) ) # a generator
         
-        # <merge循环有前后依赖，所以不能并行>
-        for i in range(self._num_merges):
-            gen_output = self.bpe_single_merge(i, gen_tokens, len(self._special_marks))
-            occur_most_pair, occurance, new_token = next(gen_output) # first yield
-            
-            merge_ranks[occur_most_pair] = new_token
-            vocab[new_token] = vocab[occur_most_pair[0]] + vocab[occur_most_pair[1]]
+        # <多进程>
+        with ProcessPoolExecutor(max_workers=3) as executor:
+            for i in range(self._num_merges):
 
-            gen_tokens = gen_output # remain as gen_tokens
+                occur_most_pair, occurance, new_token, tokens_chunks = self.bpe_single_merge(
+                    i,
+                    tokens_chunks,
+                    executor,
+                    len(self._special_marks)
+                )
+                
+                merge_ranks[occur_most_pair] = new_token
+                vocab[new_token] = vocab[occur_most_pair[0]] + vocab[occur_most_pair[1]]
 
-            if verbose:
-                print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}'
-                      f'[{vocab[new_token]}] had {occurance} occurences')
+                if verbose:
+                    print(f'merge {i+1}/{self._num_merges}: {occur_most_pair} -> {new_token}'
+                        f'[{vocab[new_token]}] had {occurance} occurences')
         
-
         self._merge_ranks = merge_ranks
         self._vocab = vocab
 
         self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
         self._register_special_tokens()
-
-
-
-
