@@ -1,26 +1,22 @@
 # test.py
 from src.core.design.producer_consumer import *
-
-import pandas as pd
+from src.core.utils.text.tokenizer import ByteTokenizer
+cache_play = '../cache/playground/'
+import typing as t
 import pyarrow.parquet as pq
+import pyarrow as pa
 import os
+import regex as re
+import functools
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed, Future
+ENDOFTEXT = '<|endoftext|>'
+GPT4_TOKENIZER_REGEX = \
+    r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 
-def create_sample_parquet_file(file_path: str, num_rows: int = 10000):
-    """
-    创建一个大的示例 Parquet 文件用于演示。
-    """
-    print(f"Creating a sample Parquet file with {num_rows} rows...")
-    data = {
-        'id': range(num_rows),
-        'name': [f'User_{i}' for i in range(num_rows)],
-        'value': [i * 0.1 for i in range(num_rows)],
-        'category': ['A', 'B', 'C', 'D'] * (num_rows // 4)
-    }
-    df = pd.DataFrame(data)
-    df.to_parquet(file_path, index=False)
-    print(f"Sample file '{file_path}' created successfully.")
+def encode_to_ints(s:str, encoding='utf-8') -> t.List[int]:
+    return list( s.encode(encoding) )
 
-def read_parquet_in_batches(file_path: str, batch_size: int = 1000):
+def read_parquet_in_batches(file_path: str, batch_size: int):
     """
     从 Parquet 文件中分批读取数据。
 
@@ -32,48 +28,60 @@ def read_parquet_in_batches(file_path: str, batch_size: int = 1000):
         pd.DataFrame: 包含当前批次数据的 Pandas DataFrame。
     """
     if not os.path.exists(file_path):
-        print(f"Error: File '{file_path}' not found.")
-        return
-
-    print(f"\nStarting to read '{file_path}' in batches of {batch_size} rows...")
+        raise FileNotFoundError(f"Error: File '{file_path}' not found.")
     
-    # 使用 pyarrow.parquet.ParquetFile 打开文件
     parquet_file = pq.ParquetFile(file_path)
-    
-    # 遍历文件的所有行组 (Row Groups)
-    # Parquet 文件内部数据按 Row Group 组织，每个 Row Group 包含一部分行
-    # iter_batches 方法可以让你从 Row Group 中进一步分批读取 RecordBatch
-    for i, batch in enumerate(parquet_file.iter_batches(batch_size=batch_size)):
-        # 将 PyArrow RecordBatch 转换为 Pandas DataFrame
-        df_batch = batch.to_pandas()
-        print(f"  Read batch {i+1}: {len(df_batch)} rows.")
-        yield df_batch # 返回当前批次的 DataFrame
 
-    print(f"Finished reading all batches from '{file_path}'.")
+    for batch in parquet_file.iter_batches(batch_size=batch_size):
+        yield batch['text']
 
 
 if __name__ == "__main__":
-    test_file = 'large_sample.parquet'
-    
-    # 1. 创建一个大的示例文件
-    create_sample_parquet_file(test_file, num_rows=25345) # 使用一个不是 batch_size 倍数的行数
+    sample_pq = os.path.join(cache_play, "sample_raw.parquet")
+    sample_tokens_pq = os.path.join(cache_play, "sample_tokens.parquet")
+    batch_size = 3
+    # 输出 tokens schema
+    list_of_ints_type = pa.list_(pa.field('token', pa.int32()))
+    output_schema = pa.schema([
+        pa.field('tokens', list_of_ints_type) # 变长的整数列表
+    ])
+    # 把 raw parquet 文件 pre-split 成 chunks, 再把每个chunk encode 成 0-255 integers, 输出称为 parquet 文件.
+    # 每一行是一个 tokens (list of integers)
 
-    # 2. 以每次 5000 行的方式读取文件
-    batch_size = 5000
-    for i, df_chunk in enumerate(read_parquet_in_batches(test_file, batch_size)):
-        print(f"Processing chunk {i+1}: First 3 rows of this chunk:\n{df_chunk.head(3)}")
-        # 在这里你可以对 df_chunk 进行任何处理，例如：
-        # - 写入数据库
-        # - 进行聚合计算
-        # - 过滤并保存到新文件
-        # - 发送到其他服务
-        
-        # 模拟一些处理时间
-        # import time
-        # time.sleep(0.1)
+    with pq.ParquetWriter(sample_tokens_pq, output_schema, compression='snappy') as writer:
+        for i, text in enumerate(read_parquet_in_batches(sample_pq, batch_size)):
+            string_batch = ENDOFTEXT.join(text.to_pylist())
+            chunks = re.findall(GPT4_TOKENIZER_REGEX, string_batch) # list of tokens(string)
 
-    print("\nAll chunks processed!")
+            chunks_tokens = [encode_to_ints(chunk) for chunk in chunks] # list of list of integers(every list of integers --> tokens)
 
-    # 3. 清理示例文件
-    os.remove(test_file)
-    print(f"Cleaned up '{test_file}'.")
+            # 扁平化一个大列表，计算每个子列表的偏移量
+            flat_tokens = [token for tokens in chunks_tokens for token in tokens]
+            # offset
+            offset = [0]
+            current_offset = 0
+            for tokens in chunks_tokens:
+                current_offset += len(tokens)
+                offset.append(current_offset)
+            
+            values_array = pa.array(flat_tokens, type=pa.int32())
+            
+            list_array = pa.ListArray.from_arrays(offset, values_array)
+
+            # 创建 pa table
+            batch_table = pa.Table.from_arrays([list_array], schema=output_schema)
+            writer.write_table(batch_table)
+
+    # 反向验证
+    # sample_tokens = pd.read_parquet(sample_tokens_pq)
+    # bt = []
+    # for tokens in sample_tokens['tokens']:
+    #     bt.extend(tokens)
+    # bttok = ByteTokenizer()
+    # print( bttok.decode(bt) )
+
+    # sample_raw = pd.read_parquet(sample_pq)
+    # text = []
+    # for article in sample_raw['text']:
+    #     text.append(article)
+    # print(ENDOFTEXT.join(text))
