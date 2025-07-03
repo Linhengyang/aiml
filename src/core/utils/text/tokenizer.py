@@ -159,6 +159,9 @@ def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token):
 
 
 
+
+
+
 # 缓存这个函数, 因为预计会用完全相同的输入，调用很多次这个函数。缓存函数调用结果，下次遇到相同输入时，避免计算直接返回缓存结果
 @functools.lru_cache(maxsize=128)
 def _special_token_regex(tokens: frozenset[str]) -> "re.Pattern[str]":
@@ -193,6 +196,11 @@ def raise_disallowed_special_token(token: str) -> t.NoReturn:
         f'you can expand `allowed_special` to "all" or narrow `disallowed_special` to (),'
         f'both will ignore specials and tokenize the text as plain'
     )
+
+
+def encode_to_ints(s:str, encoding='utf-8') -> t.List[int]:
+    return list( s.encode(encoding) )
+
 
 
 class baseBBPETokenizer(Tokenizer):
@@ -322,9 +330,8 @@ class baseBBPETokenizer(Tokenizer):
 
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
 
-        utf8_encode = functools.partial(str.encode, encoding='utf-8')
         with ThreadPoolExecutor(max_workers=8) as e:
-             gen_tokens = e.map(utf8_encode, chunks_str) # a generator
+             gen_tokens = e.map(encode_to_ints, chunks_str) # a generator
         
         # <merge循环有前后依赖，所以不能并行>
         for i in range(self._num_merges):
