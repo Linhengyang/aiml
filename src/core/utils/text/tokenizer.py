@@ -611,15 +611,17 @@ class boostBBPETokenizer(baseBBPETokenizer):
     的收益非常低。由于 tokens 一般被切得很小, 故 这两个原子操作的计算密度不大, 而超长的 chunks of tokens 的并发数量太大，并发
     带来的开销完全抵消了其提升。
     真正的瓶颈在于 stored_tokens(暂存的tokens以merge top pair) 导致的内存瓶颈。超长的 stored_tokens 是 list of tokens，长
-    度非常长，单机内存很可能放不下。真正的 boost 应该首先处理这个内存瓶颈。-----> 使用 异步编程 来异步读取 
+    度非常长，单机内存很可能放不下。真正的 boost 应该首先处理这个内存瓶颈。-----> 使用 异步编程 
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
     '''
     bpe_single_merge: 
-    tokens_generator  --tokens-->  append in stored_tokens
-    tokens_generator  --tokens-->  get_pair_counts --> partial_p_counts --> aggregate in agg_p_counts
+    前半部分：生产者不断生产 tokens(list of ints)
+             消费者不断消费(一.把tokens写入disk stored_tokens; 二.计算partial_p_counts,累加到 agg_p_counts)
+    tokens_generator  --tokens-->  append in stored_tokens disk
+                      --tokens-->  get_pair_counts --> partial_p_counts --> aggregate in agg_p_counts
 
     tokens_generator替换为一个 fetch-tokens 协程:
     协程 tokens_generator:
@@ -641,23 +643,23 @@ class boostBBPETokenizer(baseBBPETokenizer):
     
     def bpe_single_merge(self, rank:int, tokens_generator:t.Generator, num_specials:int):
         # rank 从 0 开始
-        p_counts:t.Dict[tuple[int, int], int] = {}
+        agg_p_counts:t.Dict[tuple[int, int], int] = {}
         stored_tokens = []
         for tokens in tokens_generator:
             # 对于最多只有 1个token 的 tokens(即all merged together)
             # 它从本次 merge开始，不会再贡献影响任何后续 p_counts, 也没有更新的必要
             if len(tokens) <= 1:
                 continue
-            get_pair_counts(tokens, p_counts)
+            get_pair_counts(tokens, agg_p_counts)
             stored_tokens.append( tokens )
         
-        if not p_counts:
+        if not agg_p_counts:
             raise_run_out_corpus_error(rank, num_specials)
         
-        occur_most_pair: tuple[int, int] = max(p_counts, key=p_counts.get)
-        occurance: int = p_counts[occur_most_pair]
+        occur_most_pair: tuple[int, int] = max(agg_p_counts, key=agg_p_counts.get)
+        occurance: int = agg_p_counts[occur_most_pair]
         new_token: int = rank + 256
-        del p_counts
+        del agg_p_counts
 
         yield occur_most_pair, occurance, new_token # first yield
 
