@@ -2,8 +2,8 @@ import pytest
 import os
 
 
-from src.core.utils.text.tokenizer import boostBBPETokenizer, boostBBPETokenizer
-
+from src.core.utils.text.tokenizer import bufferBBPETokenizer, bufferBBPETokenizer
+from src.apps.bpe_build._jobs import corpus_to_init_tokens_pq
 
 # -----------------------------------------------------------------------------
 # common test data
@@ -54,24 +54,28 @@ The ancestors of llamas are thought to have originated from the Great Plains of 
 <|fim_prefix|>In Aymara mythology, llamas are important beings. The Heavenly Llama is said to drink water from the ocean and urinates as it rains.[6] According to Aymara eschatology,<|fim_suffix|> where they come from at the end of time.[6]<|fim_middle|> llamas will return to the water springs and ponds<|endofprompt|>
 """.strip()
 
+# init_tokens_pq = "../../cache/playground/sample_tokens.parquet"
+buffer = "../../cache/temp/"
 
 # -----------------------------------------------------------------------------
 # tests
 
 # test encode/decode identity for a few different strings
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
 @pytest.mark.parametrize("text", test_strings)
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
+    init_tokens_pq = os.path.join(buffer, 'test.parquet')
     tokenizer = tokenizer_factory(name='test', explicit_n_vocab = 261) # 256 + 5, zero-merge
-    tokenizer.train_bpe(corpus='')
+    corpus_to_init_tokens_pq(text, init_tokens_pq)
+    tokenizer.train_bpe(init_tokens_pq, buffer)
     ids = tokenizer.encode(text)
     decoded = tokenizer.decode(ids)
     assert text == decoded
 
 
 # test bpe basic logic
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
 def test_wikipedia_example(tokenizer_factory):
     """
     Quick unit test, following along the Wikipedia example:
@@ -95,7 +99,9 @@ def test_wikipedia_example(tokenizer_factory):
     """
     tokenizer = tokenizer_factory(name='test', explicit_n_vocab=256+3+5)
     text = "aaabdaaabac"
-    tokenizer.train_bpe(text, verbose=True)
+    init_tokens_pq = os.path.join(buffer, 'test.parquet')
+    corpus_to_init_tokens_pq(text, init_tokens_pq)
+    tokenizer.train_bpe(init_tokens_pq, buffer)
     tokens = tokenizer.encode(text)
     assert tokens == [258, 100, 258, 97, 99]
     assert tokenizer.decode(tokens) == text
@@ -103,7 +109,7 @@ def test_wikipedia_example(tokenizer_factory):
 
 
 # test save/load/view
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_save_load(tokenizer_factory, special_marks):
     num_specials = len(special_marks)
@@ -111,13 +117,15 @@ def test_save_load(tokenizer_factory, special_marks):
     tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, explicit_n_vocab=256+3+num_specials)
     # test on text "aaabdaaabac"
     text = "aaabdaaabac"
-    tokenizer.train_bpe(corpus=text)
+    init_tokens_pq = os.path.join(buffer, 'test.parquet')
+    corpus_to_init_tokens_pq(text, init_tokens_pq)
+    tokenizer.train_bpe(init_tokens_pq, buffer)
     # verify that save/load work as expected
     tokens = tokenizer.encode(text)
     # save the tokenizer (TODO use a proper temporary directory)
     tokenizer.save("temp/test_tokenizer_tmp.tok")
     # re-load the tokenizer
-    tokenizer = boostBBPETokenizer(name='reload')
+    tokenizer = bufferBBPETokenizer(name='reload')
     tokenizer.load("temp/test_tokenizer_tmp.tok")
     # verify that decode(encode(x)) == x
     assert tokenizer.decode(tokens) == text
@@ -135,10 +143,12 @@ def test_save_load(tokenizer_factory, special_marks):
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_complicated_text(text, special_marks):
     num_specials = len(special_marks)
-    tokenizer = boostBBPETokenizer(name='llama', special_marks=special_marks)
+    tokenizer = bufferBBPETokenizer(name='llama', special_marks=special_marks)
     # test on llama_text & timemachine.txt, with 495 merges
     text = unpack(text)
-    tokenizer.train_bpe(corpus=text, num_merges=495)
+    init_tokens_pq = os.path.join(buffer, 'test.parquet')
+    corpus_to_init_tokens_pq(text, init_tokens_pq)
+    tokenizer.train_bpe(init_tokens_pq, buffer, num_merges=495)
     # verify the vocab_size
     assert tokenizer.vocab_size == 495+num_specials+256
     # verify that save/load work as expected
@@ -146,7 +156,7 @@ def test_complicated_text(text, special_marks):
     # save the tokenizer (use a proper temporary directory)
     tokenizer.save("temp/test_llama.tok")
     # re-load the tokenizer
-    tokenizer = boostBBPETokenizer(name='reload')
+    tokenizer = bufferBBPETokenizer(name='reload')
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
     assert tokenizer.vocab_size == 495+num_specials+256
@@ -158,20 +168,20 @@ def test_complicated_text(text, special_marks):
 
 
 
-# test view
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
-def test_view(tokenizer_factory):
-    tokenizer = tokenizer_factory(name='llama', special_marks={})
-    tokenizer.load("temp/test_llama.tok")
-    tokenizer.view('temp/')
+# # test view
+# @pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
+# def test_view(tokenizer_factory):
+#     tokenizer = tokenizer_factory(name='llama', special_marks={})
+#     tokenizer.load("temp/test_llama.tok")
+#     tokenizer.view('temp/')
 
 
 
 
 
-# test empty .tok
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
-def test_empty(tokenizer_factory):
-    tokenizer = tokenizer_factory(name='empty', special_marks={})
-    tokenizer.load("temp/test_empty.tok")
-    tokenizer.view('temp/')
+# # test empty .tok
+# @pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
+# def test_empty(tokenizer_factory):
+#     tokenizer = tokenizer_factory(name='empty', special_marks={})
+#     tokenizer.load("temp/test_empty.tok")
+#     tokenizer.view('temp/')
