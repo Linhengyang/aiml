@@ -1,0 +1,3 @@
+train_pq: '../../data/raw/train.parquet'
+valid_pq: '../../data/raw/validation.parquet'
+

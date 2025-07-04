@@ -50,7 +50,7 @@ async def tokens_generator(queue: asyncio.Queue, total_chunks: int):
     生产者协程：不断获取 tokens，并放入队列。
     """
     for i in range(total_chunks):
-        next_tokens = await simulate_fetch_tokens_from_IO(i) # 模拟从 I/O 获取
+        next_tokens = await simulate_fetch_tokens_from_IO(i) # 模拟从 I/O 获取，后接的 fetcher 必须是异步的
         await queue.put(next_tokens) # 将 tokens 放入队列，如果队列满则暂停等待
         print(f"[Generator] 放入 chunk {i} ({len(next_tokens)} tokens) 到队列。")
     
