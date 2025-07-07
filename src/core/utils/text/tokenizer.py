@@ -489,7 +489,7 @@ class baseBBPETokenizer(Tokenizer):
         return concat_bytes.decode('utf-8', errors=errors)
     
 
-    def save(self, f_name):
+    def save(self, f_path):
         '''
         保存 name
         保存 pat_str
@@ -497,8 +497,8 @@ class baseBBPETokenizer(Tokenizer):
         保存 merge_ranks (只需要保存 keys 即可，因为 values 是从 256 的递增序列)
         ---> 即保存了一个 tokenizer 的全部信息
         '''
-        assert f_name.endswith(".tok")
-        with open(f_name, 'w') as f:
+        assert f_path.endswith(".tok")
+        with open(f_path, 'w') as f:
             # write the name of the tokenizer as version
             f.write(f"{self.name}\n")
             # write the split pattern
@@ -512,7 +512,7 @@ class baseBBPETokenizer(Tokenizer):
                 f.write(f"{L} {R}\n")
 
     
-    def load(self, f_name):
+    def load(self, f_path):
         '''
         读取 name: line 1
         读取 pat_str: line 2
@@ -521,11 +521,11 @@ class baseBBPETokenizer(Tokenizer):
         按序读取剩下所有行: pair tokens, 依次存入 merge_ranks[pair tokens] = 256 ++
         构建剩余所有其他, register special tokens / vocab / explicit_n_vocab
         '''
-        assert f_name.endswith(".tok")
+        assert f_path.endswith(".tok")
         # read .tok file
         self._special_marks = []
         self._merge_ranks = {}
-        with open(f_name, 'r', encoding='utf-8') as f:
+        with open(f_path, 'r', encoding='utf-8') as f:
             # line 1: the name of the tokenizer as version
             self.name = f.readline().strip()
             # line 2: the split pattern
@@ -553,7 +553,7 @@ class baseBBPETokenizer(Tokenizer):
         self._register_special_tokens()
 
     
-    def view(self, tmpsave_path):
+    def view(self, tmpsave_dir):
         # _vocab: int(0 至 MAX_MERGE_RANK) --> bytes
         # _merge_ranks: (int, int) --> merged_int(256 至 MAX_MERGE_RANK)
         # special_tokens: (str, int)
@@ -563,7 +563,7 @@ class baseBBPETokenizer(Tokenizer):
         from .text_preprocess import render_bytes
         import os
 
-        with open(os.path.join(tmpsave_path, f'tmp_{self.name}.vocab'), 'w', encoding='utf-8') as f:
+        with open(os.path.join(tmpsave_dir, f'tmp_{self.name}.vocab'), 'w', encoding='utf-8') as f:
             # 首先打印 special marks:
             for mark, idx in self.special_tokens.items():
                 f.write(f"[{mark}] {idx}\n")
