@@ -3,8 +3,10 @@ import typing as t
 import pyarrow.parquet as pq
 import pyarrow as pa
 import os
-import regex as re
-from collections import defaultdict
+
+
+
+
 
 def yield_parquet_batch(file_path: str, batch_size: int, columns: t.List[str]):
     """
@@ -27,40 +29,28 @@ def yield_parquet_batch(file_path: str, batch_size: int, columns: t.List[str]):
         yield batch
 
 
-# sample1   sample2
-# [[1,2,3], [2,3,4,5],...]
-
-# def build_pyarrow_table(row_data:t.List, schema):
-#     # row_data is data in row: len(row_data) = sample_size, row_data[0] is first sample, len(row_data[0]) is num_field
-#     # to build table, get offsets and values
-#     offset, current_offset = [0], 0
-#     for row in row_data:
-#         current_offset += len(row)
-#         offset.append(current_offset)
-
-#     values_array = pa.array([v for row in row_data for v in row], type=schema.field(0).type.value_type)
-#     list_array = pa.ListArray.from_arrays(offset, values_array)
-
-#     data_table = pa.Table.from_arrays([list_array], schema=schema)
-#     return data_table
 
 
 def build_pyarrow_table_from_row_data(row_data:t.List, schema):
-    # row_data is data in row: len(row_data) = sample_size, row_data[0] is first sample, len(row_data[0]) is num_field
+    '''
+    row_data is list of data points(row):
+        len(row_data) = sample_size, row_data[0] is the first sample, len(row_data[0]) is num_field
+    schema must match with data points from row_data
+    '''
     num_fields = len(schema)
-    col_data =[[] for _ in range(num_fields)] # [[col1_data], [col2_data],...]
-    offsets = {} # {field j1: [0, 3, 6, ..],  field j2: [0, 4, 8, 12, ..]}
+    col_data =[[] for _ in range(num_fields)] # transfer row data to col data. [[col1_data], [col2_data],...]
+    offsets = {} # for possible listarray col data. should be {field j1: [0, 3, 6, ..],  field j2: [0, 4, 8, 12, ..]}
 
-    for i, row in enumerate(row_data): # row can be [ 1, 3.14, 'A', [3,2,1,0] ] for 4 fields
-        assert len(row) == num_fields, f'row {i} length not match with schema num_fields {num_fields}'
+    for i, row in enumerate(row_data):
+        # row e.g, 4 fields: [ 9, 3.14, 'A', [3,2,1,0] ]
+        assert len(row) == num_fields, f'row {i} length {len(row)} not match with schema num_fields {num_fields}'
 
         for j in range(num_fields):
-            if isinstance(row[j], t.List|t.Tuple): # 如果 field j 是一个序列 # 尚未测试 空序列
+            if isinstance(row[j], list|tuple): # 如果 field j 是一个向量 #TODO 尚未测试 空向量
                 try:
                     offsets[j].append( offsets[j][-1] + len(row[j]) )
                 except KeyError:
                     offsets[j] = [0, len(row[j])]
-
                 col_data[j].extend( row[j] )
             else: # 如果 field j 是一个标量
                 col_data[j].append(row[j])
@@ -72,9 +62,8 @@ def build_pyarrow_table_from_row_data(row_data:t.List, schema):
         else:
             col_array = pa.array(col_data[j])
         col_data[j] = col_array
-
-    data_table = pa.Table.from_arrays(col_data, schema=schema)
-    return data_table
+    
+    return pa.Table.from_arrays(col_data, schema=schema)
 
 
 
