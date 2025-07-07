@@ -16,9 +16,12 @@ cache_play = '../cache/playground/'
 
 
 if __name__ == "__main__":
-    sample_pq = os.path.join(cache_play, "sample_raw.parquet")
-    sample_tokens_pq = os.path.join(cache_play, "sample_tokens.parquet")
-    batch_size = 3
+    # sample_pq = os.path.join(cache_play, "sample_raw.parquet")
+    # sample_tokens_pq = os.path.join(cache_play, "sample_tokens.parquet")
+    # batch_size = 3
 
-    # 测试 parquet write 是否覆盖原文件
-    pd.read_parquet(sample_tokens_pq)
+    # # 测试 parquet write 是否覆盖原文件
+    # pd.read_parquet(sample_tokens_pq)
+    p_counts = {(1,2):10, (3,4):20}
+    import json
+    json.dump()

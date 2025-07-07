@@ -636,7 +636,7 @@ def text_to_tokens_pa_table(text, tokens_schema):
     return batch_table
 
 
-            
+
 
 class bufferBBPETokenizer(baseBBPETokenizer):
     '''
@@ -652,16 +652,29 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         self._buffer_dir = buffer_dir
     
 
-    def _generate_buffer_path(self, rank:int) -> str:
+    def _generate_tokens_pq(self, rank:int) -> str:
         '''
         generate tokens parquet file path for merge rank `rank`. 
             determined by `rank`
-        当前 merge rank `rank` 要读取的 parquet file path。
+        当前 merge rank `rank` 要读取的 tokens parquet file path。
             由 `rank` 唯一确定
 
         `rank`: 0, ..., num_mergs-1
         '''
-        return os.path.join(self._buffer_dir, f'merged_tokens_{rank}.parquet') # 当前 merge rank 要读取的 parquet
+        return os.path.join(self._buffer_dir, 'tokens', f'tokens_{rank}.parquet') # 当前 merge rank 要读取的 parquet
+    
+
+    def _generate_pair_counts_pq(self, rank:int, tokens_pq:str) -> str:
+        '''
+        p_counts parquet file path based on `tokens_pq` for merge rank `rank`. 
+            determined by `rank` and `tokens_pq`
+        当前 merge rank `rank` 要缓存的 p-counts parquet file path。
+            由 `rank` 和 `tokens_pq` 唯一确定的 pair—counts
+
+        `rank`: 0, ..., num_mergs-1
+        '''
+        return os.path.join(self._buffer_dir, 'pair_counts', f'{tokens_pq}_{rank}.parquet')
+
 
 
     def _prepare_train(self, num_merges, corpus, text_column:str='text'): # 重写 _prepare_train
@@ -701,7 +714,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         tokens_schema = pa.schema([
             pa.field( 'tokens', pa.list_(pa.field('token', pa.int32())) ), # 变长的整数列表
         ])
-        init_tokens_pq = self._generate_buffer_path(0)
+        init_tokens_pq = self._generate_tokens_pq(0)
 
         with pq.ParquetWriter(init_tokens_pq, tokens_schema) as writer:
             for k, batch in enumerate(corpus_batch_iter):
@@ -715,6 +728,20 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         return init_tokens_pq, tokens_schema
 
+
+    def _agg_partial_stats_from_corpus(self, tokens_pq, buffer_batch_size):
+
+        yield_tokens_for_agg:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size, columns=['tokens'])
+        part_p_counts:t.Dict[tuple[int, int], int] = {}
+
+        for batch in yield_tokens_for_agg: # 遍历读取当前 tokens_pq
+            chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里, batch_size 个 tokens
+            for tokens in chunks_tokens:
+                get_pair_counts(tokens, part_p_counts)
+        
+        # buffer the part_p_counts
+        # TODO
+        
     
 
     def train_bpe(self,
@@ -757,7 +784,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 top-pair, 缓存 merged tokens parquet file
             yield_tokens_for_merge:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size, columns=['tokens'])
             
-            merged_tokens_pq:str = self._generate_buffer_path(i+1) # 下一次 merge rank 要读取的 parquet
+            merged_tokens_pq:str = self._generate_tokens_pq(i+1) # 下一次 merge rank 要读取的 parquet
             with pq.ParquetWriter(where = merged_tokens_pq, schema = schema) as writer:
                 for batch in yield_tokens_for_merge:
                     chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里
@@ -769,7 +796,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             # keep the init tokens parquet file, and the last `buffer_cache_latest_num`
             to_remove = i-buffer_cache_latest_num
             if to_remove > 0:
-                os.remove( self._generate_buffer_path(to_remove) )
+                os.remove( self._generate_tokens_pq(to_remove) )
             
             tokens_pq = merged_tokens_pq # update tokens_pq
         
