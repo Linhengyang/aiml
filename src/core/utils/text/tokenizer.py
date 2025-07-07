@@ -775,29 +775,41 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
         self._register_special_tokens()
+    
 
 
 
 
-'''
-bpe_single_merge: 
-前半部分：生产者不断生产 tokens(list of ints)
-            消费者不断消费(一.把tokens写入disk stored_tokens; 二.计算partial_p_counts,累加到 agg_p_counts)
-tokens_generator  --tokens-->  append in stored_tokens disk
-                    --tokens-->  get_pair_counts --> partial_p_counts --> aggregate in agg_p_counts
 
-tokens_generator替换为一个 fetch-tokens 协程:
-协程 tokens_generator:
-    协程开始
-    await fetch_next_tokens # 暂停直到 next tokens fetched
-    协程恢复
-    yield next_tokens # 吐出 next tokens
 
-stored_tokens:
-协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, write tokens to stored_tokens
 
-agg_p_counts:
-协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, apply get_pair_counts on tokens, get p_counts, aggregate p_counts in agg_p_counts
 
-直到 fetch all tokens
-'''
+
+
+
+
+#TODO
+class asyncBBPETokenizer(bufferBBPETokenizer):
+    '''
+    bpe_single_merge: 
+    前半部分：生产者不断生产 tokens(list of ints)
+                消费者不断消费(一.把tokens写入disk stored_tokens; 二.计算partial_p_counts,累加到 agg_p_counts)
+    tokens_generator  --tokens-->  append in stored_tokens disk
+                        --tokens-->  get_pair_counts --> partial_p_counts --> aggregate in agg_p_counts
+
+    tokens_generator替换为一个 fetch-tokens 协程:
+    协程 tokens_generator:
+        协程开始
+        await fetch_next_tokens # 暂停直到 next tokens fetched
+        协程恢复
+        yield next_tokens # 吐出 next tokens
+
+    stored_tokens:
+    协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, write tokens to stored_tokens
+
+    agg_p_counts:
+    协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, apply get_pair_counts on tokens, get p_counts, aggregate p_counts in agg_p_counts
+
+    直到 fetch all tokens
+    '''
+    pass
