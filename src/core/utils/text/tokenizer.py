@@ -630,7 +630,8 @@ def text_to_tokens_pa_table(text, tokens_schema):
     
     # 视作 list of datapoints, 每个 datapoint 是一个 变长的 listarray of integers
     # 创建 pa table
-    batch_table = build_pyarrow_table_from_row_data(chunks_tokens, tokens_schema)
+    datapoints = [[chunk] for chunk in chunks_tokens]
+    batch_table = build_pyarrow_table_from_row_data(datapoints, tokens_schema)
 
     return batch_table
 
@@ -680,14 +681,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             在 buffer_dir 中生成名为 `corpus.parquet` 的文件, 然后从 corpus.parquet 开始如上执行后续
         '''
         super()._prepare_train(num_merges)
-
+        if os.listdir(self._buffer_dir):
+            raise FileExistsError(f'buffer directory {self._buffer_dir} better be empty before BPE train process')
+        
         if not corpus.endswith('.parquet'):
             corpus_schema = pa.schema([
                 pa.field( text_column, pa.string() ), # 一列数据, 列名为 text_column, 类型为 string
             ])
             corpus_pq = os.path.join(self._buffer_dir, 'corpus.parquet')
             with pq.ParquetWriter(corpus_pq, corpus_schema) as writer:
-                writer.write_table( build_pyarrow_table_from_row_data([corpus], corpus_schema) )
+                datapoints = [ [corpus] ]
+                writer.write_table( build_pyarrow_table_from_row_data(datapoints, corpus_schema) )
             corpus = corpus_pq # 更新 corpus 变量为 ../corpus.parquet
         elif not os.path.exists(corpus):
             raise FileNotFoundError(f'corpus parquet file {corpus} not found')
@@ -723,7 +727,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   verbose:bool = False):
         
         tokens_pq, schema = self._prepare_train(num_merges, corpus, text_column)
-        
+
         for i in range(self._num_merges):
             # rank = i: 0, ..., _num_mergs-1
             if not os.path.exists(tokens_pq):
@@ -758,13 +762,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 for batch in yield_tokens_for_merge:
                     chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里
                     new_batch = [ merge_pair(tokens, occur_most_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
-                    # new_batch 写回磁盘 buffer
-                    writer.write_table(
-                        build_pyarrow_table_from_row_data(new_batch, schema)
-                        )
+                    # new_batch 构建 datapoints 写回磁盘 buffer
+                    datapoints = [ [tokens] for tokens in new_batch ]
+                    writer.write_table( build_pyarrow_table_from_row_data(datapoints, schema) )
                     
             # keep the init tokens parquet file, and the last `buffer_cache_latest_num`
-            if to_remove := i-buffer_cache_latest_num > 0:
+            to_remove = i-buffer_cache_latest_num
+            if to_remove > 0:
                 os.remove( self._generate_buffer_path(to_remove) )
             
             tokens_pq = merged_tokens_pq # update tokens_pq
