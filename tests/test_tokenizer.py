@@ -1,7 +1,7 @@
 import pytest
 import os
-
-
+import shutil
+from src.core.utils.file.folder_op import clean_folder
 from src.core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer
 
 # -----------------------------------------------------------------------------
@@ -55,9 +55,10 @@ The ancestors of llamas are thought to have originated from the Great Plains of 
 
 
 buffer="../../cache/temp/"
-for f in os.listdir(buffer): # clean buffer after every test
-    os.remove(os.path.join(buffer, f))
-    
+os.makedirs(buffer, exist_ok=True)
+clean_folder(buffer, method='all')
+
+
 # -----------------------------------------------------------------------------
 # tests
 
@@ -67,12 +68,11 @@ for f in os.listdir(buffer): # clean buffer after every test
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab = 261) # 256 + 5, zero-merge
-    tokenizer.train_bpe('')
+    tokenizer.train_bpe([''])
     ids = tokenizer.encode(text)
     decoded = tokenizer.decode(ids)
     assert text == decoded
-    for f in os.listdir(buffer): # clean buffer after every test
-        os.remove(os.path.join(buffer, f))
+    clean_folder(buffer, method='all')
 
 
 # test bpe basic logic
@@ -100,12 +100,11 @@ def test_wikipedia_example(tokenizer_factory):
     """
     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab=256+3+5)
     corpus = "aaabdaaabac"
-    tokenizer.train_bpe(corpus)
+    tokenizer.train_bpe([corpus])
     tokens = tokenizer.encode(corpus)
     assert tokens == [258, 100, 258, 97, 99]
     assert tokenizer.decode(tokens) == corpus
-    for f in os.listdir(buffer): # clean buffer after every test
-        os.remove(os.path.join(buffer, f))
+    clean_folder(buffer, method='all')
 
 
 # test save/load/view
@@ -117,7 +116,7 @@ def test_save_load(tokenizer_factory, special_marks):
     tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, buffer_dir=buffer, explicit_n_vocab=256+3+num_specials)
     # test on text "aaabdaaabac"
     corpus = "aaabdaaabac"
-    tokenizer.train_bpe(corpus)
+    tokenizer.train_bpe([corpus])
     # verify that save/load work as expected
     tokens = tokenizer.encode(corpus)
     # save the tokenizer
@@ -132,8 +131,7 @@ def test_save_load(tokenizer_factory, special_marks):
     # delete the temporary files
     for file in ["temp/test_tokenizer_tmp.tok"]:
         os.remove(file)
-    for f in os.listdir(buffer): # clean buffer after every test
-        os.remove(os.path.join(buffer, f))
+    clean_folder(buffer, method='all')
 
 
 
@@ -146,9 +144,10 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     tokenizer = tokenizer_factory(name='llama', special_marks=special_marks, buffer_dir=buffer)
     # test on llama_text & timemachine.txt, with 495 merges
     corpus = unpack(text)
-    tokenizer.train_bpe(corpus, num_merges=495)
+    num_merges = 496
+    tokenizer.train_bpe([corpus], num_merges=num_merges)
     # verify the vocab_size
-    assert tokenizer.vocab_size == 495+num_specials+256
+    assert tokenizer.vocab_size == num_merges+num_specials+256
     # verify that save/load work as expected
     tokens = tokenizer.encode(text, 'all')
     # save the tokenizer (use a proper temporary directory)
@@ -157,12 +156,11 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     tokenizer = tokenizer_factory(name='reload', buffer_dir="../../cache/temp/")
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
-    assert tokenizer.vocab_size == 495+num_specials+256
+    assert tokenizer.vocab_size == num_merges+num_specials+256
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
     assert tokenizer.encode(text, 'all') == tokens
-    for f in os.listdir(buffer): # clean buffer after every test
-        os.remove(os.path.join(buffer, f))
+    clean_folder(buffer, method='all')
 
 
 
