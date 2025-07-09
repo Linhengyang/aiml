@@ -17,12 +17,12 @@ tmp_dir: '../tmp'
 
 
 ######################## 数据、外部资源地址和项目信息 ######################## 
-app_name: 'vit' # /logs /model /tmp /cache 的项目目录
+app_name: 'bpe_build' # /logs /model /tmp /cache 的项目目录
 
 
 # data-params
-train_pq: '../../data/raw/train.parquet'
-valid_pq: '../../data/raw/validation.parquet'
+train_pq: '../../data/TinyStories/raw/train.parquet'
+valid_pq: '../../data/TinyStories/raw/validation.parquet'
 
 
 
