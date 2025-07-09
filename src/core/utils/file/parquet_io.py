@@ -8,14 +8,14 @@ import os
 
 
 
-def yield_parquet_batch(file_path: str, batch_size: int, columns: t.List[str]):
+def yield_parquet_batch(file_path: str, batch_size: int, columns: t.List[str]|None=None):
     """
     从 Parquet 文件中分批读取数据。
 
     Args:
         file_path (str): Parquet 文件的路径。
         batch_size (int): 每次读取的行数。
-        columns: 每次读取的列集（列名列表）
+        columns: 每次读取的列集（列名列表）。输入代表读取全部列
 
     Yields:
         parquet.RecordBatch: 包含当前批次数据的 pyarrow record batch
@@ -31,7 +31,7 @@ def yield_parquet_batch(file_path: str, batch_size: int, columns: t.List[str]):
 
 
 
-def build_pyarrow_table_from_row_data(row_data:t.List, schema):
+def build_pa_table_from_row(row_data:t.List, schema):
     '''
     row_data is list of data points(row):
         len(row_data) = sample_size, row_data[0] is the first sample, len(row_data[0]) is num_field
@@ -67,6 +67,71 @@ def build_pyarrow_table_from_row_data(row_data:t.List, schema):
 
 
 
+def build_pa_table(data:t.List|t.Dict, schema):
+    if isinstance(data, list):
+        pa_table = build_pa_table_from_row(data, schema)
+    elif isinstance(data, dict):
+        pa_table = pa.Table.from_pydict(data, schema)
+    else:
+        raise TypeError(f'data should be list for row_data, or dict for column_data.')
+    return pa_table
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -83,5 +148,10 @@ if __name__ == "__main__":
     row3 = [0, -4.89, 'Y', [1,]]
     row_data = [row1, row2, row3]
     list_of_ints_type = pa.list_(pa.field('token', pa.int32()))
-    schema = pa.schema([ pa.field('int', pa.int32()), pa.field('float', pa.float32()), pa.field('char', pa.string()), pa.field('tokens', list_of_ints_type) ])
-    print( build_pyarrow_table_from_row_data(row_data, schema) )
+    schema = pa.schema([ 
+        pa.field('int', pa.int32()), 
+        pa.field('float', pa.float32()), 
+        pa.field('char', pa.string()), 
+        pa.field('tokens', list_of_ints_type) 
+        ])
+    print( build_pa_table_from_row(row_data, schema) )
