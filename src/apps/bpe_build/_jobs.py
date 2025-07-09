@@ -36,9 +36,11 @@ def bpe_build():
     print('begin to run BPE on dataset TinyStories with 50k vocab_size')
     train_pq = configs['train_pq']
     valid_pq = configs['valid_pq']
-
-    tok = bufferBBPETokenizer(name='tinyTok_50k', buffer_dir=buffer_dir)
-    tok.train_bpe(train_pq, tetext_column='text', num_merges=50000)
+    for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
+        os.makedirs(folder, exist_ok=True)
+        
+    tok = bufferBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
+    tok.train_bpe([train_pq, valid_pq], text_columns=['text', 'text'], num_merges=3, verbose=True)
 
     # save tokenizer
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}.tok')

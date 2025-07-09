@@ -335,7 +335,8 @@ class baseBBPETokenizer(Tokenizer):
             yield merge_pair(tokens, occur_most_pair, new_token)
     
 
-    def train_bpe(self, corpus:str, *, num_merges:int|None = None, verbose:bool=False):
+    def train_bpe(self, corpus:t.List[str], num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
+        corpus = ENDOFTEXT.join( corpus )
         self._prepare_train(num_merges)
         
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
@@ -611,29 +612,30 @@ class baseBBPETokenizer(Tokenizer):
 
 import pyarrow.parquet as pq
 import pyarrow as pa
-from ..file.parquet_io import yield_parquet_batch, build_pyarrow_table_from_row_data
+import pyarrow.compute as pc
+from ..file.parquet_io import yield_parquet_batch
+from ..file.folder_op import clean_folder
 
 
 
-def text_to_tokens_pa_table(text, tokens_schema):
-    assert len(tokens_schema) == 1 and isinstance(tokens_schema.field(0).type, pa.ListType) and \
-        (tokens_schema.field(0).type.value_type.equals(pa.int32()) or\
-         tokens_schema.field(0).type.value_type.equals(pa.int64())), \
-        f'''tokens_schema must be as following: pa.schema([pa.field('tokens', pa.list_(pa.field('token', pa.int32())))])'''
-    
-    if not text.endswith(ENDOFTEXT):
-        text = text + ENDOFTEXT
-    chunks_str = re.findall(GPT4_TOKENIZER_REGEX, text) # list of tokens(string)
 
-    # list of list of integers(every list of integers as tokens)
-    chunks_tokens = [encode_to_ints(chunk) for chunk in chunks_str]
-    
-    # 视作 list of datapoints, 每个 datapoint 是一个 变长的 listarray of integers
-    # 创建 pa table
-    datapoints = [[chunk] for chunk in chunks_tokens]
-    batch_table = build_pyarrow_table_from_row_data(datapoints, tokens_schema)
 
-    return batch_table
+def check_tokens_schema(tokens_schema):
+    assert len(tokens_schema) == 1 and \
+           isinstance(tokens_schema.field(0).type, pa.ListType) and \
+           (tokens_schema.field(0).type.value_type.equals(pa.int32()) or \
+            tokens_schema.field(0).type.value_type.equals(pa.int64())), \
+f'''
+tokens_schema must be as following:
+pa.schema([
+    pa.field(
+        'tokens',
+        pa.list_(
+            pa.field('token', pa.int32())
+        )
+    )
+])
+'''
 
 
 
@@ -646,92 +648,146 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     真正的瓶颈在于 stored_tokens(暂存的tokens以merge top pair) 导致的内存瓶颈。超长的 stored_tokens 是 list of tokens, 长
     度非常长，单机内存很可能放不下。 应该首先处理这个内存瓶颈。-----> buffer it
     '''
+    p_counts_schema = pa.schema([
+        pa.field('L', pa.int32()),
+        pa.field('R', pa.int32()),
+        pa.field('counts', pa.int64()),
+        ])
+    
+    
+    tokens_schema = pa.schema([
+        pa.field( 'tokens', pa.list_(pa.field('token', pa.int32())) ),
+        ])
+
+
     def __init__(self, buffer_dir, **kwargs):
         super().__init__(**kwargs)
-        os.makedirs(buffer_dir, exist_ok=True)
         self._buffer_dir = buffer_dir
+
     
-
-    def _generate_tokens_pq(self, rank:int) -> str:
-        '''
-        generate tokens parquet file path for merge rank `rank`. 
-            determined by `rank`
-        当前 merge rank `rank` 要读取的 tokens parquet file path。
-            由 `rank` 唯一确定
-
-        `rank`: 0, ..., num_mergs-1
-        '''
-        return os.path.join(self._buffer_dir, 'tokens', f'tokens_{rank}.parquet') # 当前 merge rank 要读取的 parquet
-    
-
-    def _generate_pair_counts_pq(self, rank:int, tokens_pq:str) -> str:
-        '''
-        p_counts parquet file path based on `tokens_pq` for merge rank `rank`. 
-            determined by `rank` and `tokens_pq`
-        当前 merge rank `rank` 要缓存的 p-counts parquet file path。
-            由 `rank` 和 `tokens_pq` 唯一确定的 pair—counts
-
-        `rank`: 0, ..., num_mergs-1
-        '''
-        return os.path.join(self._buffer_dir, 'pair_counts', f'{tokens_pq}_{rank}.parquet')
-
-
-
-    def _prepare_train(self, num_merges, corpus, text_column:str='text'): # 重写 _prepare_train
-        '''
-        如果 corpus 是 endswith('.parquet') 的 pq file:
-            从 corpus 中读取 batch of text, join/split 成 chunks 之后, 把每个 chunk encode 成 tokens(list of integers)
-            把 tokens 写入到位于 buffer_dir 的 Parquet 文件。per tokens-chunk per row
-
-            tokens-chunk 是 ListArray 类型 --> list of int32 named 'token' --> list_of_ints_type
-                变长的 List Array, field 是 token, dtype 为 int32(token的最大vocab size 十几万即可, int32值域足够)
-            
-            Parquet table 的 schema:
-                列名: tokens
-                column type: list_of_ints_type, which is pa.list_(pa.field('token', pa.int32()))
+    def text_to_tokens_pa_table(self, text):
+        if not text.endswith(ENDOFTEXT):
+            text = text + ENDOFTEXT
+        chunks_str = re.findall(self.pat_str, text) # list of tokens(string)
         
-        如果 corpus 是普通 string 类文本:
-            在 buffer_dir 中生成名为 `corpus.parquet` 的文件, 然后从 corpus.parquet 开始如上执行后续
+        # list of list of integers(every list of integers as tokens)
+        chunks_tokens = [encode_to_ints(chunk) for chunk in chunks_str]
+        
+        # 创建 pa table
+        batch_table = pa.Table.from_pydict({self.tokens_schema[0].name: chunks_tokens}, self.tokens_schema)
+
+        return batch_table
+
+
+    def _check_buffer_env(self):
+        os.makedirs(self._buffer_dir, exist_ok=True)
+        # buffer_dir 里应该为 empty, 或有 tokens 和 p_counts 两个空文件夹
+        assert os.listdir(self._buffer_dir) == [] or \
+               set(os.listdir(self._buffer_dir) ) == set(['tokens', 'p_counts']),\
+            f'buffer_dir shall only contains two folders: tokens & p_counts'
+        
+        buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
+        os.makedirs(buffer_tokens_dir, exist_ok=True)
+        assert os.listdir(buffer_tokens_dir) == [], f'buffer_dir/tokens {buffer_tokens_dir} shall be empty'
+        
+        buffer_pcounts_dir = os.path.join(self._buffer_dir, 'p_counts')
+        os.makedirs(buffer_pcounts_dir, exist_ok=True)
+        assert os.listdir(buffer_pcounts_dir) == [], f'buffer_dir/p_counts {buffer_pcounts_dir} shall be empty'
+
+        self._buffer_tokens_dir = buffer_tokens_dir
+        self._buffer_pcounts_dir = buffer_pcounts_dir
+
+
+    def _init_tokens_pqs(self, corpus_pqs, text_colnames) -> str:
+        '''
+        initialize tokens parquet files from corpus parquet files list
+        [   /buffer_dir/tokens/0/tokens_pq_1
+            /buffer_dir/tokens/0/tokens_pq_2
+                      ...
+            /buffer_dir/tokens/0/tokens_pq_m    ]
+        '''
+        os.makedirs( os.path.join(self._buffer_tokens_dir, '0'), exist_ok=True)
+        init_tokens_pqs = []
+        for corpus_pq in corpus_pqs:
+            corpus_fname = os.path.basename(corpus_pq)
+            init_tokens_pq = os.path.join(self._buffer_tokens_dir, '0', corpus_fname)
+
+            if init_tokens_pq in init_tokens_pqs:
+                raise FileExistsError(
+                    f'input corpus parquet files cannot have duplicated file basename.\n'
+                    f'now they are {corpus_pqs}.\n'
+                    f'change the basename of input corpus file in parquet format, because the program '
+                    f'generated same name for previous corpus in string format.')
+            else:
+                init_tokens_pqs.append(init_tokens_pq)
+        
+        for corpus_pq, text_col, init_tokens_pq in zip(corpus_pqs, text_colnames, init_tokens_pqs):
+            corpus_batch_iter = yield_parquet_batch(corpus_pq, 8192, [text_col])
+
+            with pq.ParquetWriter(init_tokens_pq, self.tokens_schema) as writer:
+                for k, batch in enumerate(corpus_batch_iter):
+                    try:
+                        text = ENDOFTEXT.join( batch[text_col].to_pylist() )
+                        # 创建 pa table
+                        batch_table = self.text_to_tokens_pa_table(text)
+                        writer.write_table(batch_table)
+                    except:
+                        raise RuntimeError(
+                            f'convert & write corpus parquet {corpus_pq} to tokens parquet error in batch {k}'
+                            )
+        
+        return init_tokens_pqs
+
+
+    def _prepare_train(self, num_merges, corpora, columns:t.List[str|None]):
+        '''
+        for i, corpus in enumerate(corpora):
+            如果 corpus 是 endswith('.parquet') 的 pq file:
+                从 corpus 中读取 batch of text, join/split 成 chunks 之后, 把每个 chunk encode 成 tokens(list of integers)
+                把 tokens 写入到位于 buffer_dir 的 Parquet 文件。per tokens-chunk per row
+
+                tokens-chunk 是 ListArray 类型 --> list of int32 named 'token' --> list_of_ints_type
+                    变长的 List Array, field 是 token, dtype 为 int32(token的最大vocab size 十几万即可, int32值域足够)
+                
+                Parquet table 的 schema:
+                    列名: tokens
+                    column type: list_of_ints_type, which is pa.list_(pa.field('token', pa.int32()))
+            
+            如果 corpus 是普通 string 类文本:
+                在 buffer_dir 中生成名为 `corpus.parquet` 的文件, 然后从 corpus.parquet 开始如上执行后续
         '''
         super()._prepare_train(num_merges)
-        if os.listdir(self._buffer_dir):
-            raise FileExistsError(f'buffer directory {self._buffer_dir} better be empty before BPE train process')
+        self._check_buffer_env()
+        assert len(corpora) == len(columns), f"length of corpora must match with length of columns"
+
+        corpus_pqs, text_colnames = [], []
+        for i, corpus in enumerate(corpora):
+            if not corpus.endswith('.parquet'):
+                # 一列数据, 列名为 'text', 类型为 string
+                corpus_pq_schema = pa.schema([ pa.field( 'text', pa.string() ) ])
+                # 在 buffer_dir 中, 为第 i 个corpus自动生成唯一的pq
+                corpus_pq = os.path.join(self._buffer_dir, f'corpus_{i}.parquet')
+                with pq.ParquetWriter(corpus_pq, corpus_pq_schema) as writer:
+                    writer.write_table(
+                        pa.Table.from_pydict({"text":[corpus]}, corpus_pq_schema)
+                        )
+                corpus_pqs.append( corpus_pq )
+                text_colnames.append( 'text' )
+            elif os.path.exists(corpus) and columns[i]:
+                corpus_pqs.append( corpus )
+                text_colnames.append( columns[i] )
+            else:
+                raise FileNotFoundError(
+                    f'corpus parquet file {corpus} not found or text_colname {columns[i]} not valid')
         
-        if not corpus.endswith('.parquet'):
-            corpus_schema = pa.schema([
-                pa.field( text_column, pa.string() ), # 一列数据, 列名为 text_column, 类型为 string
-            ])
-            corpus_pq = os.path.join(self._buffer_dir, 'corpus.parquet')
-            with pq.ParquetWriter(corpus_pq, corpus_schema) as writer:
-                datapoints = [ [corpus] ]
-                writer.write_table( build_pyarrow_table_from_row_data(datapoints, corpus_schema) )
-            corpus = corpus_pq # 更新 corpus 变量为 ../corpus.parquet
-        elif not os.path.exists(corpus):
-            raise FileNotFoundError(f'corpus parquet file {corpus} not found')
+        init_tokens_pqs = self._init_tokens_pqs(corpus_pqs, text_colnames) # generate all init_tokens_pq file
         
-        corpus_batch_iter = yield_parquet_batch(corpus, 512, [text_column])
-        # schema = pq.ParquetFile(corpus).schema # 得到 init_tokens parquet file 的 schema  buffer文件遵循这个schema
-        tokens_schema = pa.schema([
-            pa.field( 'tokens', pa.list_(pa.field('token', pa.int32())) ), # 变长的整数列表
-        ])
-        init_tokens_pq = self._generate_tokens_pq(0)
-
-        with pq.ParquetWriter(init_tokens_pq, tokens_schema) as writer:
-            for k, batch in enumerate(corpus_batch_iter):
-                try:
-                    text = ENDOFTEXT.join( batch[text_column].to_pylist() )
-                    # 创建 pa table
-                    batch_table = text_to_tokens_pa_table(text, tokens_schema)
-                    writer.write_table(batch_table)
-                except:
-                    raise RuntimeError(f'convert & write corpus to tokens parquet error in batch {k}')
-        
-        return init_tokens_pq, tokens_schema
+        return init_tokens_pqs
 
 
-    def _agg_partial_stats_from_corpus(self, tokens_pq, buffer_batch_size):
+    def _get_p_counts_pq(self, tokens_pq, buffer_batch_size):
 
-        yield_tokens_for_agg:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size, columns=['tokens'])
+        yield_tokens_for_agg:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size)
         part_p_counts:t.Dict[tuple[int, int], int] = {}
 
         for batch in yield_tokens_for_agg: # 遍历读取当前 tokens_pq
@@ -739,70 +795,146 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             for tokens in chunks_tokens:
                 get_pair_counts(tokens, part_p_counts)
         
-        # buffer the part_p_counts
-        # TODO
+        # buffer the part_p_counts. 虽然可以用 build_pa_table 直接用行数据创建, 但列数据的效率高很多
+        datapoints = [ (l, r, count) for (l, r), count in part_p_counts.items() ]
+        if datapoints:
+            L_tokens, R_tokens, counts = zip(*datapoints)
+        else:
+            L_tokens, R_tokens, counts = [], [], []
+        data = {
+            self.p_counts_schema[0].name: list(L_tokens), # L: L_tokens
+            self.p_counts_schema[1].name: list(R_tokens), # R: R_tokens
+            self.p_counts_schema[2].name: list(counts), # counts: counts
+            }
+        del part_p_counts # 节省内存
         
+        rank, token_fname = tokens_pq.split('/')[-2:] # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
+        os.makedirs( os.path.join(self._buffer_pcounts_dir, rank), exist_ok=True) # 创建 本次 rank 的 buffer_pcounts_dir
+        part_p_counts_pq = os.path.join(self._buffer_pcounts_dir, rank, token_fname)
+
+        with pq.ParquetWriter(part_p_counts_pq, self.p_counts_schema) as writer:
+            writer.write_table( pa.Table.from_pydict(data, self.p_counts_schema) )
+        
+        return part_p_counts_pq
     
 
-    def train_bpe(self,
-                  corpus:str,
-                  text_column:str = 'text',
-                  buffer_batch_size:int = 65536, # max tokens-chunks in memory
-                  buffer_cache_latest_num:int = 10, # max reserved tokens_pq file in disk
-                  *,
-                  num_merges:int|None = None,
-                  verbose:bool = False):
+    def _aggregate_p_counts(self, part_p_counts):
+        p_counts_collect = [] # list of pa tables
+
+        for p_counts_pq in part_p_counts:
+            p_counts_collect.append( pq.read_table(p_counts_pq) )
+
+        _p_counts = pa.concat_tables( p_counts_collect )
+        agg_p_counts = _p_counts.group_by(['L', 'R']).aggregate([('counts', 'sum')]) # counts 列 --> counts_sum 列
+
+        return agg_p_counts
+
+
+    def _get_occur_most(self, agg_p_counts):
+        max_occur = pc.max(agg_p_counts['counts_sum']).as_py()
+        filter_mask = pc.equal(agg_p_counts['counts_sum'], max_occur)
+
+        _row = agg_p_counts.filter(filter_mask).slice(0, 1)
+
+        L, R = self.p_counts_schema[0].name, self.p_counts_schema[1].name
+        occur_most_pair: tuple[int, int] = (_row[L][0].as_py(), _row[R][0].as_py())
+
+        return occur_most_pair, max_occur
+
+    
+    def _merge_tokens_save(self, save_dir, to_merge_pair, new_token, tokens_pq, buffer_batch_size):
+        '''
+        given tokens parquet file `tokens_pq`,
+        merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
+        then save result tokens chunks into a same-file-name parquet file to `save_dir`
+        '''
+        # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 occur_most_pair, 缓存 merged tokens parquet file
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size)
+
+        # merged result 也是下一个 merge rank 要读取的 parquet
+        merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
         
-        tokens_pq, schema = self._prepare_train(num_merges, corpus, text_column)
+        with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
+            for batch in yield_tokens:
+                chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里
+                merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
+                new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
+                writer.write_batch( new_batch )
+        
+        return merged_tokens_pq
+
+
+    def train_bpe(self,
+                  corpus:t.List[str],
+                  text_columns:t.List[None|str] = ['text'], # 默认输入单个 pq file as corpus with text column `text`
+                  buffer_batch_size:int = 4194304, # max tokens-chunks in memory
+                  buffer_cache_latest_num:int = 10, # max reserved tokens_pq file in disk
+                  num_merges:int|None = None,
+                  verbose:bool = False,
+                  *args, **kwargs):
+        
+        tokens_pqs = self._prepare_train(num_merges, corpora=corpus, columns=text_columns)
 
         for i in range(self._num_merges):
             # rank = i: 0, ..., _num_mergs-1
-            if not os.path.exists(tokens_pq):
-                raise FileNotFoundError(f'buffer parquet {tokens_pq} of merge_rank {i} not found')
-            
-            yield_tokens_for_agg:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size, columns=['tokens'])
-            agg_p_counts:t.Dict[tuple[int, int], int] = {}
+            print('merge epoch {i}')
 
-            for batch in yield_tokens_for_agg: # 遍历读取当前 tokens_pq
-                chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里, batch_size 个 tokens
-                for tokens in chunks_tokens:
-                    get_pair_counts(tokens, agg_p_counts)
-            
+            # compute pari_counts for every tokens parquet into p_counts parquet, and collect them
+            print(f'collecting partial pair-counts')
+            part_p_counts = []
+            for tokens_pq in tokens_pqs:
+                print(f'computing partial pair-counts for {tokens_pq}')
+                if not os.path.exists(tokens_pq):
+                    raise FileNotFoundError(f'buffer parquet {tokens_pq} of merge_rank {i} not found')
+                
+                part_p_counts_pq = self._get_p_counts_pq(tokens_pq, buffer_batch_size)
+                part_p_counts.append( part_p_counts_pq )
+
+            # aggregate pair counts to agg_p_counts(pa.Tabel)
+            print(f'aggregating pair-counts')
+            agg_p_counts = self._aggregate_p_counts(part_p_counts)
             if not agg_p_counts:
                 raise_run_out_corpus_error(i, len(self._special_marks))
             
-            occur_most_pair: tuple[int, int] = max(agg_p_counts, key=agg_p_counts.get)
-            new_token = i + 256
-            
-            occurence: int = agg_p_counts[occur_most_pair] if verbose else None
+            # obtain the pair with most occurrence
+            print(f'calculating occur-most pair tokens')
+            occur_most_pair, max_occurence = self._get_occur_most(agg_p_counts)
             del agg_p_counts
+            new_token, occurence = i+256, max_occurence if verbose else None
 
+            # update tokenizer
+            print(f'update tokenizer')
             self._update_tokenizer(i, occur_most_pair, new_token, occurence)
             if i == self._num_merges - 1: # 完成最后一次 tokens merge 后, 即 i == _num_merges-1, 不需要继续 merge tokens
                 break
 
-            # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 top-pair, 缓存 merged tokens parquet file
-            yield_tokens_for_merge:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size, columns=['tokens'])
-            
-            merged_tokens_pq:str = self._generate_tokens_pq(i+1) # 下一次 merge rank 要读取的 parquet
-            with pq.ParquetWriter(where = merged_tokens_pq, schema = schema) as writer:
-                for batch in yield_tokens_for_merge:
-                    chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里
-                    new_batch = [ merge_pair(tokens, occur_most_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
-                    # new_batch 构建 datapoints 写回磁盘 buffer
-                    datapoints = [ [tokens] for tokens in new_batch ]
-                    writer.write_table( build_pyarrow_table_from_row_data(datapoints, schema) )
+            dir_for_next_rank_tokens = os.path.join(self._buffer_tokens_dir, f'{i+1}')
+            os.makedirs( dir_for_next_rank_tokens, exist_ok=True)
+
+            next_tokens_pqs = []
+            for tokens_pq in tokens_pqs:
+                print(f'merging occur-most pair tokens for {tokens_pq}')
+                merged_tokens_pq = self._merge_tokens_save(
+                    dir_for_next_rank_tokens,
+                    occur_most_pair, 
+                    new_token, 
+                    tokens_pq,
+                    buffer_batch_size
+                    )
+                
+                next_tokens_pqs.append( merged_tokens_pq )
                     
-            # keep the init tokens parquet file, and the last `buffer_cache_latest_num`
+            # keep the init and `buffer_cache_latest_num` tokens/p_counts parquet file
             to_remove = i-buffer_cache_latest_num
             if to_remove > 0:
-                os.remove( self._generate_tokens_pq(to_remove) )
+                clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
+                clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
             
-            tokens_pq = merged_tokens_pq # update tokens_pq
+            tokens_pqs = next_tokens_pqs # update tokens_pq
         
         self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
         self._register_special_tokens()
-    
+        
 
 
 
