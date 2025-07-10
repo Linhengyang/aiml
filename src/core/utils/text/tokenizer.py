@@ -527,7 +527,7 @@ class baseBBPETokenizer(Tokenizer):
         读取 num_of_special_marks: line 3
         读取接下来 num_of_special_marks 行 --> special marks
         按序读取剩下所有行: pair tokens, 依次存入 merge_ranks[pair tokens] = 256 ++
-        构建剩余所有其他, register special tokens / vocab / explicit_n_vocab
+        构建 register special tokens / vocab
         '''
         assert f_path.endswith(".tok")
         # read .tok file
@@ -988,18 +988,29 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             _vocab
             special_tokens
             inverse_special_tokens
+        also need:
             explicit_n_vocab
             _num_merges
-        also need:
             _buffer_tokens_dir
             _buffer_pcounts_dir
             _buffer_size
         '''
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load. run .load() before continue BPE process.'
-        assert continue_num_merges > 0, f'continue_num_merges shall be > 0'
-        #TODO    
-        pass
-
+        # continue bpe 要解决 continue_num_merges 和 explicit_n_vocab / _num_merges 之间的冲突问题
+        # load 的时候只有 merge_ranks，不涉及 _num_merges 和 explicit_n_vocab
+        # load 前 init 的时候可能会生成 explicit_n_vocab 或 _num_merges
+        # 如果init的时候输入了 merge_rank --> 有对应 explicit_n_vocab。但是load时候输入的新的merge_rank，导致原explicit_n_vocab
+        # 完全失效。所以要删除这个 explicit_n_vocab
+        # 如果init的时候没有输入 merge_rank 但输入了 explicit_n_vocab，那么会生成 _num_merges --> 
+        #   解决和 continue_num_merges/_merge_rank 的冲突
+        # init 的时候啥都没有 --> 没有冲突
+        if hasattr(self, 'explicit_n_vocab'):
+            del self.explicit_n_vocab
+        if hasattr(self, '_num_merges') and continue_num_merges:
+            assert len(self._merge_ranks) + continue_num_merges == self._num_merges, \
+                f'loaded merge_ranks size {len(self._merge_ranks)} + continue num_merges {len(self._merge_ranks)} '\
+                f'not match with num_merges {self._num_merges} set during initialization'
+        elif
 
 
     def extend_bpe(self, *args, **kwargs):
