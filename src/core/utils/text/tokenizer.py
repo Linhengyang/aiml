@@ -207,6 +207,7 @@ class baseBBPETokenizer(Tokenizer):
     def __init__(
             self,
             name: str,
+            buffer_dir: str,
             pat_str: str = GPT4_TOKENIZER_REGEX,
             merge_ranks: dict[tuple[int, int], int] = {},
             special_marks: list[str] = [ENDOFTEXT, FIM_PREFIX, FIM_MIDDLE, FIM_SUFFIX, ENDOFPROMPT],
@@ -214,6 +215,8 @@ class baseBBPETokenizer(Tokenizer):
             **kwargs):
 
         self.name = name
+        assert os.path.isdir(buffer_dir)
+        self._buffer_dir = buffer_dir
         self.pat_str = pat_str
         self._merge_ranks = merge_ranks
         self._special_marks = special_marks
@@ -321,6 +324,7 @@ class baseBBPETokenizer(Tokenizer):
             stored_tokens.append( tokens )
         
         if not agg_p_counts:
+            self.save(self._buffer_dir) # 在raise error前先保存已经train好的tokenizer
             raise_run_out_corpus_error(rank, len(self._special_marks))
         
         occur_most_pair: tuple[int, int] = max(agg_p_counts, key=agg_p_counts.get)
@@ -543,12 +547,6 @@ class baseBBPETokenizer(Tokenizer):
             for i, line in enumerate(f):
                 L, R = map(int, line.split())
                 self._merge_ranks[(L, R)] = 256 + i # i 从 0 开始, rank 从 256 开始
-
-            try: # 循环结束时, i = num_lines_of_merge_ranks - 1 , explicit_n_vocab = 256 + num_merges + num_specials
-                self.explicit_n_vocab = 257 + i + num_special
-            except UnboundLocalError: # fix rare situation when no remained lines, that is no pair merged
-                self.explicit_n_vocab = 256 + num_special
-
         
         # 构建 vocab: token_ID --> bytes
         self._build_vocab()
@@ -664,9 +662,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         ])
 
 
-    def __init__(self, buffer_dir, **kwargs):
-        super().__init__(**kwargs)
-        self._buffer_dir = buffer_dir
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     
     def text_to_tokens_pa_table(self, text):
@@ -683,7 +680,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return batch_table
 
 
-    def _set_buffer_env(self, buffer_size):
+    def _reset_buffer_env(self, buffer_size):
 
         os.makedirs(self._buffer_dir, exist_ok=True)
         # buffer_dir 里应该为 empty, 或有 tokens 和 p_counts 两个空文件夹
@@ -764,7 +761,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 在 buffer_dir 中生成名为 `corpus.parquet` 的文件, 然后从 corpus.parquet 开始如上执行后续
         '''
         super()._prepare_train(num_merges)
-        self._set_buffer_env(buffer_size)
+        self._reset_buffer_env(buffer_size)
         assert len(corpora) == len(columns), f"length of corpora must match with length of columns"
 
         corpus_pqs, text_colnames = [], []
@@ -970,6 +967,65 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
         self._register_special_tokens()
+
+
+
+    def continue_bpe(self,
+                     tokens_pqs:t.List[str],
+                     buffer_size:int = 4194304*4, # max tokens-chunks in memory
+                     keep_window:int = 10, # max reserved tokens_pq file in disk
+                     continue_num_merges:int|None = None,
+                     verbose:bool = False,
+                     *args, **kwargs):
+        '''
+        init:
+            _buffer_dir
+        load:
+            name
+            pat_str
+            _special_marks
+            _merge_rank
+            _vocab
+            special_tokens
+            inverse_special_tokens
+            explicit_n_vocab
+            _num_merges
+        also need:
+            _buffer_tokens_dir
+            _buffer_pcounts_dir
+            _buffer_size
+        '''
+        assert hasattr(self, '_merge_ranks'), f'tokenizer not load. run .load() before continue BPE process.'
+        assert continue_num_merges > 0, f'continue_num_merges shall be > 0'
+        #TODO    
+        pass
+
+
+
+    def extend_bpe(self, *args, **kwargs):
+        assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'
+        if not self._merge_ranks:
+            raise RuntimeError(f'merge_ranks empty. should run `train_bpe`.')
+        #TODO    
+        pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

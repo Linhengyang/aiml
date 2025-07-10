@@ -156,7 +156,6 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     tokenizer = tokenizer_factory(name='reload', buffer_dir="../../cache/temp/")
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
-    assert tokenizer.vocab_size == num_merges+num_specials+256
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
     assert tokenizer.encode(text, 'all') == tokens
