@@ -67,6 +67,7 @@ def build_pa_table_from_row(row_data:t.List, schema):
 
 
 
+
 def build_pa_table(data:t.List|t.Dict, schema):
     if isinstance(data, list):
         pa_table = build_pa_table_from_row(data, schema)

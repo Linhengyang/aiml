@@ -68,7 +68,7 @@ clean_folder(buffer, method='all')
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab = 261) # 256 + 5, zero-merge
-    tokenizer.train_bpe([''])
+    tokenizer.train_bpe('')
     ids = tokenizer.encode(text)
     decoded = tokenizer.decode(ids)
     assert text == decoded
@@ -100,7 +100,7 @@ def test_wikipedia_example(tokenizer_factory):
     """
     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab=256+3+5)
     corpus = "aaabdaaabac"
-    tokenizer.train_bpe([corpus])
+    tokenizer.train_bpe(corpus)
     tokens = tokenizer.encode(corpus)
     assert tokens == [258, 100, 258, 97, 99]
     assert tokenizer.decode(tokens) == corpus
@@ -116,7 +116,7 @@ def test_save_load(tokenizer_factory, special_marks):
     tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, buffer_dir=buffer, explicit_n_vocab=256+3+num_specials)
     # test on text "aaabdaaabac"
     corpus = "aaabdaaabac"
-    tokenizer.train_bpe([corpus])
+    tokenizer.train_bpe(corpus)
     # verify that save/load work as expected
     tokens = tokenizer.encode(corpus)
     # save the tokenizer
@@ -144,8 +144,8 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     tokenizer = tokenizer_factory(name='llama', special_marks=special_marks, buffer_dir=buffer)
     # test on llama_text & timemachine.txt, with 495 merges
     corpus = unpack(text)
-    num_merges = 496
-    tokenizer.train_bpe([corpus], num_merges=num_merges)
+    num_merges = 495
+    tokenizer.train_bpe(corpus, num_merges=num_merges)
     # verify the vocab_size
     assert tokenizer.vocab_size == num_merges+num_specials+256
     # verify that save/load work as expected

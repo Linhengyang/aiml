@@ -298,13 +298,13 @@ class baseBBPETokenizer(Tokenizer):
         self._vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
 
 
-    def _update_tokenizer(self, rank:int, occur_most_pair:tuple[int, int], new_token:int, occurence:int|None):
+    def _update_tokenizer(self, occur_most_pair:tuple[int, int], new_token:int, occurence:int|None):
         # rank = i: 0, ..., _num_mergs-1
         self._merge_ranks[occur_most_pair] = new_token
         self._vocab[new_token] = self._vocab[occur_most_pair[0]] + self._vocab[occur_most_pair[1]]
 
         if occurence: # occurence 不会是0
-            print(f'merge {rank+1}/{self._num_merges}: {occur_most_pair} -> {new_token}'
+            print(f'merge process {len(self._merge_ranks)}/{self._num_merges}: {occur_most_pair} -> {new_token}'
                   f'[{self._vocab[new_token]}] had {occurence} occurences')
 
 
@@ -335,8 +335,11 @@ class baseBBPETokenizer(Tokenizer):
             yield merge_pair(tokens, occur_most_pair, new_token)
     
 
-    def train_bpe(self, corpus:t.List[str], num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
-        corpus = ENDOFTEXT.join( corpus )
+    def train_bpe(self, corpora:t.List[str]|str, num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
+        if isinstance(corpora, str):
+            corpora = [corpora]
+        
+        corpus = ENDOFTEXT.join( corpora )
         self._prepare_train(num_merges)
         
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
@@ -350,7 +353,7 @@ class baseBBPETokenizer(Tokenizer):
             yield_output = self.bpe_single_merge(i, yield_tokens, verbose)
             occur_most_pair, occurence, new_token = next(yield_output) # first yield
             
-            self._update_tokenizer(i, occur_most_pair, new_token, occurence)
+            self._update_tokenizer(occur_most_pair, new_token, occurence)
             
             yield_tokens = yield_output # continue to yield tokens. update yield_tokens
 
@@ -613,6 +616,7 @@ class baseBBPETokenizer(Tokenizer):
 import pyarrow.parquet as pq
 import pyarrow as pa
 import pyarrow.compute as pc
+from pathlib import Path
 from ..file.parquet_io import yield_parquet_batch
 from ..file.folder_op import clean_folder
 
@@ -679,12 +683,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return batch_table
 
 
-    def _check_buffer_env(self):
+    def _set_buffer_env(self, buffer_size):
+
         os.makedirs(self._buffer_dir, exist_ok=True)
         # buffer_dir 里应该为 empty, 或有 tokens 和 p_counts 两个空文件夹
         assert os.listdir(self._buffer_dir) == [] or \
                set(os.listdir(self._buffer_dir) ) == set(['tokens', 'p_counts']),\
-            f'buffer_dir shall only contains two folders: tokens & p_counts'
+            f'buffer_dir shall only contains at most two folders: tokens & p_counts'
         
         buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
         os.makedirs(buffer_tokens_dir, exist_ok=True)
@@ -696,15 +701,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         self._buffer_tokens_dir = buffer_tokens_dir
         self._buffer_pcounts_dir = buffer_pcounts_dir
+        self._buffer_size = buffer_size
+
 
 
     def _init_tokens_pqs(self, corpus_pqs, text_colnames) -> str:
         '''
-        initialize tokens parquet files from corpus parquet files list
+        initialize tokens parquet files from corpus parquet files list to:
         [   /buffer_dir/tokens/0/tokens_pq_1
             /buffer_dir/tokens/0/tokens_pq_2
                       ...
-            /buffer_dir/tokens/0/tokens_pq_m    ]
+            /buffer_dir/tokens/0/tokens_pq_m   ]
         '''
         os.makedirs( os.path.join(self._buffer_tokens_dir, '0'), exist_ok=True)
         init_tokens_pqs = []
@@ -739,7 +746,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return init_tokens_pqs
 
 
-    def _prepare_train(self, num_merges, corpora, columns:t.List[str|None]):
+    def _prepare_train(self, num_merges, corpora:t.List[str], columns:t.List[str|None], buffer_size):
         '''
         for i, corpus in enumerate(corpora):
             如果 corpus 是 endswith('.parquet') 的 pq file:
@@ -757,7 +764,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 在 buffer_dir 中生成名为 `corpus.parquet` 的文件, 然后从 corpus.parquet 开始如上执行后续
         '''
         super()._prepare_train(num_merges)
-        self._check_buffer_env()
+        self._set_buffer_env(buffer_size)
         assert len(corpora) == len(columns), f"length of corpora must match with length of columns"
 
         corpus_pqs, text_colnames = [], []
@@ -785,13 +792,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return init_tokens_pqs
 
 
-    def _get_p_counts_pq(self, tokens_pq, buffer_batch_size):
+    def _get_p_counts_pq(self, tokens_pq):
 
-        yield_tokens_for_agg:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size)
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
         part_p_counts:t.Dict[tuple[int, int], int] = {}
 
-        for batch in yield_tokens_for_agg: # 遍历读取当前 tokens_pq
-            chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里, batch_size 个 tokens
+        for batch in yield_tokens: # 遍历读取当前 tokens_pq
+            chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
             for tokens in chunks_tokens:
                 get_pair_counts(tokens, part_p_counts)
         
@@ -818,21 +825,22 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return part_p_counts_pq
     
 
-    def _aggregate_p_counts(self, part_p_counts):
+    def _aggregate_p_counts(self, part_pcounts_pqs):
         p_counts_collect = [] # list of pa tables
 
-        for p_counts_pq in part_p_counts:
+        for p_counts_pq in part_pcounts_pqs:
             p_counts_collect.append( pq.read_table(p_counts_pq) )
 
         _p_counts = pa.concat_tables( p_counts_collect )
-        agg_p_counts = _p_counts.group_by(['L', 'R']).aggregate([('counts', 'sum')]) # counts 列 --> counts_sum 列
+        L, R, counts = self.p_counts_schema[0].name, self.p_counts_schema[1].name, self.p_counts_schema[2].name
+        agg_p_counts = _p_counts.group_by([L, R]).aggregate([(counts, 'sum')]) # counts 列 --> counts_sum 列
 
-        return agg_p_counts
+        return agg_p_counts, '_'.join([counts, 'sum'])
 
 
-    def _get_occur_most(self, agg_p_counts):
-        max_occur = pc.max(agg_p_counts['counts_sum']).as_py()
-        filter_mask = pc.equal(agg_p_counts['counts_sum'], max_occur)
+    def _get_occur_most(self, agg_p_counts, agg_colname):
+        max_occur = pc.max(agg_p_counts[agg_colname]).as_py()
+        filter_mask = pc.equal(agg_p_counts[agg_colname], max_occur)
 
         _row = agg_p_counts.filter(filter_mask).slice(0, 1)
 
@@ -842,21 +850,21 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return occur_most_pair, max_occur
 
     
-    def _merge_tokens_save(self, save_dir, to_merge_pair, new_token, tokens_pq, buffer_batch_size):
+    def _merge_tokens_save(self, save_dir, to_merge_pair, new_token, tokens_pq):
         '''
         given tokens parquet file `tokens_pq`,
         merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
         then save result tokens chunks into a same-file-name parquet file to `save_dir`
         '''
         # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 occur_most_pair, 缓存 merged tokens parquet file
-        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_batch_size)
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
 
         # merged result 也是下一个 merge rank 要读取的 parquet
         merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
         
         with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
             for batch in yield_tokens:
-                chunks_tokens = batch['tokens'].to_pylist() # 每次只有一个 batch 在内存里
+                chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
                 merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
                 new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
                 writer.write_batch( new_batch )
@@ -864,77 +872,104 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return merged_tokens_pq
 
 
+
+    def _next_tokens_pqs(self, tokens_pqs, occur_most_pair, new_token):
+        # 在计算获得 tokens parquet for next merge_rank 时, 当前 tokens_pq 已经提炼出了 merge_info
+        # 并更新了 tokenizer._merge_rank，使得其 + 1。所以 cur_dir_for_tokens_pq = len(_merge_rank) - 1
+        # next_dir_for_tokens_pq = cur_dir_for_tokens_pq + 1 = len(cur_merge_rank)
+        next_rank = len(self._merge_ranks)
+        assert all([next_rank == int(Path(f).parent.name)+1 for f in tokens_pqs])
+        
+        next_dir_for_tokens = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
+        os.makedirs( next_dir_for_tokens, exist_ok=True)
+
+        next_tokens_pqs = []
+        for tokens_pq in tokens_pqs:
+            print(f'merging occur-most pair tokens for {tokens_pq}')
+            merged_tokens_pq = self._merge_tokens_save(
+                next_dir_for_tokens,
+                occur_most_pair, 
+                new_token, 
+                tokens_pq)
+            
+            next_tokens_pqs.append( merged_tokens_pq )
+        
+        return next_tokens_pqs # update tokens_pq
+
+
+
+    def _get_merge_info(self, tokens_pqs):
+        # rank = i: 0, ..., _num_mergs-1, 代表已经完成的 merge 次数
+        rank = len(self._merge_ranks)
+        # tokens_pqs 所在的 dir_name N 代表这些 tokens_pq 经过了 N 次 merge
+        assert all([rank == int(Path(f).parent.name) for f in tokens_pqs])
+        print(f'merge epoch {rank}')
+
+        # compute pair_counts for every tokens parquet into p_counts parquet, and collect them
+        print(f'collecting partial pair-counts')
+        part_p_counts_pqs = []
+        for tokens_pq in tokens_pqs:
+            print(f'computing partial pair-counts for {tokens_pq}')
+
+            if not os.path.exists(tokens_pq):
+                raise FileNotFoundError(f'buffer parquet {tokens_pq} of merge_rank {rank} not found')
+            
+            part_p_counts_pqs.append( self._get_p_counts_pq(tokens_pq) )
+
+        # aggregate pair counts to agg_p_counts(pa.Tabel)
+        print(f'aggregating pair-counts')
+        agg_p_counts, agg_colname = self._aggregate_p_counts(part_p_counts_pqs)
+        if not agg_p_counts:
+            raise_run_out_corpus_error(rank, len(self._special_marks))
+        
+        # obtain the pair with most occurrence
+        print(f'calculating occur-most pair tokens')
+        occur_most_pair, max_occurence = self._get_occur_most(agg_p_counts, agg_colname)
+        del agg_p_counts
+
+        return occur_most_pair, max_occurence
+
+
+
     def train_bpe(self,
-                  corpus:t.List[str],
-                  text_columns:t.List[None|str] = ['text'], # 默认输入单个 pq file as corpus with text column `text`
-                  buffer_batch_size:int = 4194304, # max tokens-chunks in memory
-                  buffer_cache_latest_num:int = 10, # max reserved tokens_pq file in disk
+                  corpora:t.List[str]|str,
+                  text_columns:t.List[str|None] = ['text'], # 默认输入单个 pq file as corpus with text column `text`
+                  buffer_size:int = 4194304, # max tokens-chunks in memory
+                  keep_window:int = 10, # max reserved tokens_pq file in disk
                   num_merges:int|None = None,
                   verbose:bool = False,
                   *args, **kwargs):
         
-        tokens_pqs = self._prepare_train(num_merges, corpora=corpus, columns=text_columns)
+        assert keep_window >= 0
+        if isinstance(corpora, str):
+            corpora = [corpora]
+            text_columns = [None]
+        
+        tokens_pqs = self._prepare_train(num_merges, corpora, text_columns, buffer_size)
 
         for i in range(self._num_merges):
-            # rank = i: 0, ..., _num_mergs-1
-            print('merge epoch {i}')
+            # rank = i = len(self._merge_rank)
 
-            # compute pari_counts for every tokens parquet into p_counts parquet, and collect them
-            print(f'collecting partial pair-counts')
-            part_p_counts = []
-            for tokens_pq in tokens_pqs:
-                print(f'computing partial pair-counts for {tokens_pq}')
-                if not os.path.exists(tokens_pq):
-                    raise FileNotFoundError(f'buffer parquet {tokens_pq} of merge_rank {i} not found')
-                
-                part_p_counts_pq = self._get_p_counts_pq(tokens_pq, buffer_batch_size)
-                part_p_counts.append( part_p_counts_pq )
+            occur_most_pair, max_occurence = self._get_merge_info(tokens_pqs)
+            new_token, occurence = i + 256, max_occurence if verbose else None
 
-            # aggregate pair counts to agg_p_counts(pa.Tabel)
-            print(f'aggregating pair-counts')
-            agg_p_counts = self._aggregate_p_counts(part_p_counts)
-            if not agg_p_counts:
-                raise_run_out_corpus_error(i, len(self._special_marks))
-            
-            # obtain the pair with most occurrence
-            print(f'calculating occur-most pair tokens')
-            occur_most_pair, max_occurence = self._get_occur_most(agg_p_counts)
-            del agg_p_counts
-            new_token, occurence = i+256, max_occurence if verbose else None
+            # update tokenizer: len(self._merge_rank) += 1
+            self._update_tokenizer(occur_most_pair, new_token, occurence)
 
-            # update tokenizer
-            print(f'update tokenizer')
-            self._update_tokenizer(i, occur_most_pair, new_token, occurence)
+            # rank = i = len(self._merge_rank) - 1
             if i == self._num_merges - 1: # 完成最后一次 tokens merge 后, 即 i == _num_merges-1, 不需要继续 merge tokens
                 break
+            
+            tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
 
-            dir_for_next_rank_tokens = os.path.join(self._buffer_tokens_dir, f'{i+1}')
-            os.makedirs( dir_for_next_rank_tokens, exist_ok=True)
-
-            next_tokens_pqs = []
-            for tokens_pq in tokens_pqs:
-                print(f'merging occur-most pair tokens for {tokens_pq}')
-                merged_tokens_pq = self._merge_tokens_save(
-                    dir_for_next_rank_tokens,
-                    occur_most_pair, 
-                    new_token, 
-                    tokens_pq,
-                    buffer_batch_size
-                    )
-                
-                next_tokens_pqs.append( merged_tokens_pq )
-                    
-            # keep the init and `buffer_cache_latest_num` tokens/p_counts parquet file
-            to_remove = i-buffer_cache_latest_num
+            # keep the init and `keep_window` tokens/p_counts parquet file
+            to_remove = i - keep_window
             if to_remove > 0:
                 clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
                 clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
-            
-            tokens_pqs = next_tokens_pqs # update tokens_pq
-        
+
         self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
         self._register_special_tokens()
-        
 
 
 
