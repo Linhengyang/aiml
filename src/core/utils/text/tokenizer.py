@@ -188,6 +188,8 @@ def raise_run_out_corpus_error(num_occured_merges:int, num_specials:int) -> t.No
 
 
 
+
+
 def raise_disallowed_special_token(token: str) -> t.NoReturn:
     raise ValueError(
         f'disallowed specials {token!r} found in text.\n'
@@ -638,7 +640,14 @@ pa.schema([
     )
 ])
 '''
+    
 
+def raise_continue_num_merges_conflict(num_merged, num_total_merges, continue_num_merges):
+    raise ValueError(
+        f'continue_num_merges plus loaded merge_ranks size must not exceed num_merges derived from `explicit_n_vocab`.\n'
+        f'merge times derived from `explicit_n_vocab` shall be `explicit_n_vocab`-num_specials-256 = {num_total_merges}.\n'
+        f'now loaded merge_ranks size {num_merged} + `continue_num_merges`{continue_num_merges} = {num_merged+continue_num_merges}'
+    )
 
 
 
@@ -917,6 +926,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         print(f'aggregating pair-counts')
         agg_p_counts, agg_colname = self._aggregate_p_counts(part_p_counts_pqs)
         if not agg_p_counts:
+            self.save(self._buffer_dir) # 在raise error前先保存已经train好的tokenizer
             raise_run_out_corpus_error(rank, len(self._special_marks))
         
         # obtain the pair with most occurrence
@@ -944,23 +954,23 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         tokens_pqs = self._prepare_train(num_merges, corpora, text_columns, buffer_size)
 
-        for i in range(self._num_merges):
-            # rank = i = len(self._merge_rank)
+        for rank in range(self._num_merges):
+            # rank = i = 0, ..., _num_merges-1
 
             occur_most_pair, max_occurence = self._get_merge_info(tokens_pqs)
-            new_token, occurence = i + 256, max_occurence if verbose else None
+            new_token, occurence = rank + 256, max_occurence if verbose else None
 
             # update tokenizer: len(self._merge_rank) += 1
             self._update_tokenizer(occur_most_pair, new_token, occurence)
 
             # rank = i = len(self._merge_rank) - 1
-            if i == self._num_merges - 1: # 完成最后一次 tokens merge 后, 即 i == _num_merges-1, 不需要继续 merge tokens
+            if rank == self._num_merges - 1:
                 break
             
             tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
 
             # keep the init and `keep_window` tokens/p_counts parquet file
-            to_remove = i - keep_window
+            to_remove = rank - keep_window
             if to_remove > 0:
                 clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
                 clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
@@ -971,47 +981,83 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     def continue_bpe(self,
-                     tokens_pqs:t.List[str],
-                     buffer_size:int = 4194304*4, # max tokens-chunks in memory
+                     tokens_dir:t.List[str],
+                     continue_num_merges:int,
+                     buffer_size:int = 4194304*128, # max tokens-chunks in memory
                      keep_window:int = 10, # max reserved tokens_pq file in disk
-                     continue_num_merges:int|None = None,
                      verbose:bool = False,
                      *args, **kwargs):
-        '''
-        init:
-            _buffer_dir
-        load:
-            name
-            pat_str
-            _special_marks
-            _merge_rank
-            _vocab
-            special_tokens
-            inverse_special_tokens
-        also need:
-            explicit_n_vocab
-            _num_merges
-            _buffer_tokens_dir
-            _buffer_pcounts_dir
-            _buffer_size
-        '''
+        assert continue_num_merges > 0
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load. run .load() before continue BPE process.'
         # continue bpe 要解决 continue_num_merges 和 explicit_n_vocab / _num_merges 之间的冲突问题
         # load 的时候只有 merge_ranks，不涉及 _num_merges 和 explicit_n_vocab
         # load 前 init 的时候可能会生成 explicit_n_vocab 或 _num_merges
         # 如果init的时候输入了 merge_rank --> 有对应 explicit_n_vocab。但是load时候输入的新的merge_rank，导致原explicit_n_vocab
-        # 完全失效。所以要删除这个 explicit_n_vocab
-        # 如果init的时候没有输入 merge_rank 但输入了 explicit_n_vocab，那么会生成 _num_merges --> 
-        #   解决和 continue_num_merges/_merge_rank 的冲突
-        # init 的时候啥都没有 --> 没有冲突
+        # 完全失效。所以要删除这个 explicit_n_vocab。亦或者是 init 之后不load直接continue bpe，那explicit_n_vocab也要失效。
+        # 如果init的时候没有输入 merge_rank 但输入了 explicit_n_vocab，那么会生成 _num_merges --> load merge_ranks后 -->
+        #   解决和 continue_num_merges/_merge_rank/_num_merges 的冲突
+        # init 的时候啥都没有 --> 没有冲突。load merge_ranks
         if hasattr(self, 'explicit_n_vocab'):
             del self.explicit_n_vocab
-        if hasattr(self, '_num_merges') and continue_num_merges:
-            assert len(self._merge_ranks) + continue_num_merges == self._num_merges, \
-                f'loaded merge_ranks size {len(self._merge_ranks)} + continue num_merges {len(self._merge_ranks)} '\
-                f'not match with num_merges {self._num_merges} set during initialization'
-        elif
 
+        if hasattr(self, '_num_merges') and self._num_merges < len(self._merge_ranks) + continue_num_merges:
+            raise_continue_num_merges_conflict(len(self._merge_ranks), self._num_merges, continue_num_merges)
+        
+        # 确认 buffer 文件夹都存在
+        self._buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
+        self._buffer_pcounts_dir = os.path.join(self._buffer_dir, 'p_counts')
+        assert os.path.exists(self._buffer_tokens_dir) and os.path.exists(self._buffer_pcounts_dir)
+
+        self._buffer_size = buffer_size
+        # 检查 tokens_dir 的文件夹名称序号 是否符合 merge_ranks 的 size
+        if len(self._merge_ranks) == int(Path(tokens_dir).name):
+            # 若 n = merge_rank size = tokens/order, 说明 merge_rank 的 last merge 已经作用在 tokens_pqs 上生成了 tokens/n
+            # 这样地话, tokens/n 直接继续执行即可
+            tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
+        elif len(self._merge_ranks) == int(Path(tokens_dir).name)+1 :
+            # 若 n = merge_rank size = tokens/order+1, 说明 merge_rank 的 last merge 没有作用在 tokens_pqs
+            # 即train bpe的时候, 中途break掉了. 此时要生成 tokens/(order+1). 取出最新的 pair 和 merged_token
+            occur_most_pair, new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
+            tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
+            tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
+        else:
+            raise ValueError(
+                f"tokens directory {tokens_dir} not match with loaded merge_ranks with size {len(self._merge_ranks)}.\n"
+                f"merge_ranks size either equals to tokens' dir name, or tokens' dirname plus 1.")
+        
+        # merge_rank 等于 merge轮次开始时, 作为材料的 tokens 的 num_merges
+        # e.g, merge_rank = 0 时, tokens/0 是材料, 它们所经的 num_merges = 0
+        start_merge_rank = len(self._merge_ranks)
+        for rank in range(start_merge_rank, start_merge_rank+continue_num_merges):
+            # merge_rank = ini num_merges,...,ini num_merges+continue_num_merges-1
+            occur_most_pair, max_occurence = self._get_merge_info(tokens_pqs)
+            
+            new_token, occurence = rank + 256, max_occurence if verbose else None
+
+            # update tokenizer: len(self._merge_rank) += 1
+            self._update_tokenizer(occur_most_pair, new_token, occurence)
+
+            if rank == start_merge_rank + continue_num_merges - 1:
+                break
+
+            tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
+
+            # keep the init and `keep_window` tokens/p_counts parquet file
+            # e.g., keep_window = 3, merge_ranks size 在本轮从 93 -> 94. 那么本轮次里
+            # 读取了 tokens/93, 生成了p_counts/93 和 tokens/94(if). 那么to_remove=93-3=90, 留下91/92/93
+            to_remove = rank - keep_window
+            if to_remove > 0:
+                clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
+                clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
+        
+        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
+        self._register_special_tokens()
+    
+
+    def _locate_pcounts_pq(self, tokens_pq):
+        dir_name, fname = tokens_pq.split('/')[-2:]
+        return os.path.join(self._buffer_pcounts_dir, dir_name, fname)
+    
 
     def extend_bpe(self, *args, **kwargs):
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'
