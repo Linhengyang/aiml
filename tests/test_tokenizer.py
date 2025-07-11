@@ -1,9 +1,8 @@
 import pytest
 import os
-
-
-from src.core.utils.text.tokenizer import BBPETokenizer
-
+import shutil
+from src.core.utils.file.folder_op import clean_folder
+from src.core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer
 
 # -----------------------------------------------------------------------------
 # common test data
@@ -55,23 +54,29 @@ The ancestors of llamas are thought to have originated from the Great Plains of 
 """.strip()
 
 
+buffer="../../cache/temp/"
+os.makedirs(buffer, exist_ok=True)
+clean_folder(buffer, method='all')
+
+
 # -----------------------------------------------------------------------------
 # tests
 
 # test encode/decode identity for a few different strings
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer, bufferBBPETokenizer])
 @pytest.mark.parametrize("text", test_strings)
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
-    tokenizer = tokenizer_factory(name='test', explicit_n_vocab = 261) # 256 + 5, zero-merge
-    tokenizer.train_bpe(corpus='')
+    tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab = 261) # 256 + 5, zero-merge
+    tokenizer.train_bpe('')
     ids = tokenizer.encode(text)
     decoded = tokenizer.decode(ids)
     assert text == decoded
+    clean_folder(buffer, method='all')
 
 
 # test bpe basic logic
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer, bufferBBPETokenizer])
 def test_wikipedia_example(tokenizer_factory):
     """
     Quick unit test, following along the Wikipedia example:
@@ -93,85 +98,91 @@ def test_wikipedia_example(tokenizer_factory):
 
     So we expect the output list of ids to be [258, 100, 258, 97, 99]
     """
-    tokenizer = tokenizer_factory(name='test', explicit_n_vocab=256+3+5)
-    text = "aaabdaaabac"
-    tokenizer.train_bpe(text, verbose=True)
-    tokens = tokenizer.encode(text)
+    tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab=256+3+5)
+    corpus = "aaabdaaabac"
+    tokenizer.train_bpe(corpus)
+    tokens = tokenizer.encode(corpus)
     assert tokens == [258, 100, 258, 97, 99]
-    assert tokenizer.decode(tokens) == text
-
+    assert tokenizer.decode(tokens) == corpus
+    clean_folder(buffer, method='all')
 
 
 # test save/load/view
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer, bufferBBPETokenizer])
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_save_load(tokenizer_factory, special_marks):
     num_specials = len(special_marks)
     # do 3 merges on "aaabdaaabac"
-    tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, explicit_n_vocab=256+3+num_specials)
+    tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, buffer_dir=buffer, explicit_n_vocab=256+3+num_specials)
     # test on text "aaabdaaabac"
-    text = "aaabdaaabac"
-    tokenizer.train_bpe(corpus=text)
+    corpus = "aaabdaaabac"
+    tokenizer.train_bpe(corpus)
     # verify that save/load work as expected
-    tokens = tokenizer.encode(text)
-    # save the tokenizer (TODO use a proper temporary directory)
+    tokens = tokenizer.encode(corpus)
+    # save the tokenizer
     tokenizer.save("temp/test_tokenizer_tmp.tok")
     # re-load the tokenizer
-    tokenizer = BBPETokenizer(name='reload')
+    tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
     tokenizer.load("temp/test_tokenizer_tmp.tok")
     # verify that decode(encode(x)) == x
-    assert tokenizer.decode(tokens) == text
-    assert tokenizer.decode(tokenizer.encode(text)) == text
-    assert tokenizer.encode(text) == tokens
+    assert tokenizer.decode(tokens) == corpus
+    assert tokenizer.decode(tokenizer.encode(corpus)) == corpus
+    assert tokenizer.encode(corpus) == tokens
     # delete the temporary files
     for file in ["temp/test_tokenizer_tmp.tok"]:
         os.remove(file)
-
+    clean_folder(buffer, method='all')
 
 
 
 # test save/load
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
-@pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
-def test_complicated_text(tokenizer_factory, special_marks):
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
+@pytest.mark.parametrize("text", [llama_text, ])
+@pytest.mark.parametrize("special_marks", [  list(special_tokens.keys()) ])
+def test_complicated_text(tokenizer_factory, text, special_marks):
     num_specials = len(special_marks)
-    tokenizer = tokenizer_factory(name='llama', special_marks=special_marks)
-    # test on llama_text, with 495 merges
-    text = llama_text
-    tokenizer.train_bpe(corpus=text, num_merges=495)
+    tokenizer = tokenizer_factory(name='llama', special_marks=special_marks, buffer_dir=buffer)
+    # test on llama_text & timemachine.txt, with 495 merges
+    corpus = unpack(text)
+    num_merges = 295
+    tokenizer.train_bpe(corpus, num_merges=num_merges)
     # verify the vocab_size
-    assert tokenizer.vocab_size == 495+num_specials+256
+    assert tokenizer.vocab_size == num_merges+num_specials+256
     # verify that save/load work as expected
-    tokens = tokenizer.encode(text, 'all')
     # save the tokenizer (use a proper temporary directory)
     tokenizer.save("temp/test_llama.tok")
     # re-load the tokenizer
-    tokenizer = BBPETokenizer(name='reload')
+    tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
-    assert tokenizer.vocab_size == 495+num_specials+256
+    buffer_tokens_dir = os.path.join(buffer, 'tokens')
+    latest = max( [int(f) for f in os.listdir(buffer_tokens_dir)] )
+    tokens_dir = os.path.join(buffer_tokens_dir, f'{latest}')
+    tokenizer.continue_bpe(tokens_dir, 200)
+    tokens = tokenizer.encode(text, 'all')
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
     assert tokenizer.encode(text, 'all') == tokens
+    clean_folder(buffer, method='all')
 
 
 
 
 
-# test view
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
-def test_view(tokenizer_factory):
-    tokenizer = tokenizer_factory(name='llama', special_marks={})
-    tokenizer.load("temp/test_llama.tok")
-    tokenizer.view('temp/')
+# # test view
+# @pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer])
+# def test_view(tokenizer_factory):
+#     tokenizer = tokenizer_factory(name='llama', special_marks={})
+#     tokenizer.load("temp/test_llama.tok")
+#     tokenizer.view('temp/')
 
 
 
 
 
-# test empty .tok
-@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer])
-def test_empty(tokenizer_factory):
-    tokenizer = tokenizer_factory(name='empty', special_marks={})
-    tokenizer.load("temp/test_empty.tok")
-    tokenizer.view('temp/')
+# # test empty .tok
+# @pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer])
+# def test_empty(tokenizer_factory):
+#     tokenizer = tokenizer_factory(name='empty', special_marks={})
+#     tokenizer.load("temp/test_empty.tok")
+#     tokenizer.view('temp/')

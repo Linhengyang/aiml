@@ -68,11 +68,11 @@ also recommend to have:
     │   │   │   │   ├── mask.py
     │   │   │   │   └── patch_operation.py
     │   │   │   └── compute
-    │   │   │   │   ├── evaluate_tools.py
-    │   │   │   │   ├── predict_tools.py
-    │   │   │   │   ├── sampling_tools.py
-    │   │   │   │   ├── train_tools.py
-    │   │   │   │   └── visualize_tools.py
+    │   │   │       ├── evaluate_tools.py
+    │   │   │       ├── predict_tools.py
+    │   │   │       ├── sampling_tools.py
+    │   │   │       ├── train_tools.py
+    │   │   │       └── visualize_tools.py
     │   │   ├── loss
     │   │   │   ├── bp_ranking_loss.py
     │   │   │   ├── l2penalty_mse_loss.py

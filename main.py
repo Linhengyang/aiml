@@ -1,9 +1,7 @@
 import os
 import warnings
 warnings.filterwarnings("ignore")
-from src.projs.vit._jobs import prepare_job, train_job, infer_job
+from src.apps.bpe_build._jobs import bpe_build, bpe_continue
 
 if __name__ == "__main__":
-    prepare_job()
-    saved_params_fpath = train_job('local')
-    infer_job(saved_params_fpath)
+    tok_fpath, vocab_cache_dir = bpe_continue(1)
