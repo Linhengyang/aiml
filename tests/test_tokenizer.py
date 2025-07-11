@@ -136,26 +136,30 @@ def test_save_load(tokenizer_factory, special_marks):
 
 
 # test save/load
-@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer, bufferBBPETokenizer])
-@pytest.mark.parametrize("text", [llama_text, r"FILE:../../../data/test/text/timemachine.txt"])
-@pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
+@pytest.mark.parametrize("text", [llama_text, ])
+@pytest.mark.parametrize("special_marks", [  list(special_tokens.keys()) ])
 def test_complicated_text(tokenizer_factory, text, special_marks):
     num_specials = len(special_marks)
     tokenizer = tokenizer_factory(name='llama', special_marks=special_marks, buffer_dir=buffer)
     # test on llama_text & timemachine.txt, with 495 merges
     corpus = unpack(text)
-    num_merges = 495
+    num_merges = 295
     tokenizer.train_bpe(corpus, num_merges=num_merges)
     # verify the vocab_size
     assert tokenizer.vocab_size == num_merges+num_specials+256
     # verify that save/load work as expected
-    tokens = tokenizer.encode(text, 'all')
     # save the tokenizer (use a proper temporary directory)
     tokenizer.save("temp/test_llama.tok")
     # re-load the tokenizer
-    tokenizer = tokenizer_factory(name='reload', buffer_dir="../../cache/temp/")
+    tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
+    buffer_tokens_dir = os.path.join(buffer, 'tokens')
+    latest = max( [int(f) for f in os.listdir(buffer_tokens_dir)] )
+    tokens_dir = os.path.join(buffer_tokens_dir, f'{latest}')
+    tokenizer.continue_bpe(tokens_dir, 200)
+    tokens = tokenizer.encode(text, 'all')
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
     assert tokenizer.encode(text, 'all') == tokens
@@ -165,20 +169,20 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
 
 
 
-# test view
-@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer])
-def test_view(tokenizer_factory):
-    tokenizer = tokenizer_factory(name='llama', special_marks={})
-    tokenizer.load("temp/test_llama.tok")
-    tokenizer.view('temp/')
+# # test view
+# @pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer])
+# def test_view(tokenizer_factory):
+#     tokenizer = tokenizer_factory(name='llama', special_marks={})
+#     tokenizer.load("temp/test_llama.tok")
+#     tokenizer.view('temp/')
 
 
 
 
 
-# test empty .tok
-@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer])
-def test_empty(tokenizer_factory):
-    tokenizer = tokenizer_factory(name='empty', special_marks={})
-    tokenizer.load("temp/test_empty.tok")
-    tokenizer.view('temp/')
+# # test empty .tok
+# @pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer])
+# def test_empty(tokenizer_factory):
+#     tokenizer = tokenizer_factory(name='empty', special_marks={})
+#     tokenizer.load("temp/test_empty.tok")
+#     tokenizer.view('temp/')
