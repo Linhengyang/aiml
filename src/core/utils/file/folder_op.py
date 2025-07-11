@@ -22,8 +22,8 @@ def clean_folder(folder_path: str, method:t.Literal['all', 'only_file', 'only_fo
         item_path = os.path.join(folder_path, item_name) # 构建完整路径
 
         # 只有当此文件的 性质 与 是否删除这个性质的文件 匹配，才删除此文件
-        del_file =  os.path.isfile(item_path) and method in ('all', 'only_file')
-        del_dir = os.path.isdir(item_path) and method in ('all', 'only_folder')
+        del_file =  os.path.isfile(item_path) and (method in ('all', 'only_file'))
+        del_dir = os.path.isdir(item_path) and (method in ('all', 'only_folder'))
 
         try:
             if del_file:
