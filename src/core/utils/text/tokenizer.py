@@ -33,13 +33,12 @@
 #             不过 非流式解码器（生成全部token之后，再一次性输出）不存在这个问题。比如 经典 transformer 中的 beam search，需要对 生成 sequence 的长度奖惩，
 #             所以需要生成 num_steps 步后，再一起输出。这种情况下跨字符tokenize的问题会比较轻。 
 
-# 7. 推理过程：这个还是 “最长贪婪匹配”。但实现过程不一样：StringSegment.py 里写的是从末尾开始查找尽量长的token，而现代 Tokenizer 一般实现一个 树结构，以便
-#             从头开始高效查找词汇表中的最长匹配（无需遍历整个词汇表）
+# 7. 推理过程：按照merge的顺序，多次遍历tokens(原始bytes状态)到各种merged tokens，直到无可merge
 
 
 # 一个合适的 tokenizer：合适的压缩率，使得 string tokenized 之后的 token 数量少，这样 attention 机制能尽量抓住序列信息（attention 对序列长度的消耗是L^2）
 # 尽量少的 token 数量，要求 vocab_size 尽量大。但过大的 vocab_size 将使得 next token prediction 的softmax 机制不准确。
-# meta-class
+
 from abc import ABC
 import typing as t
 
@@ -176,14 +175,16 @@ def raise_run_out_corpus_error(num_occured_merges:int, num_specials:int) -> t.No
     '''
     如果经过 tokens 累积更新 p_counts, p_counts 仍然是 {}, 说明 corpus 已经全部 merge 到一起, 无可 merge。
     不提前结束 merge 循环, 而是报错, 提示 更换参数 explicit_n_vocab 或 语料 corpus。
-    原因是参数 explicit_n_vocab 语意为「明确的 vocab_size」，
-    所以不应引入不确定性：当 explicit_n_vocab 和 corpus 冲突时，raise error而不是根据 corpus 确定 explicit_n_vocab。
+    原因是参数 explicit_n_vocab 语意为「明确的 vocab_size」,
+    所以不应引入不确定性：当 explicit_n_vocab 和 corpus 冲突时, raise error而不是根据 corpus 确定 explicit_n_vocab。
     '''
-    raise RuntimeError(f'run out of corpus(all merged together) after {num_occured_merges} merges.\n'
-                       f'the maximum valid `explicit_n_vocab` for this corpus is {256+num_occured_merges+num_specials}.\n'
-                       f're-init the tokenizer with lower `explicit_n_vocab` in between {256+num_specials}'
-                       f'(zero-merge) & {256+num_occured_merges+num_specials}(exactly-ran-out-of current corpus), '
-                       f'or with enlarged corpus.')
+    raise RuntimeError(
+        f'run out of corpus(all merged together) after {num_occured_merges} merges.\n'
+        f'the maximum valid `explicit_n_vocab` for this corpus is {256+num_occured_merges+num_specials}.\n'
+        f're-init the tokenizer with lower `explicit_n_vocab` in between {256+num_specials}'
+        f'(zero-merge) & {256+num_occured_merges+num_specials}(exactly-ran-out-of current corpus), '
+        f'or with enlarged corpus.'
+        )
 
 
 
@@ -197,7 +198,11 @@ def raise_disallowed_special_token(token: str) -> t.NoReturn:
         f'narrow `disallowed_special` if you want to encode the disallowed marks as plain.\n'
         f'you can expand `allowed_special` to "all" or narrow `disallowed_special` to (),'
         f'both will ignore specials and tokenize the text as plain'
-    )
+        )
+
+
+
+
 
 
 def encode_to_ints(s:str, encoding='utf-8') -> t.List[int]:
@@ -646,8 +651,9 @@ def raise_continue_num_merges_conflict(num_merged, num_total_merges, continue_nu
     raise ValueError(
         f'continue_num_merges plus loaded merge_ranks size must not exceed num_merges derived from `explicit_n_vocab`.\n'
         f'merge times derived from `explicit_n_vocab` shall be `explicit_n_vocab`-num_specials-256 = {num_total_merges}.\n'
-        f'now loaded merge_ranks size {num_merged} + `continue_num_merges`{continue_num_merges} = {num_merged+continue_num_merges}'
-    )
+        f'now loaded merge_ranks size {num_merged} + `continue_num_merges`{continue_num_merges} = '
+        f'{num_merged+continue_num_merges} which exceeds {num_total_merges}.'
+        )
 
 
 
@@ -729,8 +735,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 raise FileExistsError(
                     f'input corpus parquet files cannot have duplicated file basename.\n'
                     f'now they are {corpus_pqs}.\n'
-                    f'change the basename of input corpus file in parquet format, because the program '
-                    f'generated same name for previous corpus in string format.')
+                    f'change the basename of input corpus file of parquet format, because the program '
+                    f'generated same name for previous corpus of string format.')
             else:
                 init_tokens_pqs.append(init_tokens_pq)
         
@@ -794,7 +800,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                     f'corpus parquet file {corpus} not found or text_colname {columns[i]} not valid')
         
         init_tokens_pqs = self._init_tokens_pqs(corpus_pqs, text_colnames) # generate all init_tokens_pq file
-        
+        clean_folder(self._buffer_dir, method='only_file') # clean corpus parquet file from string input
+
         return init_tokens_pqs
 
 
@@ -981,13 +988,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     def continue_bpe(self,
-                     tokens_dir:t.List[str],
                      continue_num_merges:int,
                      buffer_size:int = 4194304*128, # max tokens-chunks in memory
                      keep_window:int = 10, # max reserved tokens_pq file in disk
                      verbose:bool = False,
                      *args, **kwargs):
-        assert continue_num_merges > 0
+        '''
+        .continue_bpe:
+            根据 tokenizer 的 _merge_rank(from load or init) 和 _buffer_dir(主要依赖内部的tokens/latest)
+            来继续run bpe process
+        '''
+        assert continue_num_merges > 0 and keep_window >= 0
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load. run .load() before continue BPE process.'
         # continue bpe 要解决 continue_num_merges 和 explicit_n_vocab / _num_merges 之间的冲突问题
         # load 的时候只有 merge_ranks，不涉及 _num_merges 和 explicit_n_vocab
@@ -1003,27 +1014,36 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         if hasattr(self, '_num_merges') and self._num_merges < len(self._merge_ranks) + continue_num_merges:
             raise_continue_num_merges_conflict(len(self._merge_ranks), self._num_merges, continue_num_merges)
         
+        self._buffer_size = buffer_size
+
         # 确认 buffer 文件夹都存在
         self._buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
         self._buffer_pcounts_dir = os.path.join(self._buffer_dir, 'p_counts')
         assert os.path.exists(self._buffer_tokens_dir) and os.path.exists(self._buffer_pcounts_dir)
 
-        self._buffer_size = buffer_size
+        try:
+            latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
+            tokens_dir = os.path.join(self._buffer_tokens_dir, f'{latest}')
+        except ValueError:
+            raise FileNotFoundError(
+                f'latest tokens parquet file not found.\n'
+                f'tokens buffer folder for parquet files {self._buffer_tokens_dir} is empty.')
+        
+        tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
         # 检查 tokens_dir 的文件夹名称序号 是否符合 merge_ranks 的 size
-        if len(self._merge_ranks) == int(Path(tokens_dir).name):
-            # 若 n = merge_rank size = tokens/order, 说明 merge_rank 的 last merge 已经作用在 tokens_pqs 上生成了 tokens/n
-            # 这样地话, tokens/n 直接继续执行即可
-            tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
-        elif len(self._merge_ranks) == int(Path(tokens_dir).name)+1 :
-            # 若 n = merge_rank size = tokens/order+1, 说明 merge_rank 的 last merge 没有作用在 tokens_pqs
-            # 即train bpe的时候, 中途break掉了. 此时要生成 tokens/(order+1). 取出最新的 pair 和 merged_token
+        if len(self._merge_ranks) == latest:
+            # 若merge_rank size = tokens/order,说明merge_rank的last merge已经作用在tokens_pqs上生成了 tokens/latest
+            # 这样地话, tokens/latest 直接继续执行即可. 主要是 latest = 0 即 merge_ranks = {}时使用.
+            pass
+        elif len(self._merge_ranks) == latest+1 :
+            # 若 merge_rank size = tokens/latest+1, 说明 merge_rank 的 last merge 没有作用在 tokens_pqs
+            # 即train bpe的时候, 中途break掉了. 此时要生成 tokens/(latest+1). 取出最新的 pair 和 merged_token
             occur_most_pair, new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
-            tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
             tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
         else:
             raise ValueError(
-                f"tokens directory {tokens_dir} not match with loaded merge_ranks with size {len(self._merge_ranks)}.\n"
-                f"merge_ranks size either equals to tokens' dir name, or tokens' dirname plus 1.")
+                f"latest tokens directory {tokens_dir} not match with loaded merge_ranks with size {len(self._merge_ranks)}.\n"
+                f"merge_ranks size either equals to tokens' latest order, or tokens' latest order plus 1.")
         
         # merge_rank 等于 merge轮次开始时, 作为材料的 tokens 的 num_merges
         # e.g, merge_rank = 0 时, tokens/0 是材料, 它们所经的 num_merges = 0
@@ -1053,12 +1073,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
     
-
-    def _locate_pcounts_pq(self, tokens_pq):
-        dir_name, fname = tokens_pq.split('/')[-2:]
-        return os.path.join(self._buffer_pcounts_dir, dir_name, fname)
     
-
     def extend_bpe(self, *args, **kwargs):
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'
         if not self._merge_ranks:
