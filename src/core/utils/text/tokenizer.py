@@ -1072,8 +1072,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
-    
-    
+
+
+
     def extend_bpe(self, *args, **kwargs):
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'
         if not self._merge_ranks:
