@@ -17,6 +17,8 @@ private:
 
     std::vector<char*> _blocks; //char*是指向单字节的指针, 故可以拿来指代最小偏移粒度为单字节的内存block
 
+    std::vector<void*> _large_alloc; //大于 _block_size 的内存申请, 单独申请. 在这里记录申请结果
+
     char* _current_block = nullptr; //内存池的当前正在使用的内存block指针
 
     size_t _offset = 0; //当前内存block已使用的位置偏移量
@@ -35,10 +37,12 @@ public:
     // void* ptr;
     // int*pInt = statc_cast<int*>(ptr);
 
+    void dealloc_large(void* ptr, size_t size); //如果 ptr是大对象(大于_block_size)的，会被释放;否则不会被释放
+
     void reset(); //清空内存池, 复用下一次
 
-    void release(); //释放内存池
-    
+    void release(); //释放内存池, 全部释放(block 和 large alloc都释放)
+
 };
 
 
