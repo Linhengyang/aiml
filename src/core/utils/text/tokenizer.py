@@ -655,12 +655,11 @@ pa.schema([
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
 def merge_pair_batch_twoloop(
-        tokens_flat:memoryview,
-        offsets:memoryview,
-        pair0,
-        pair1,
-        new_token,
-        dtype:type,
+        tokens_flat:memoryview, # memory of int32
+        offsets:memoryview, # memory of int64
+        pair_L:np.int32,
+        pair_R:np.int32,
+        new_token:np.int32,
         **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
     # tokens_flat: [1, 2, 3, 4, 5]
@@ -676,28 +675,34 @@ def merge_pair_batch_twoloop(
         # 遍历 tokens, 看里面是否出现了 pair0 pair1
         len_tokens, j = tokens_lens[i], 0
         while j < len_tokens:
-            if j < len_tokens-1 and tokens[j] == pair0 and tokens[j+1] == pair1:
+            if j < len_tokens-1 and tokens[j] == pair_L and tokens[j+1] == pair_R:
                 j += 2
                 output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
             else:
                 j += 1
 
     # # 确定output data 的size, 以及
-    output_tokens_flat = np.zeros(shape=(sum(output_tokens_lens),), dtype=dtype)
-    output_offsets = np.array([0]+output_tokens_lens).cumsum()
+    output_tokens_flat = np.zeros(shape=(sum(output_tokens_lens),), dtype=np.int32)
+    output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
     for i in range( len(output_tokens_lens) ): # len(output_tokens_lens) = len(output_offsets)-1
         # 从 tokens_flat 中slice出 tokens
         tokens = tokens_flat[offsets[i]:offsets[i+1]]
         # 从 output_tokens_flat 中 slice 出 output tokens
         output_tokens = output_tokens_flat[output_offsets[i]:output_offsets[i+1]]
-        _merge_pair_core(tokens, output_tokens, pair0, pair1, new_token)
+        _merge_pair_core(tokens, output_tokens, pair_L, pair_R, new_token)
     
     return output_tokens_flat, output_offsets
 
 
 
-def _merge_pair_core(input_tokens:memoryview, output_tokens:memoryview, pair0, pair1, new_token):
+def _merge_pair_core(
+        input_tokens:memoryview, # memory of int32
+        output_tokens:memoryview, # memory of int32
+        pair_L:np.int32,
+        pair_R:np.int32,
+        new_token:np.int32
+        ):
     # 对 output_tokens 作 in-place 更新
     _num_merges, i = 0, 0
 
@@ -706,7 +711,7 @@ def _merge_pair_core(input_tokens:memoryview, output_tokens:memoryview, pair0, p
         return
     
     while i < len(input_tokens):
-        if i < len(input_tokens) - 1 and input_tokens[i] == pair0 and input_tokens[i+1] == pair1:
+        if i < len(input_tokens) - 1 and input_tokens[i] == pair_L and input_tokens[i+1] == pair_R:
             output_tokens[i-_num_merges] = new_token
             i += 2
             _num_merges += 1
@@ -719,12 +724,11 @@ def _merge_pair_core(input_tokens:memoryview, output_tokens:memoryview, pair0, p
 
 
 def merge_pair_batch_memcontiguous(
-        tokens_flat:memoryview,
-        offsets:memoryview,
-        pair0,
-        pair1,
-        new_token,
-        dtype:type,
+        tokens_flat:memoryview, # memory of int32
+        offsets:memoryview, # memory of int64
+        pair_L:np.int32,
+        pair_R:np.int32,
+        new_token:np.int32,
         **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
     # tokens_flat: [1, 2, 3, 4, 5]
@@ -733,7 +737,7 @@ def merge_pair_batch_memcontiguous(
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
-    output_tokens_flat = np.zeros_like(tokens_flat, dtype=dtype) # output tokens flat 只会比 token flat 短
+    output_tokens_flat = np.zeros_like(tokens_flat, dtype=np.int32) # output tokens flat 只会比 token flat 短
 
     num_merges = 0
     for i in range( len(tokens_lens) ): # len(offsets)-1 == len(tokens_lens)
@@ -742,15 +746,16 @@ def merge_pair_batch_memcontiguous(
         # 遍历 tokens, 看里面是否出现了 pair0 pair1
         len_tokens, j = tokens_lens[i], 0
         while j < len_tokens:
-            if j < len_tokens-1 and tokens[j] == pair0 and tokens[j+1] == pair1:
+            if j < len_tokens-1 and tokens[j] == pair_L and tokens[j+1] == pair_R:
                 output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
-                output_tokens_flat[offsets[i]+j-num_merges] = dtype(new_token)
+                output_tokens_flat[offsets[i]+j-num_merges] = new_token
                 j += 2
                 num_merges += 1
             else:
                 output_tokens_flat[offsets[i]+j-num_merges] = tokens[j]
                 j += 1
-    output_offsets = np.array([0]+output_tokens_lens).cumsum()
+    
+    output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
     return output_tokens_flat[:output_offsets[-1]], output_offsets
 
@@ -759,12 +764,11 @@ def merge_pair_batch_memcontiguous(
 
 
 def merge_pair_batch_parallel(
-        tokens_flat:memoryview,
-        offsets:memoryview,
-        pair0,
-        pair1,
-        new_token,
-        dtype:type,
+        tokens_flat:memoryview, # memory of int32
+        offsets:memoryview, # memory of int64
+        pair_L:np.int32,
+        pair_R:np.int32,
+        new_token:np.int32,
         **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
     # tokens_flat: [1, 2, 3, 4, 5]
@@ -773,7 +777,7 @@ def merge_pair_batch_parallel(
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
-    output_tokens_flat = np.zeros_like(tokens_flat, dtype=dtype) # output tokens flat 只会比 token flat 短
+    output_tokens_flat = np.zeros_like(tokens_flat, dtype=np.int32) # output tokens flat 只会比 token flat 短
     output_filter = np.zeros_like(tokens_flat, dtype=np.bool) # 从 output_tokens_flat 中 filter 出 output 的 mask
     
     # can parallel-program to speed upon loop i: thread-secure
@@ -783,9 +787,9 @@ def merge_pair_batch_parallel(
         # 遍历 tokens, 看里面是否出现了 pair0 pair1
         len_tokens, j = tokens_lens[i], 0
         while j < len_tokens:
-            if j < len_tokens-1 and tokens[j] == pair0 and tokens[j+1] == pair1:
+            if j < len_tokens-1 and tokens[j] == pair_L and tokens[j+1] == pair_R:
                 output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
-                output_tokens_flat[offsets[i]+j] = dtype(new_token)
+                output_tokens_flat[offsets[i]+j] = new_token
                 output_filter[offsets[i]+j] = True
                 j += 2
             else:
@@ -793,7 +797,7 @@ def merge_pair_batch_parallel(
                 output_filter[offsets[i]+j] = True
                 j += 1
     
-    output_offsets = np.array([0]+output_tokens_lens).cumsum()
+    output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
     return output_tokens_flat[output_filter], output_offsets
 
@@ -830,7 +834,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
     
     tokens_schema = pa.schema([
-        pa.field( 'tokens', pa.list_(pa.field('token', pa.int32())) ),
+        pa.field( 'tokens', pa.large_list(pa.field('token', pa.int32())) ),
         ])
 
 
@@ -1041,19 +1045,21 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
             for batch in yield_tokens:
+                # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
                 tokens_flat = batch[self.tokens_schema[0].name].values.to_numpy().data
+                # tokens_schema: list dtype pa.int64array --> offsets: int64
                 offsets = batch[self.tokens_schema[0].name].offsets.to_numpy().data
-                pair0, pair1 = map(np.int32, to_merge_pair)
-
+                L, R = map(np.int32, to_merge_pair)
+                new_token = np.int32(new_token)
                 if optimize == 'parallel':
                     merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_parallel(
-                        tokens_flat, offsets, pair0, pair1, new_token, np.int32)
+                        tokens_flat, offsets, L, R, new_token)
                 elif optimize == 'mem_contiguous':
                     merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_memcontiguous(
-                        tokens_flat, offsets, pair0, pair1, new_token, np.int32)
+                        tokens_flat, offsets, L, R, new_token)
                 elif optimize == 'twoloop':
                     merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_twoloop(
-                        tokens_flat, offsets, pair0, pair1, new_token, np.int32)
+                        tokens_flat, offsets, L, R, new_token)
                 else:
                     chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
                     merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
