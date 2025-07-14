@@ -141,7 +141,9 @@ def get_pair_counts(tokens:t.List[int], p_counts:t.Dict[tuple[int, int], int]|No
 
 
 
-def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token):
+
+
+def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token:int) -> t.List[int]:
     new_tokens = [] # 返回一个 new_tokens, 而不是对 tokens 作 in-place 更新
     i = 0
     if len(tokens) == 1: # 如果只剩下 一个 token, 那么就没有 merge pair 的必要
@@ -155,7 +157,6 @@ def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token):
             new_tokens.append( tokens[i] )
             i += 1
     return new_tokens
-
 
 
 
@@ -621,6 +622,7 @@ class baseBBPETokenizer(Tokenizer):
 import pyarrow.parquet as pq
 import pyarrow as pa
 import pyarrow.compute as pc
+import numpy as np
 from pathlib import Path
 from ..file.parquet_io import yield_parquet_batch
 from ..file.folder_op import clean_folder
@@ -645,7 +647,75 @@ pa.schema([
     )
 ])
 '''
+
+
+
+
+# merge_pair 如果是一个 C/C++ 封装的接口，那么传参 tokens 时, 会遍历整个list并拷贝。
+# 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
+# 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
+def merge_pair_batch(
+        tokens_flat:memoryview,
+        offsets:memoryview,
+        pair0,
+        pair1,
+        new_token,
+        dtype:type,
+        **kwargs
+        ) -> tuple[np.ndarray, np.ndarray]:
+    # tokens_flat: [1, 2, 3, 4, 5]
+    # offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
+    # tokens_lens: [1, 0, 2, 2]
+    tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
+
+    # 第一遍遍历，确定 merged 后, 各个 tokens 的长度（通过offsets确定）
+    output_tokens_lens = tokens_lens # 直接修改 tokens_lens
+    for i in range( len(tokens_lens) ): # len(offsets)-1 == len(tokens_lens)
+        # 从 tokens_flat 中slice出 tokens
+        tokens = tokens_flat[offsets[i]:offsets[i+1]]
+        # 遍历 tokens, 看里面是否出现了 pair0 pair1
+        len_tokens, j = tokens_lens[i], 0
+        while j < len_tokens:
+            if j < len_tokens-1 and tokens[j] == pair0 and tokens[j+1] == pair1:
+                j += 2
+                output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
+            else:
+                j += 1
+
+    # # 确定output data 的size, 以及
+    output_tokens_flat = np.zeros(shape=(sum(output_tokens_lens),), dtype=dtype)
+    output_offsets = np.array([0]+output_tokens_lens).cumsum()
+
+    for i in range( len(output_tokens_lens) ): # len(output_tokens_lens) = len(output_offsets)-1
+        # 从 tokens_flat 中slice出 tokens
+        tokens = tokens_flat[offsets[i]:offsets[i+1]]
+        # 从 output_tokens_flat 中 slice 出 output tokens
+        output_tokens = output_tokens_flat[output_offsets[i]:output_offsets[i+1]]
+        merge_pair_core(tokens, output_tokens, pair0, pair1, new_token)
     
+    return output_tokens_flat, output_offsets
+
+
+
+def merge_pair_core(input_tokens:memoryview, output_tokens:memoryview, pair0, pair1, new_token):
+    # 对 output_tokens 作 in-place 更新
+    _num_merges, i = 0, 0
+
+    if len(input_tokens) == 1: # 如果只剩下 一个 token, 那么就没有 merge pair 的必要
+        output_tokens[0] = new_token
+        return
+    
+    while i < len(input_tokens):
+        if i < len(input_tokens) - 1 and input_tokens[i] == pair0 and input_tokens[i+1] == pair1:
+            output_tokens[i-_num_merges] = new_token
+            i += 2
+            _num_merges += 1
+        else:
+            output_tokens[i-_num_merges] = input_tokens[i]
+            i += 1
+    return
+
+
 
 def raise_continue_num_merges_conflict(num_merged, num_total_merges, continue_num_merges):
     raise ValueError(
@@ -877,8 +947,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
             for batch in yield_tokens:
-                chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
-                merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
+                # chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
+                # merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
+                # new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
+                # writer.write_batch( new_batch )
+
+                batch_tokens_flat = batch[self.tokens_schema[0].name].values.to_numpy().data
+                batch_offsets = batch[self.tokens_schema[0].name].offsets.to_numpy()
+                pair0, pair1 = map(np.int32, to_merge_pair)
+                merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch(
+                    batch_tokens_flat, batch_offsets, pair0, pair1, new_token, np.int32)
+                merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
                 new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
                 writer.write_batch( new_batch )
         
