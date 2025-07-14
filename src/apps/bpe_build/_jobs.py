@@ -60,12 +60,8 @@ def bpe_continue(continue_num_merges):
     # load tokenizer
     tok.load(os.path.join(tokenizer_save_dir, 'tinyTok_3.tok'))
 
-    # continue to train 1 epoch
-    buffer_tokens_dir = os.path.join(buffer_dir, 'tokens')
-    latest = max( [int(f) for f in os.listdir(buffer_tokens_dir)] )
-    tokens_dir = os.path.join(buffer_tokens_dir, f'{latest}')
-
-    tok.continue_bpe(tokens_dir, continue_num_merges)
+    # continue to train `continue_num_merges` epoch
+    tok.continue_bpe(continue_num_merges)
 
     # save/view the new tokenizer in different name
     tok.name = 'tinyTok_4.tok'

@@ -33,13 +33,12 @@
 #             不过 非流式解码器（生成全部token之后，再一次性输出）不存在这个问题。比如 经典 transformer 中的 beam search，需要对 生成 sequence 的长度奖惩，
 #             所以需要生成 num_steps 步后，再一起输出。这种情况下跨字符tokenize的问题会比较轻。 
 
-# 7. 推理过程：这个还是 “最长贪婪匹配”。但实现过程不一样：StringSegment.py 里写的是从末尾开始查找尽量长的token，而现代 Tokenizer 一般实现一个 树结构，以便
-#             从头开始高效查找词汇表中的最长匹配（无需遍历整个词汇表）
+# 7. 推理过程：按照merge的顺序，多次遍历tokens(原始bytes状态)到各种merged tokens，直到无可merge
 
 
 # 一个合适的 tokenizer：合适的压缩率，使得 string tokenized 之后的 token 数量少，这样 attention 机制能尽量抓住序列信息（attention 对序列长度的消耗是L^2）
 # 尽量少的 token 数量，要求 vocab_size 尽量大。但过大的 vocab_size 将使得 next token prediction 的softmax 机制不准确。
-# meta-class
+
 from abc import ABC
 import typing as t
 
@@ -142,7 +141,9 @@ def get_pair_counts(tokens:t.List[int], p_counts:t.Dict[tuple[int, int], int]|No
 
 
 
-def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token):
+
+
+def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token:int) -> t.List[int]:
     new_tokens = [] # 返回一个 new_tokens, 而不是对 tokens 作 in-place 更新
     i = 0
     if len(tokens) == 1: # 如果只剩下 一个 token, 那么就没有 merge pair 的必要
@@ -156,7 +157,6 @@ def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token):
             new_tokens.append( tokens[i] )
             i += 1
     return new_tokens
-
 
 
 
@@ -176,14 +176,16 @@ def raise_run_out_corpus_error(num_occured_merges:int, num_specials:int) -> t.No
     '''
     如果经过 tokens 累积更新 p_counts, p_counts 仍然是 {}, 说明 corpus 已经全部 merge 到一起, 无可 merge。
     不提前结束 merge 循环, 而是报错, 提示 更换参数 explicit_n_vocab 或 语料 corpus。
-    原因是参数 explicit_n_vocab 语意为「明确的 vocab_size」，
-    所以不应引入不确定性：当 explicit_n_vocab 和 corpus 冲突时，raise error而不是根据 corpus 确定 explicit_n_vocab。
+    原因是参数 explicit_n_vocab 语意为「明确的 vocab_size」,
+    所以不应引入不确定性：当 explicit_n_vocab 和 corpus 冲突时, raise error而不是根据 corpus 确定 explicit_n_vocab。
     '''
-    raise RuntimeError(f'run out of corpus(all merged together) after {num_occured_merges} merges.\n'
-                       f'the maximum valid `explicit_n_vocab` for this corpus is {256+num_occured_merges+num_specials}.\n'
-                       f're-init the tokenizer with lower `explicit_n_vocab` in between {256+num_specials}'
-                       f'(zero-merge) & {256+num_occured_merges+num_specials}(exactly-ran-out-of current corpus), '
-                       f'or with enlarged corpus.')
+    raise RuntimeError(
+        f'run out of corpus(all merged together) after {num_occured_merges} merges.\n'
+        f'the maximum valid `explicit_n_vocab` for this corpus is {256+num_occured_merges+num_specials}.\n'
+        f're-init the tokenizer with lower `explicit_n_vocab` in between {256+num_specials}'
+        f'(zero-merge) & {256+num_occured_merges+num_specials}(exactly-ran-out-of current corpus), '
+        f'or with enlarged corpus.'
+        )
 
 
 
@@ -197,7 +199,11 @@ def raise_disallowed_special_token(token: str) -> t.NoReturn:
         f'narrow `disallowed_special` if you want to encode the disallowed marks as plain.\n'
         f'you can expand `allowed_special` to "all" or narrow `disallowed_special` to (),'
         f'both will ignore specials and tokenize the text as plain'
-    )
+        )
+
+
+
+
 
 
 def encode_to_ints(s:str, encoding='utf-8') -> t.List[int]:
@@ -616,6 +622,7 @@ class baseBBPETokenizer(Tokenizer):
 import pyarrow.parquet as pq
 import pyarrow as pa
 import pyarrow.compute as pc
+import numpy as np
 from pathlib import Path
 from ..file.parquet_io import yield_parquet_batch
 from ..file.folder_op import clean_folder
@@ -640,14 +647,170 @@ pa.schema([
     )
 ])
 '''
+
+
+
+
+# merge_pair 如果是一个 C/C++ 封装的接口，那么传参 tokens 时, 会遍历整个list并拷贝。
+# 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
+# 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
+def merge_pair_batch_twoloop(
+        tokens_flat:memoryview,
+        offsets:memoryview,
+        pair0,
+        pair1,
+        new_token,
+        dtype:type,
+        **kwargs
+        ) -> tuple[np.ndarray, np.ndarray]:
+    # tokens_flat: [1, 2, 3, 4, 5]
+    # offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
+    # tokens_lens: [1, 0, 2, 2]
+    tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
+
+    # 第一遍遍历，确定 merged 后, 各个 tokens 的长度（通过offsets确定）
+    output_tokens_lens = tokens_lens # 直接修改 tokens_lens
+    for i in range( len(tokens_lens) ): # len(offsets)-1 == len(tokens_lens)
+        # 从 tokens_flat 中slice出 tokens
+        tokens = tokens_flat[offsets[i]:offsets[i+1]]
+        # 遍历 tokens, 看里面是否出现了 pair0 pair1
+        len_tokens, j = tokens_lens[i], 0
+        while j < len_tokens:
+            if j < len_tokens-1 and tokens[j] == pair0 and tokens[j+1] == pair1:
+                j += 2
+                output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
+            else:
+                j += 1
+
+    # # 确定output data 的size, 以及
+    output_tokens_flat = np.zeros(shape=(sum(output_tokens_lens),), dtype=dtype)
+    output_offsets = np.array([0]+output_tokens_lens).cumsum()
+
+    for i in range( len(output_tokens_lens) ): # len(output_tokens_lens) = len(output_offsets)-1
+        # 从 tokens_flat 中slice出 tokens
+        tokens = tokens_flat[offsets[i]:offsets[i+1]]
+        # 从 output_tokens_flat 中 slice 出 output tokens
+        output_tokens = output_tokens_flat[output_offsets[i]:output_offsets[i+1]]
+        _merge_pair_core(tokens, output_tokens, pair0, pair1, new_token)
     
+    return output_tokens_flat, output_offsets
+
+
+
+def _merge_pair_core(input_tokens:memoryview, output_tokens:memoryview, pair0, pair1, new_token):
+    # 对 output_tokens 作 in-place 更新
+    _num_merges, i = 0, 0
+
+    if len(input_tokens) == 1: # 如果只剩下 一个 token, 那么就没有 merge pair 的必要
+        output_tokens[0] = new_token
+        return
+    
+    while i < len(input_tokens):
+        if i < len(input_tokens) - 1 and input_tokens[i] == pair0 and input_tokens[i+1] == pair1:
+            output_tokens[i-_num_merges] = new_token
+            i += 2
+            _num_merges += 1
+        else:
+            output_tokens[i-_num_merges] = input_tokens[i]
+            i += 1
+    return
+
+
+
+
+def merge_pair_batch_memcontiguous(
+        tokens_flat:memoryview,
+        offsets:memoryview,
+        pair0,
+        pair1,
+        new_token,
+        dtype:type,
+        **kwargs
+        ) -> tuple[np.ndarray, np.ndarray]:
+    # tokens_flat: [1, 2, 3, 4, 5]
+    # offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
+    # tokens_lens: [1, 0, 2, 2]
+    tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
+
+    output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
+    output_tokens_flat = np.zeros_like(tokens_flat, dtype=dtype) # output tokens flat 只会比 token flat 短
+
+    num_merges = 0
+    for i in range( len(tokens_lens) ): # len(offsets)-1 == len(tokens_lens)
+        # 从 tokens_flat 中slice出 tokens
+        tokens = tokens_flat[offsets[i]:offsets[i+1]]
+        # 遍历 tokens, 看里面是否出现了 pair0 pair1
+        len_tokens, j = tokens_lens[i], 0
+        while j < len_tokens:
+            if j < len_tokens-1 and tokens[j] == pair0 and tokens[j+1] == pair1:
+                output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
+                output_tokens_flat[offsets[i]+j-num_merges] = dtype(new_token)
+                j += 2
+                num_merges += 1
+            else:
+                output_tokens_flat[offsets[i]+j-num_merges] = tokens[j]
+                j += 1
+    output_offsets = np.array([0]+output_tokens_lens).cumsum()
+
+    return output_tokens_flat[:output_offsets[-1]], output_offsets
+
+
+
+
+
+def merge_pair_batch_parallel(
+        tokens_flat:memoryview,
+        offsets:memoryview,
+        pair0,
+        pair1,
+        new_token,
+        dtype:type,
+        **kwargs
+        ) -> tuple[np.ndarray, np.ndarray]:
+    # tokens_flat: [1, 2, 3, 4, 5]
+    # offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
+    # tokens_lens: [1, 0, 2, 2]
+    tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
+
+    output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
+    output_tokens_flat = np.zeros_like(tokens_flat, dtype=dtype) # output tokens flat 只会比 token flat 短
+    output_filter = np.zeros_like(tokens_flat, dtype=np.bool) # 从 output_tokens_flat 中 filter 出 output 的 mask
+    
+    # can parallel-program to speed upon loop i: thread-secure
+    for i in range( len(tokens_lens) ): # len(offsets)-1 == len(tokens_lens)
+        # 从 tokens_flat 中slice出 tokens
+        tokens = tokens_flat[offsets[i]:offsets[i+1]]
+        # 遍历 tokens, 看里面是否出现了 pair0 pair1
+        len_tokens, j = tokens_lens[i], 0
+        while j < len_tokens:
+            if j < len_tokens-1 and tokens[j] == pair0 and tokens[j+1] == pair1:
+                output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
+                output_tokens_flat[offsets[i]+j] = dtype(new_token)
+                output_filter[offsets[i]+j] = True
+                j += 2
+            else:
+                output_tokens_flat[offsets[i]+j] = tokens[j]
+                output_filter[offsets[i]+j] = True
+                j += 1
+    
+    output_offsets = np.array([0]+output_tokens_lens).cumsum()
+
+    return output_tokens_flat[output_filter], output_offsets
+
+
+
+
+
+
+
 
 def raise_continue_num_merges_conflict(num_merged, num_total_merges, continue_num_merges):
     raise ValueError(
         f'continue_num_merges plus loaded merge_ranks size must not exceed num_merges derived from `explicit_n_vocab`.\n'
         f'merge times derived from `explicit_n_vocab` shall be `explicit_n_vocab`-num_specials-256 = {num_total_merges}.\n'
-        f'now loaded merge_ranks size {num_merged} + `continue_num_merges`{continue_num_merges} = {num_merged+continue_num_merges}'
-    )
+        f'now loaded merge_ranks size {num_merged} + `continue_num_merges`{continue_num_merges} = '
+        f'{num_merged+continue_num_merges} which exceeds {num_total_merges}.'
+        )
 
 
 
@@ -729,8 +892,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 raise FileExistsError(
                     f'input corpus parquet files cannot have duplicated file basename.\n'
                     f'now they are {corpus_pqs}.\n'
-                    f'change the basename of input corpus file in parquet format, because the program '
-                    f'generated same name for previous corpus in string format.')
+                    f'change the basename of input corpus file of parquet format, because the program '
+                    f'generated same name for previous corpus of string format.')
             else:
                 init_tokens_pqs.append(init_tokens_pq)
         
@@ -794,7 +957,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                     f'corpus parquet file {corpus} not found or text_colname {columns[i]} not valid')
         
         init_tokens_pqs = self._init_tokens_pqs(corpus_pqs, text_colnames) # generate all init_tokens_pq file
-        
+        clean_folder(self._buffer_dir, method='only_file') # clean corpus parquet file from string input
+
         return init_tokens_pqs
 
 
@@ -856,7 +1020,14 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return occur_most_pair, max_occur
 
     
-    def _merge_tokens_save(self, save_dir, to_merge_pair, new_token, tokens_pq):
+    def _merge_tokens_save(
+            self,
+            save_dir,
+            to_merge_pair,
+            new_token,
+            tokens_pq,
+            optimize:t.Literal['twoloop', 'parallel', 'mem_contiguous']
+            ):
         '''
         given tokens parquet file `tokens_pq`,
         merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
@@ -870,8 +1041,27 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
             for batch in yield_tokens:
-                chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
-                merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
+                tokens_flat = batch[self.tokens_schema[0].name].values.to_numpy().data
+                offsets = batch[self.tokens_schema[0].name].offsets.to_numpy().data
+                pair0, pair1 = map(np.int32, to_merge_pair)
+
+                if optimize == 'parallel':
+                    merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_parallel(
+                        tokens_flat, offsets, pair0, pair1, new_token, np.int32)
+                elif optimize == 'mem_contiguous':
+                    merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_memcontiguous(
+                        tokens_flat, offsets, pair0, pair1, new_token, np.int32)
+                elif optimize == 'twoloop':
+                    merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_twoloop(
+                        tokens_flat, offsets, pair0, pair1, new_token, np.int32)
+                else:
+                    chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
+                    merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
+                    new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
+                    writer.write_batch( new_batch )
+                    return
+                
+                merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
                 new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
                 writer.write_batch( new_batch )
         
@@ -879,7 +1069,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
 
-    def _next_tokens_pqs(self, tokens_pqs, occur_most_pair, new_token):
+    def _next_tokens_pqs(
+            self,
+            tokens_pqs,
+            occur_most_pair,
+            new_token,
+            optimize: t.Literal['twoloop', 'parallel', 'mem_contiguous'] = 'parallel'
+            ):
         # 在计算获得 tokens parquet for next merge_rank 时, 当前 tokens_pq 已经提炼出了 merge_info
         # 并更新了 tokenizer._merge_rank，使得其 + 1。所以 cur_dir_for_tokens_pq = len(_merge_rank) - 1
         # next_dir_for_tokens_pq = cur_dir_for_tokens_pq + 1 = len(cur_merge_rank)
@@ -896,7 +1092,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 next_dir_for_tokens,
                 occur_most_pair, 
                 new_token, 
-                tokens_pq)
+                tokens_pq,
+                optimize)
             
             next_tokens_pqs.append( merged_tokens_pq )
         
@@ -981,13 +1178,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     def continue_bpe(self,
-                     tokens_dir:t.List[str],
                      continue_num_merges:int,
                      buffer_size:int = 4194304*128, # max tokens-chunks in memory
                      keep_window:int = 10, # max reserved tokens_pq file in disk
                      verbose:bool = False,
                      *args, **kwargs):
-        assert continue_num_merges > 0
+        '''
+        .continue_bpe:
+            根据 tokenizer 的 _merge_rank(from load or init) 和 _buffer_dir(主要依赖内部的tokens/latest)
+            来继续run bpe process
+        '''
+        assert continue_num_merges > 0 and keep_window >= 0
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load. run .load() before continue BPE process.'
         # continue bpe 要解决 continue_num_merges 和 explicit_n_vocab / _num_merges 之间的冲突问题
         # load 的时候只有 merge_ranks，不涉及 _num_merges 和 explicit_n_vocab
@@ -1003,27 +1204,36 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         if hasattr(self, '_num_merges') and self._num_merges < len(self._merge_ranks) + continue_num_merges:
             raise_continue_num_merges_conflict(len(self._merge_ranks), self._num_merges, continue_num_merges)
         
+        self._buffer_size = buffer_size
+
         # 确认 buffer 文件夹都存在
         self._buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
         self._buffer_pcounts_dir = os.path.join(self._buffer_dir, 'p_counts')
         assert os.path.exists(self._buffer_tokens_dir) and os.path.exists(self._buffer_pcounts_dir)
 
-        self._buffer_size = buffer_size
+        try:
+            latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
+            tokens_dir = os.path.join(self._buffer_tokens_dir, f'{latest}')
+        except ValueError:
+            raise FileNotFoundError(
+                f'latest tokens parquet file not found.\n'
+                f'tokens buffer folder for parquet files {self._buffer_tokens_dir} is empty.')
+        
+        tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
         # 检查 tokens_dir 的文件夹名称序号 是否符合 merge_ranks 的 size
-        if len(self._merge_ranks) == int(Path(tokens_dir).name):
-            # 若 n = merge_rank size = tokens/order, 说明 merge_rank 的 last merge 已经作用在 tokens_pqs 上生成了 tokens/n
-            # 这样地话, tokens/n 直接继续执行即可
-            tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
-        elif len(self._merge_ranks) == int(Path(tokens_dir).name)+1 :
-            # 若 n = merge_rank size = tokens/order+1, 说明 merge_rank 的 last merge 没有作用在 tokens_pqs
-            # 即train bpe的时候, 中途break掉了. 此时要生成 tokens/(order+1). 取出最新的 pair 和 merged_token
+        if len(self._merge_ranks) == latest:
+            # 若merge_rank size = tokens/order,说明merge_rank的last merge已经作用在tokens_pqs上生成了 tokens/latest
+            # 这样地话, tokens/latest 直接继续执行即可. 主要是 latest = 0 即 merge_ranks = {}时使用.
+            pass
+        elif len(self._merge_ranks) == latest+1 :
+            # 若 merge_rank size = tokens/latest+1, 说明 merge_rank 的 last merge 没有作用在 tokens_pqs
+            # 即train bpe的时候, 中途break掉了. 此时要生成 tokens/(latest+1). 取出最新的 pair 和 merged_token
             occur_most_pair, new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
-            tokens_pqs = [os.path.join(tokens_dir, f) for f in os.listdir(tokens_dir)]
             tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
         else:
             raise ValueError(
-                f"tokens directory {tokens_dir} not match with loaded merge_ranks with size {len(self._merge_ranks)}.\n"
-                f"merge_ranks size either equals to tokens' dir name, or tokens' dirname plus 1.")
+                f"latest tokens directory {tokens_dir} not match with loaded merge_ranks with size {len(self._merge_ranks)}.\n"
+                f"merge_ranks size either equals to tokens' latest order, or tokens' latest order plus 1.")
         
         # merge_rank 等于 merge轮次开始时, 作为材料的 tokens 的 num_merges
         # e.g, merge_rank = 0 时, tokens/0 是材料, 它们所经的 num_merges = 0
@@ -1052,12 +1262,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
-    
 
-    def _locate_pcounts_pq(self, tokens_pq):
-        dir_name, fname = tokens_pq.split('/')[-2:]
-        return os.path.join(self._buffer_pcounts_dir, dir_name, fname)
-    
+
 
     def extend_bpe(self, *args, **kwargs):
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'

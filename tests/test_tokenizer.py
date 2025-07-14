@@ -155,10 +155,7 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
-    buffer_tokens_dir = os.path.join(buffer, 'tokens')
-    latest = max( [int(f) for f in os.listdir(buffer_tokens_dir)] )
-    tokens_dir = os.path.join(buffer_tokens_dir, f'{latest}')
-    tokenizer.continue_bpe(tokens_dir, 200)
+    tokenizer.continue_bpe(200)
     tokens = tokenizer.encode(text, 'all')
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
