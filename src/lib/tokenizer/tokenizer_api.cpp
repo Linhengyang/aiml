@@ -16,8 +16,10 @@ return_bundle c_merge_pair_batch(
 ) {
     try
     {
+        size_t size = 1<<20;
+
         // num_chunks = len(offsets) - 1 = len(output_tokens_lens)
-        long* output_tokens_lens = nullptr; //TODO, allocate from memory_pool::get_mempool().allocate()
+        long* output_tokens_lens = static_cast<long*>(memory_pool::get_mempool().allocate(size));
 
         // 初始化数组
         for (size_t i = 0; i < num_chunks; ++i) {
@@ -28,13 +30,13 @@ return_bundle c_merge_pair_batch(
         long _LENGTH = offsets[num_chunks];
 
         // _LENGTH 长度
-        bool* output_filter = nullptr; //TODO, allocate from memory_pool::get_mempool().allocate()
+        bool* output_filter = static_cast<bool*>(memory_pool::get_mempool().allocate(size));
         for (size_t i = 0; i < _LENGTH; ++i) {
             output_filter[i] = false; // 全部初始化为 false
         }
 
         // _LENGTH 长度
-        int* output_tokens_flat = nullptr; //TODO, allocate from memory_pool::get_mempool().allocate()
+        int* output_tokens_flat = static_cast<int*>(memory_pool::get_mempool().allocate(size));
         for (size_t i = 0; i < _LENGTH; ++i) {
             output_tokens_flat[i] = -1; // 全部初始化为 -1
         }
@@ -59,6 +61,13 @@ return_bundle c_merge_pair_batch(
     {
         throw std::runtime_error("Error in merge_pair_core_parallel");
     }
+}
+
+
+
+// 缩小内存池
+void shrink_memory_pool() {
+    memory_pool::get_mempool().shrink();
 }
 
 
