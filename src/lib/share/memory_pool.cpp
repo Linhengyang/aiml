@@ -32,7 +32,7 @@ void memory_pool::release() {
 
     for(auto block: _blocks) {
         // 释放 _blocks vector 中每一个内存block. 调用 block 的析构函数
-        std::free(block); // 
+        delete block; // 
     }
 
     _blocks.clear(); // 清空 _blocks 容器里的所有元素
@@ -58,7 +58,7 @@ void* memory_pool::allocate(size_t size) {
     std::lock_guard<std::mutex> lock(_mtx);
 
     if(size == 0) {return nullptr;}
-    
+
     size = (size + _alignment) & ~(_alignment-1); // size 上跳对齐
 
     // 大于 _block_size 的内存申请
@@ -85,7 +85,7 @@ void* memory_pool::allocate(size_t size) {
         // 遍历之后还是没有找到足够分配 size 的, 新创建一个 block
         if (!_current_block || _current_block->get_remaining() < size) {
 
-            block* new_block = static_cast<block*>(std::malloc(sizeof(block)));
+            block* new_block = new block(_block_size, _alignment);
 
             if(!new_block) {
                 throw std::bad_alloc();
@@ -174,7 +174,7 @@ void memory_pool::shrink() {
         // 遍历 block. 如果 block 不是 _current_block, 且 usage = 0, 销毁
         if (block != _current_block && block->get_offset() == 0) {
             // 释放这个block
-            std::free(block);
+            delete block;
             // 把这个block放进待删除列表
             _released_block.push_back(block);
         }
