@@ -3,7 +3,7 @@
 
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
-#include "../share/memory_pool.h"  // 引入 memory_pool.h 以便访问 MemoryPool 类
+#include "memory_pool.h"  // 引入 memory_pool.h 以便访问 MemoryPool 类
 #include <cstddef>
 
 
@@ -42,6 +42,13 @@ void merge_pair_core_parallel(
     long* output_tokens_lens // input tokens lens init. in-place change in this function
 );
 
+
+// 创建内存池
+void init_memory_pool(size_t block_size, size_t alignment);
+
+
+// 缩小内存池
+void shrink_memory_pool();
 
 
 // 重置内存池

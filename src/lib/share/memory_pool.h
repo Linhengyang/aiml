@@ -47,8 +47,8 @@ private:
 public:
 
     // 获取 memory_pool 单例实例
-    static memory_pool& get_mempool() {
-        static memory_pool instance;  // 静态局部变量，确保全局只有一个实例
+    static memory_pool& get_mempool(size_t block_size = 4096, size_t alignment = 8) {
+        static memory_pool instance(block_size, alignment);  // 静态局部变量，确保全局只有一个实例
         return instance;
     }
 

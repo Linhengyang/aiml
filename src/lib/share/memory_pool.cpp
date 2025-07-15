@@ -32,7 +32,7 @@ void memory_pool::release() {
 
     for(auto block: _blocks) {
         // 释放 _blocks vector 中每一个内存block. 调用 block 的析构函数
-        std::free(block); // 
+        delete block; // 
     }
 
     _blocks.clear(); // 清空 _blocks 容器里的所有元素
@@ -57,9 +57,9 @@ void* memory_pool::allocate(size_t size) {
     // 当线程A函数在return后，对象 lock 就离开了线程A的作用域，自动销毁，那么互斥量mtx_就被释放了
     std::lock_guard<std::mutex> lock(_mtx);
 
-    size = (size + _alignment) & ~(_alignment-1); // size 上跳对齐
-
     if(size == 0) {return nullptr;}
+
+    size = (size + _alignment) & ~(_alignment-1); // size 上跳对齐
 
     // 大于 _block_size 的内存申请
     if(size > _block_size) { // 单独申请, 并记录在 _larg_allocs 中
@@ -168,15 +168,22 @@ void memory_pool::shrink() {
         return;
     }
 
+    std::vector<block*> _released_block = {};
+
     for (auto block: _blocks) {
         // 遍历 block. 如果 block 不是 _current_block, 且 usage = 0, 销毁
         if (block != _current_block && block->get_offset() == 0) {
-            std::free(block); // 释放这个block
-            // 把这个block从 _blocks 中删除
-            auto it = std::find(_blocks.begin(), _blocks.end(), block);
-            if(it != _blocks.end()) {
-                _blocks.erase(it);
-            }
+            // 释放这个block
+            delete block;
+            // 把这个block放进待删除列表
+            _released_block.push_back(block);
+        }
+    }
+
+    for (auto block: _released_block) {
+        auto it = std::find(_blocks.begin(), _blocks.end(), block);
+        if(it != _blocks.end()) {
+            _blocks.erase(it);
         }
     }
 }

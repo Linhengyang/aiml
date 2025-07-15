@@ -1,7 +1,8 @@
 #include <stdexcept>
 #include <cstddef>
+#include <iostream>
 #include "tokenizer.h"
-#include "../share/memory_pool.h"
+#include "memory_pool.h"
 
 
 extern "C" {
@@ -62,6 +63,15 @@ return_bundle c_merge_pair_batch(
         throw std::runtime_error("Error in merge_pair_core_parallel");
     }
 }
+
+
+
+// 创建内存池（全局单例）
+void init_memory_pool(size_t block_size, size_t alignment) {
+    memory_pool::get_mempool(block_size, alignment);
+    std::cout << "global memory pool initialized" << std::endl;
+}
+
 
 
 
