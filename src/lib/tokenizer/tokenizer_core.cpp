@@ -1,24 +1,25 @@
 // tokenizer.cpp
 // core functions for utils/text/tokenizer
 #include <vector>
-#include <cstring>
 #include <omp.h>
+#include <cstddef>
+
 
 extern "C" {
 
 void merge_pair_core_parallel(
     const int* tokens_flat,
     const long* offsets,
-    int num_chunks,
+    size_t num_chunks,
     int pair_L,
     int pair_R,
     int new_token,
-    int* output_tokens_flat,
-    bool* output_filter,
-    long* output_tokens_lens
+    int* output_tokens_flat, // all -1 init. in-place change in this function
+    bool* output_filter, // all false init. in-place change in this function
+    long* output_tokens_lens // input tokens lens init. in-place change in this function
 ) {
     #pragma omp parallel for
-    for(int i = 0; i < num_chunks; i++) {
+    for(size_t i = 0; i < num_chunks; i++) {
         int start = offsets[i];
         int end = offsets[i+1];
         int len_tokens = end - start;
