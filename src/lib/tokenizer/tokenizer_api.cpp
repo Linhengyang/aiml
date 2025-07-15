@@ -2,7 +2,7 @@
 #include <cstddef>
 #include <iostream>
 #include "tokenizer.h"
-#include "../share/memory_pool.h"
+#include "memory_pool.h"
 
 
 extern "C" {

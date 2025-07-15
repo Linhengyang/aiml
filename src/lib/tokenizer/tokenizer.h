@@ -3,7 +3,7 @@
 
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
-#include "../share/memory_pool.h"  // 引入 memory_pool.h 以便访问 MemoryPool 类
+#include "memory_pool.h"  // 引入 memory_pool.h 以便访问 MemoryPool 类
 #include <cstddef>
 
 
