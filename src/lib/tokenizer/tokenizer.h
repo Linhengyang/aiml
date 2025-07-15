@@ -43,6 +43,13 @@ void merge_pair_core_parallel(
 );
 
 
+// 创建内存池
+void init_memory_pool(size_t block_size, size_t alignment);
+
+
+// 缩小内存池
+void shrink_memory_pool();
+
 
 // 重置内存池
 void reset_memory_pool();

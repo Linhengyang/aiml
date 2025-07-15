@@ -29,6 +29,9 @@ cdef extern from "tokenizer.h":
         int* output_tokens_lens
     )
 
+    # 创建内存池
+    void init_memory_pool(size_t block_size, size_t alignment)
+
     # 重置内存池
     void reset_memory_pool()
 
@@ -50,8 +53,12 @@ def c_merge_pair_batch(
     pair_L, # int32
     pair_R, # int32
     new_token, # int32
+    block_size, # size_t, number of bytes for a memory block
     **kwargs
 ):
+    # 确保第一次创建内存池. block_size 从python侧传入, alignment设为16
+    init_memory_pool(block_size, 16)
+
     # 先尝试 shrink 内存池，以释放上一轮根本没用到的内存block. 对于刚初始化的内存池，shrink无效
     shrink_memory_pool()
     
