@@ -1,16 +1,17 @@
 // memory_pool.cpp
 
 #include "memory_pool.h"
+#include "memory_block.h"
 #include <stdexcept>
-#include <algorithm>
+#include <cstdint>
+#include <cstring>
 
+memory_pool::memory_pool(size_t block_size): _block_size(block_size), _blocks(std::vector<block*>()), _large_alloc(std::vector<void*>()) {
 
-
-
-memory_pool::memory_pool(size_t block_size): _block_size(block_size){
     if (block_size == 0) {
         throw std::invalid_argument("block_size must be > 0");
     }
+    
 }
 
 
