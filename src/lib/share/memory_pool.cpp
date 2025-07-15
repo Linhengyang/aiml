@@ -5,13 +5,19 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 
-memory_pool::memory_pool(size_t block_size): _block_size(block_size), _blocks(std::vector<block*>()), _large_alloc(std::vector<void*>()) {
+memory_pool::memory_pool(size_t block_size, size_t alignment):
+    _block_size(block_size),
+    _blocks(std::vector<block*>()),
+    _large_allocs(std::vector<void*>()),
+    _alignment(alignment)
+{
 
     if (block_size == 0) {
         throw std::invalid_argument("block_size must be > 0");
     }
-    
+
 }
 
 
@@ -23,62 +29,78 @@ memory_pool::~memory_pool() {
 
 
 void memory_pool::release() {
+
     for(auto block: _blocks) {
-        // 释放 _blocks vector 中每一个 内存block
-        std::free(block); // 用 std::malloc 分配的, 要用 std::free 来释放
+        // 释放 _blocks vector 中每一个内存block. 调用 block 的析构函数
+        std::free(block); // 
     }
+
     _blocks.clear(); // 清空 _blocks 容器里的所有元素
 
-    for(auto ptr: _large_alloc) {
+    for(auto ptr: _large_allocs) {
         // 释放 _large_alloc vector 中每一个 ptr
         std::free(ptr);
     }
-    _large_alloc.clear();
+
+    _large_allocs.clear();
 
     _current_block = nullptr;
-    _offset = 0;
+
 }
 
 
 
 // 申请分配 size 字节数量的内存.
-// 如果 size 是小于等于内存block，那么分配相应大小的可复用的内存. 统一用release释放所有block, 用reset复用block
-// 如果size是超过内存block的大容量，那么分配相应大小不可复用的内存. 可以用 dealloc_large(ptr, size)单独释放, 也可以随着release统一释放
 void* memory_pool::allocate(size_t size) {
     // 线程A在函数域内调用对象mempool的allocate方法以获得内存，这个时候lock_guard类就在线程A的作用域里生成了，并传入互斥量mtx_，生成对象 lock 。
     // 这个时候如果另一个线程试图调用mempool的allocate方法，它就拿不到互斥量mtx_，所以就只能堵塞，这样就能保证线程A allocate拿到的内存只有线程A能用。
     // 当线程A函数在return后，对象 lock 就离开了线程A的作用域，自动销毁，那么互斥量mtx_就被释放了
     std::lock_guard<std::mutex> lock(_mtx);
 
-    size = (size + 7) & (~7); // 把申请字节数向上对齐到最近的8的倍数. 现代cpu的特性. 线程的特性
+    size = (size + _alignment) & ~(_alignment-1); // size 上跳对齐
 
-    if(size > _block_size) { // 大于 _block_size 的内存申请: 单独申请, 并记录在 _larg_alloc 中
+    if(size == 0) {return nullptr;}
+
+    // 大于 _block_size 的内存申请
+    if(size > _block_size) { // 单独申请, 并记录在 _larg_allocs 中
         void* ptr = std::malloc(size);
         if(!ptr) {
             throw std::bad_alloc();
         }
-        _large_alloc.push_back(ptr); // 记录该次 large allocate. release里一起释放
+        _large_allocs.push_back(ptr); // 记录该次 large allocate. release里一起释放
 
         return ptr;
     }
 
-
-    if(!_current_block || _offset + size > _block_size) {
-        // 若当前内存块block指针为空, 或者当前内存块block偏移量+申请量 > 内存块block总量
-        // 说明当前内存块block对于线程不够用了，要申请新的内存块block
-        _current_block = static_cast<char*>(std::malloc(_block_size));
-        if(!_current_block) {
-            throw std::bad_alloc();
+    // 小于等于 _block_size 的内存申请
+    if (!_current_block || _current_block->get_remaining() < size) { // 若当前 block 不够分配size
+        // 遍历 _blocs，寻找一个足够的
+        for (auto block : _blocks) {
+            if (block->get_remaining() >= size) {
+                _current_block = block;
+                break;
+            }
         }
-        _blocks.push_back(_current_block); // 记录新的内存block
-        _offset = 0; // 新的内存block偏移量为0
+
+        // 遍历之后还是没有找到足够分配 size 的, 新创建一个 block
+        if (!_current_block || _current_block->get_remaining() < size) {
+
+            block* new_block = new block(_block_size, _alignment);
+
+            if(!new_block) {
+                throw std::bad_alloc();
+            }
+
+            _blocks.push_back(new_block); // 记录新的内存block
+            _current_block = new_block;
+        }
+
     }
 
-    void* ptr = _current_block + _offset;
-    _offset += size;
-    
-    return ptr;
+    return _current_block->allocate(size);
 }
+
+
 
 
 
@@ -87,22 +109,74 @@ void memory_pool::dealloc_large(void* ptr, size_t size) {
     // 单独释放大内存, 加互斥锁
     std::lock_guard<std::mutex> lock(_mtx);
 
-    size = (size + 7) & (~7);
+    size = (size + _alignment) & ~(_alignment-1); // size 上跳对齐
 
+    // 如果 size 确实是 大于 _block_size 的内存申请
     if(size > _block_size) {
         std::free(ptr); // 大对象单独释放
 
         // ptr已经释放了，要从 _large_alloc vector 中删除, 避免在release中再次释放
-        auto it = std::find(_large_alloc.begin(), _large_alloc.end(), ptr);
-        if(it != _large_alloc.end()) {
-            _large_alloc.erase(it);
+        auto it = std::find(_large_allocs.begin(), _large_allocs.end(), ptr);
+
+        if(it != _large_allocs.end()) {
+            _large_allocs.erase(it);
         }
     }
 }
 
 
 
+
+
+
+// reset 内存池: reset 所有内存block, release 所有 large_allocation
 void memory_pool::reset() {
     std::lock_guard<std::mutex> lock(_mtx);
-    _offset = 0; // 重置当前内存block的偏移量为0, 意思是该block要重新复用
+
+    for(auto block: _blocks) {
+        block->reset();
+    }
+
+    if (!_blocks.empty()) {
+        _current_block = _blocks[0];
+    }
+
+    for(auto ptr: _large_allocs) {
+        // 释放 _large_alloc vector 中每一个 ptr
+        std::free(ptr);
+    }
+
+    _large_allocs.clear();
+
+}
+
+
+
+
+
+
+
+
+// shrink 内存池: 把 _offset == 0 的block销毁掉（_current_block除外）
+// 必须要在 reset之前用. 因为reset会重置所有block._offset=0
+// 下一步紧接着就是 reset
+void memory_pool::shrink() {
+    std::lock_guard<std::mutex> lock(_mtx);
+
+    // 如果当前block指向空, 说明还没有创建任何一个block, 那么无可shrink，直接退出
+    if(!_current_block) {
+        return;
+    }
+
+    for (auto block: _blocks) {
+        // 遍历 block. 如果 block 不是 _current_block, 且 usage = 0, 销毁
+        if (block != _current_block && block->get_offset() == 0) {
+            std::free(block); // 释放这个block
+            // 把这个block从 _blocks 中删除
+            auto it = std::find(_blocks.begin(), _blocks.end(), block);
+            if(it != _blocks.end()) {
+                _blocks.erase(it);
+            }
+        }
+    }
 }

@@ -35,6 +35,9 @@ cdef extern from "tokenizer.h":
     # 销毁内存池
     void release_memory_pool()
 
+    # 缩小内存池
+    void shrink_memory_pool()
+
 
 
 
@@ -49,6 +52,9 @@ def c_merge_pair_batch(
     new_token, # int32
     **kwargs
 ):
+    # 先尝试 shrink 内存池，以释放上一轮根本没用到的内存block. 对于刚初始化的内存池，shrink无效
+    shrink_memory_pool()
+    
     # 本 batch merge pair之前, 重置内存池
     reset_memory_pool()
 
