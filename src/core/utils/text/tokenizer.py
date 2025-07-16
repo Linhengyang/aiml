@@ -1292,7 +1292,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
             save_dir,
             to_merge_pair,
             new_token,
-            tokens_pq
+            tokens_pq,
+            *args, **kwargs
             ):
         '''
         given tokens parquet file `tokens_pq`,
