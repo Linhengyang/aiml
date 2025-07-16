@@ -1,3 +1,0 @@
-
-# search c files under 
-g++ -std=c++17 test_mempool.cpp ../src/lib/share/*.cpp -I../src/lib/share -o .cpptest_cache/testmempool.exe

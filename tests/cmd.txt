@@ -1,0 +1,8 @@
+
+
+# pytest: copy to run all test_*.py under directory `aiml/tests`:
+PYTHONDONTWRITEBYTECODE=1 pytest -v .
+
+
+# cpptest:
+g++ @cppbuild_args_test_*.txt
