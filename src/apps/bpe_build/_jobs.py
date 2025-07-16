@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 import os
 import regex as re
-from ...core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer
+from ...core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer, boostBBPETokenizer
 
 configs = yaml.load(open('src/apps/bpe_build/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -20,7 +20,13 @@ vocab_cache_dir = os.path.join( configs['artifact_dir'], configs['app_name'], 'v
 
 
 
-
+def bpe_prepare():
+    print('insight on dataset TinyStories')
+    train_pq = configs['train_pq']
+    valid_pq = configs['valid_pq']
+    
+    for pq_file in [train_pq, valid_pq]:
+        print(f'parquet file {pq_file} info:\n{pq.ParquetFile(pq_file).metadata}')
 
 
 
@@ -39,7 +45,7 @@ def bpe_build():
     for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
         os.makedirs(folder, exist_ok=True)
         
-    tok = bufferBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
+    tok = boostBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
     tok.train_bpe([train_pq, valid_pq], text_columns=['text', 'text'], num_merges=3, verbose=True)
 
     # save tokenizer
@@ -56,7 +62,7 @@ def bpe_build():
 
 def bpe_continue(continue_num_merges):
     print('continue to run BPE on dataset TinyStories')
-    tok = bufferBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
+    tok = boostBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
     # load tokenizer
     tok.load(os.path.join(tokenizer_save_dir, 'tinyTok_3.tok'))
 
@@ -64,7 +70,7 @@ def bpe_continue(continue_num_merges):
     tok.continue_bpe(continue_num_merges)
 
     # save/view the new tokenizer in different name
-    tok.name = 'tinyTok_4.tok'
+    tok.name = 'tinyTok_4'
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}.tok')
     tok.save(tok_fpath)
     # view vocab
