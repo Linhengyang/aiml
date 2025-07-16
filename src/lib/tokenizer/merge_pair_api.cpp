@@ -94,7 +94,6 @@ void reset_memory_pool() {
 
 // 销毁内存池
 void release_memory_pool() {
-    memory_pool::get_mempool().release();
     memory_pool::mempool_destroy();
     std::cout << "global memory pool released" << std::endl;
 }
