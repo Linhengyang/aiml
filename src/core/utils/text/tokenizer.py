@@ -1307,6 +1307,9 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         
         with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
             import pairmerge as pairmerge
+
+            # 测算 block_size = 40 * batch_size, 使得最大块内存需求落在同一个 block
+            # 推荐 batch_size = 1 << 29 = 0.5GB, 那么一个 block size 占用 20GB
             pairmerge.allocate_memory(40*self._buffer_size)
 
             for batch in yield_tokens:
@@ -1329,10 +1332,39 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         return merged_tokens_pq
 
 
+    def train_bpe(self,
+                  corpora:t.List[str]|str,
+                  text_columns:t.List[str|None] = ['text'], # 默认输入单个 pq file as corpus with text column `text`
+                  buffer_size:int = 1 << 29, # 推荐大小, 使得内存池一个block size为 20GB
+                  keep_window:int = 10, # max reserved tokens_pq file in disk
+                  num_merges:int|None = None,
+                  verbose:bool = False,
+                  *args, **kwargs):
+        
+        super().train_bpe(
+            corpora,
+            text_columns,
+            buffer_size,
+            keep_window,
+            num_merges,
+            verbose,
+            *args, **kwargs)
+        
 
+    def continue_bpe(self,
+                     continue_num_merges:int,
+                     buffer_size:int = 1 << 29, # 推荐大小, 使得内存池一个block size为 20GB
+                     keep_window:int = 10, # max reserved tokens_pq file in disk
+                     verbose:bool = False,
+                     *args, **kwargs):
 
-
-
+        super().continue_bpe(
+            continue_num_merges,
+            buffer_size,
+            keep_window,
+            verbose,
+            *args, **kwargs)
+        
 
 
 
