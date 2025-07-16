@@ -7,7 +7,7 @@
 * invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
 
 ## src:
-* core:
+* core:  
     * base: 
         * compute:&nbsp;&nbsp;performance & tools & hardware-sensitive  
         * functions:&nbsp;&nbsp;fundamental functions  
@@ -17,8 +17,12 @@
         * root_layers:&nbsp;&nbsp;nn layers  
         * sub_modules:&nbsp;&nbsp;customized module blocks/bulks for projs
     * utils:&nbsp;&nbsp;data & algo & preprocess  
+* lib:  
+    * share: &nbsp;&nbsp;shared cpp headers & files  
+    * tokenizer:  &nbsp;&nbsp;cpp & cython files to boost tokenizer  
+* bin:  &nbsp;&nbsp;binary .so files built from lib
 * projs:  
-&nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:
+&nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:  
     * function
     * dataset
     * network
@@ -29,7 +33,11 @@
     * loss
     * configs
     * _jobs
-
+* apps:  
+&nbsp;&nbsp;&nbsp;&nbsp;a complete application needs to implement followings:  
+    * functions
+    * configs
+    * _jobs
 
 ## Work Note:
 
