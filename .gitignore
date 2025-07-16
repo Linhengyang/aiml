@@ -7,3 +7,4 @@
 tests/temp
 **/build
 .env
+**/*.so
