@@ -16,11 +16,10 @@ return_bundle c_merge_pair_batch(
     int new_token
 ) {
     try
-    {   --
-        size_t size = 1<<20;
-
+    {
         // num_chunks = len(offsets) - 1 = len(output_tokens_lens)
-        long* output_tokens_lens = static_cast<long*>(memory_pool::get_mempool().allocate(size));
+        // need size = sizeof(long) * num_chunks
+        long* output_tokens_lens = static_cast<long*>(memory_pool::get_mempool().allocate(num_chunks*sizeof(long)));
 
         // 初始化数组
         for (size_t i = 0; i < num_chunks; ++i) {
@@ -28,16 +27,18 @@ return_bundle c_merge_pair_batch(
         }
 
         // offsets 的最后一个值是 tokens_flat 的长度，也是 output_tokens_flat/output_filter 的长度
-        long _LENGTH = offsets[num_chunks];
+        size_t _LENGTH = offsets[num_chunks];
 
         // _LENGTH 长度
-        bool* output_filter = static_cast<bool*>(memory_pool::get_mempool().allocate(size));
+        // need size = sizeof(bool) * _LENGTH
+        bool* output_filter = static_cast<bool*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(bool)));
         for (size_t i = 0; i < _LENGTH; ++i) {
             output_filter[i] = false; // 全部初始化为 false
         }
 
         // _LENGTH 长度
-        int* output_tokens_flat = static_cast<int*>(memory_pool::get_mempool().allocate(size));
+        // need size = sizeof(int) * _LENGTH
+        int* output_tokens_flat = static_cast<int*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(int)));
         for (size_t i = 0; i < _LENGTH; ++i) {
             output_tokens_flat[i] = -1; // 全部初始化为 -1
         }
@@ -92,6 +93,7 @@ void reset_memory_pool() {
 // 销毁内存池
 void release_memory_pool() {
     memory_pool::get_mempool().release();
+    std::cout << "global memory pool released" << std::endl;
 }
 
 } // end extern "C"
