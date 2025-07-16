@@ -87,8 +87,6 @@ export PYTHONPATH=$(pwd)/src/bin:$PYTHONPATH
     │       └── vit
     ├── tests
     ├── notebooks
-    │   ├── speedup.ipynb
-    │   └── tokenizer.ipynb
     ├── README.md
     ├── learn.py
     ├── main.py
