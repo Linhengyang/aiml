@@ -9,6 +9,19 @@
 #include <algorithm>
 
 
+
+
+
+// 定义静态成员变量
+// 用智能指针来管理单例
+std::unique_ptr<memory_pool, memory_pool::Deleter> memory_pool::_instance = nullptr;
+std::mutex memory_pool::_mtx;
+
+
+
+
+
+
 // 构造函数. 放到 private 里导致它不对外使用.
 memory_pool::memory_pool(size_t block_size, size_t alignment):
     _block_size(block_size),
@@ -31,16 +44,15 @@ memory_pool::memory_pool(size_t block_size, size_t alignment):
 
 
 memory_pool::~memory_pool() {
-    release();
+    // 析构时调用不加锁的私有 release 方法, 避免死锁
+    release_no_lock();
 }
 
 
 
-void memory_pool::release() {
+void memory_pool::release_no_lock() {
 
-    // release 也涉及到修改共享变量, 加锁
-    std::lock_guard<std::mutex> lock(_mtx);
-
+    // 不加锁的 release 内存池, 给加锁的析构函数使用
     for(auto block: _blocks) {
         // 释放 _blocks vector 中每一个内存block. 调用 block 的析构函数
         delete block;
@@ -56,6 +68,18 @@ void memory_pool::release() {
     _large_allocs.clear();
 
     _current_block = nullptr;
+
+}
+
+
+
+
+void memory_pool::release() {
+
+    // public方法 release 涉及到修改共享变量, 加锁
+    std::lock_guard<std::mutex> lock(_mtx);
+
+    memory_pool::release_no_lock();
 
 }
 
