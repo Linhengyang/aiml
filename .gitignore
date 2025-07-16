@@ -4,4 +4,4 @@
 *.vocab
 **/.pytest_cache
 tests/temp
-tests/*.c
+**/.cpptest_cache
