@@ -85,8 +85,8 @@ def merge_pair_batch(
     cdef const int64_t[::1] offsets_view = offsets
 
     # get input ptr from memoryview input(zero-copy)
-    cdef int32_t* tokens_flat_ptr = &tokens_flat_view[0]
-    cdef int64_t* offsets_ptr = &offsets_view[0]
+    cdef const int32_t* tokens_flat_ptr = &tokens_flat_view[0]
+    cdef const int64_t* offsets_ptr = &offsets_view[0]
 
     # deploy cpp function
     cdef return_bundle result = c_merge_pair_batch(
