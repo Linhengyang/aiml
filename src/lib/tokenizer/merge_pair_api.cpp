@@ -10,10 +10,10 @@ extern "C" {
 return_bundle c_merge_pair_batch(
     const int* tokens_flat,
     const long* offsets,
-    size_t num_chunks, // num_chunks = len(offsets) - 1
-    int pair_L,
-    int pair_R,
-    int new_token
+    const size_t num_chunks, // num_chunks = len(offsets) - 1
+    const int pair_L,
+    const int pair_R,
+    const int new_token
 ) {
     try
     {

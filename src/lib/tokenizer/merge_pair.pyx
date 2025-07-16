@@ -4,26 +4,28 @@
 import numpy as np
 import sys
 cimport numpy as np
+from libc.stdint cimport int32_t, int64_t
+import ctypes
 
 np.import_array()
 
 cdef extern from "merge_pair.h":
 
     # 声明 C++ 中的 return_bundle 结构体
-    struct return_bundle {
-        int* output_tokens_flat_ptr;
-        bool* output_filter_ptr;
-        long* output_tokens_lens_ptr;
-    }
+    struct return_bundle:
+        int32_t* output_tokens_flat_ptr
+        bint* output_filter_ptr
+        int64_t* output_tokens_lens_ptr
+    
 
     # 声明 C++ 中的 c_merge_pair_batch 函数
     return_bundle c_merge_pair_batch(
-        const int* tokens_flat,
-        const long* offsets,
-        size_t num_chunks,
-        int pair_L,
-        int pair_R,
-        int new_token
+        const int32_t* tokens_flat,
+        const int64_t* offsets,
+        const size_t num_chunks,
+        const int32_t pair_L,
+        const int32_t pair_R,
+        const int32_t new_token
     )
 
     # 创建内存池
@@ -77,15 +79,15 @@ def merge_pair_batch(
     if _LENGTH != offsets[num_chunks+1]:
         sys.exit(1)
 
-    cdef int[:] tokens_flat_view = <int[:_LENGTH]> tokens_flat
-    cdef long[:] offsets_view = <long[:num_chunks+1]> offsets
+    cdef int32_t[:] tokens_flat_view = tokens_flat
+    cdef int64_t[:] offsets_view = offsets
 
     # get input ptr from memoryview input(zero-copy)
-    cdef int* tokens_flat_ptr = &tokens_flat_view[0]
-    cdef long* offsets_ptr = &offsets_view[0]
+    cdef int32_t* tokens_flat_ptr = &tokens_flat_view[0]
+    cdef int64_t* offsets_ptr = &offsets_view[0]
 
     # deploy cpp function
-    cdef return_bundle = c_merge_pair_batch(
+    cdef return_bundle result = c_merge_pair_batch(
         tokens_flat_ptr,
         offsets_ptr,
         num_chunks,
@@ -94,16 +96,16 @@ def merge_pair_batch(
         new_token,
     )
 
-    # build output tokens array by filter
-    output_tokens_flat_np = np.ctypeslib.as_array(
-        return_bundle.output_tokens_flat_ptr, shape=(_LENGTH,))
+    # build output tokens array & filter array
+    tokens_ptr = ctypes.cast(<size_t> result.output_tokens_flat_ptr, ctypes.POINTER(ctypes.c_int32))
+    output_tokens_flat_np = np.ctypeslib.as_array(tokens_ptr, shape=(_LENGTH,))
 
-    output_filter_np = np.ctypeslib.as_array(
-        return_bundle.output_filter_ptr, shape=(_LENGTH,))
+    filter_ptr = ctypes.cast(<size_t> result.output_filter_ptr, ctypes.POINTER(ctypes.c_bool))
+    output_filter_np = np.ctypeslib.as_array(filter_ptr, shape=(_LENGTH,))
 
     # build output tokens offsets
-    output_tokens_lens_np = np.ctypeslib.as_array(
-        return_bundle.output_tokens_lens_ptr, shape=(num_chunks,))
+    lens_ptr = ctypes.cast(<size_t> result.output_tokens_lens_ptr, ctypes.POINTER(ctypes.c_int64))
+    output_tokens_lens_np = np.ctypeslib.as_array(lens_ptr, shape=(num_chunks,))
 
     output_offsets_np = np.cumsum(np.insert(output_tokens_lens_np, 0, 0), dtype=np.int64)
 

@@ -10,10 +10,10 @@ extern "C" {
 void merge_pair_core_parallel(
     const int* tokens_flat,
     const long* offsets,
-    size_t num_chunks,
-    int pair_L,
-    int pair_R,
-    int new_token,
+    const size_t num_chunks,
+    const int pair_L,
+    const int pair_R,
+    const int new_token,
     int* output_tokens_flat, // all -1 init. in-place change in this function
     bool* output_filter, // all false init. in-place change in this function
     long* output_tokens_lens // input tokens lens init. in-place change in this function
