@@ -1306,11 +1306,11 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
         
         with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
-            import pairmerge as pairmerge
+            import merge_pair as merge_pair
 
-            # 测算 block_size = 40 * batch_size, 使得最大块内存需求落在同一个 block
-            # 推荐 batch_size = 1 << 29 = 0.5GB, 那么一个 block size 占用 20GB
-            pairmerge.allocate_memory(40*self._buffer_size)
+            # 测算设定 block_size = 40 * batch_size, 就使得最大块的内存需求落在同一个 block
+            # 根据本机64GB内存，反推最佳 batch_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
+            merge_pair.allocate_memory(40*self._buffer_size)
 
             for batch in yield_tokens:
                 # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
@@ -1320,14 +1320,14 @@ class boostBBPETokenizer(bufferBBPETokenizer):
                 L, R = map(np.int32, to_merge_pair)
                 new_token = np.int32(new_token)
 
-                merged_batch_tokens_flat, merged_batch_offsets = pairmerge.merge_pair_batch(
+                merged_batch_tokens_flat, merged_batch_offsets = merge_pair.merge_pair_batch(
                     tokens_flat, offsets, L, R, new_token)
                 
                 merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
                 new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
                 writer.write_batch( new_batch )
             
-            pairmerge.release_memory()
+            merge_pair.release_memory()
         
         return merged_tokens_pq
 

@@ -3,5 +3,6 @@
 *.tok
 *.vocab
 **/.pytest_cache
-tests/temp
 **/.cpptest_cache
+tests/temp
+**/build
