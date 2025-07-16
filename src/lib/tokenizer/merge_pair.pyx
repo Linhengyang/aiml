@@ -78,9 +78,11 @@ def merge_pair_batch(
     cdef size_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
         sys.exit(1)
-
-    cdef int32_t[:] tokens_flat_view = tokens_flat
-    cdef int64_t[:] offsets_view = offsets
+    
+    # const int32_t[::1]保证 memoryview是只读+内存连续的
+    # 因为tokens_flat来自 np.array(..., dtype=..., copy=False) 共享了只读数据
+    cdef const int32_t[::1] tokens_flat_view = tokens_flat
+    cdef const int64_t[::1] offsets_view = offsets
 
     # get input ptr from memoryview input(zero-copy)
     cdef int32_t* tokens_flat_ptr = &tokens_flat_view[0]
