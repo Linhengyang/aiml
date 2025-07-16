@@ -52,11 +52,11 @@ also recommend to have:
 * `cache`: -- to save files may be saved or not
 
 set env:
-* `PYTHONPATH`: -- add absolute path of `{path}/{to}/aiml/src/bin`, e.g.  
+* `PYTHONPATH`: -- add absolute path of `{path}/{to}/aiml/bin`, e.g.  
 `source env.sh` where `env.sh` like following:
 ```
 cd ./aiml
-export PYTHONPATH=$(pwd)/src/bin:$PYTHONPATH
+export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
 ```
 
 ---
