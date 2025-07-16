@@ -46,7 +46,9 @@ def bpe_build():
         os.makedirs(folder, exist_ok=True)
         
     tok = boostBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
-    tok.train_bpe([train_pq, valid_pq], text_columns=['text', 'text'], num_merges=3, verbose=True)
+    corpora = [train_pq, valid_pq]
+    
+    tok.train_bpe(corpora, text_columns=['text', 'text'], num_merges=3, verbose=True)
 
     # save tokenizer
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}.tok')
