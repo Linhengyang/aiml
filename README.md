@@ -105,5 +105,5 @@ export PYTHONPATH=$(pwd)/src/bin:$PYTHONPATH
     ├── proj
     tool
     ├── database
-    ├── hf_download.py
+    └── hf_download.py
 ---
