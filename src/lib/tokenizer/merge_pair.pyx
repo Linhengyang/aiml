@@ -76,7 +76,7 @@ def merge_pair_batch(
         return np.array([], dtype=np.int32), np.array([0], dtype=np.int64)
     
     cdef size_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
-    if _LENGTH != offsets[num_chunks+1]:
+    if _LENGTH != offsets[num_chunks]:
         sys.exit(1)
 
     cdef int32_t[:] tokens_flat_view = tokens_flat
