@@ -1030,7 +1030,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             to_merge_pair,
             new_token,
             tokens_pq,
-            optimize:t.Literal['twoloop', 'parallel', 'mem_contiguous']
+            optimize:t.Literal['twoloop', 'parallel', 'mem_contiguous', 'cspeed']
             ):
         '''
         given tokens parquet file `tokens_pq`,
@@ -1285,9 +1285,48 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
 
+class boostBBPETokenizer(bufferBBPETokenizer):
 
+    def _merge_tokens_save(
+            self,
+            save_dir,
+            to_merge_pair,
+            new_token,
+            tokens_pq
+            ):
+        '''
+        given tokens parquet file `tokens_pq`,
+        merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
+        then save result tokens chunks into a same-file-name parquet file to `save_dir`
+        '''
+        # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 occur_most_pair, 缓存 merged tokens parquet file
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
 
+        # merged result 也是下一个 merge rank 要读取的 parquet
+        merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
+        
+        with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
+            import pairmerge as pairmerge
+            pairmerge.allocate_memory(40*self._buffer_size)
 
+            for batch in yield_tokens:
+                # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
+                tokens_flat = batch[self.tokens_schema[0].name].values.to_numpy().data
+                # tokens_schema: list dtype pa.int64array --> offsets: int64
+                offsets = batch[self.tokens_schema[0].name].offsets.to_numpy().data
+                L, R = map(np.int32, to_merge_pair)
+                new_token = np.int32(new_token)
+
+                merged_batch_tokens_flat, merged_batch_offsets = pairmerge.merge_pair_batch(
+                    tokens_flat, offsets, L, R, new_token)
+                
+                merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
+                new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
+                writer.write_batch( new_batch )
+            
+            pairmerge.release_memory()
+        
+        return merged_tokens_pq
 
 
 

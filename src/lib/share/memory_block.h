@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstring>
+#include <cstddef>
 
 
 // 内部内存对齐的内存块
@@ -30,7 +31,7 @@ private:
 
 public:
 
-    // 构造函数. 默认对齐64字节
+    // 构造函数. 默认对齐16字节
     explicit block(size_t capacity, size_t alignment=16);
 
     // 析构函数

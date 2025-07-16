@@ -7,7 +7,7 @@ cimport numpy as np
 
 np.import_array()
 
-cdef extern from "tokenizer.h":
+cdef extern from "merge_pair.h":
 
     # 声明 C++ 中的 return_bundle 结构体
     struct return_bundle {
@@ -20,13 +20,10 @@ cdef extern from "tokenizer.h":
     return_bundle c_merge_pair_batch(
         const int* tokens_flat,
         const long* offsets,
-        int num_chunks,
+        size_t num_chunks,
         int pair_L,
         int pair_R,
-        int new_token,
-        int* output_tokens_flat,
-        bool* output_filter,
-        int* output_tokens_lens
+        int new_token
     )
 
     # 创建内存池
@@ -46,20 +43,27 @@ cdef extern from "tokenizer.h":
 
 
 
+
+# 创建内存池接口给python. block_size size_t 从python侧传入, alignment设为16
+# 经过测算，output needed size 的chunk_lens/fitler/tokens 分别大概是 8倍/10倍/40倍 batch_size bytes
+# 为了保证tokens在同一个block而不是large alloc, block_size 至少是 40倍batch_size bytes
+def allocate_memory(block_size):
+    init_memory_pool(block_size, 16)
+
+
+
+
+
 # 返回np.array of merged_tokens_flat/offsets给python
-def c_merge_pair_batch(
+def merge_pair_batch(
     memoryview tokens_flat, # memoryview of int32
     memoryview offsets, # memoryview of int64
     pair_L, # int32
     pair_R, # int32
     new_token, # int32
-    block_size, # size_t, number of bytes for a memory block
     **kwargs
 ):
-    # 确保第一次创建内存池. block_size 从python侧传入, alignment设为16
-    init_memory_pool(block_size, 16)
-
-    # 先尝试 shrink 内存池，以释放上一轮根本没用到的内存block. 对于刚初始化的内存池，shrink无效
+    # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
     shrink_memory_pool()
     
     # 本 batch merge pair之前, 重置内存池
@@ -69,7 +73,7 @@ def c_merge_pair_batch(
     if num_chunks <= 0:
         return np.array([], dtype=np.int32), np.array([0], dtype=np.int64)
     
-    cdef long _LENGTH = tokens_flat.shape[0] # token_flat's total length
+    cdef size_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks+1]:
         sys.exit(1)
 
