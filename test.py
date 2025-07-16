@@ -1,5 +1,5 @@
 # test.py
-from src.core.design.producer_consumer import *
+import sys
 import typing as t
 import pyarrow.parquet as pq
 import pyarrow as pa
