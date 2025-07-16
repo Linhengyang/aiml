@@ -16,7 +16,7 @@ return_bundle c_merge_pair_batch(
     int new_token
 ) {
     try
-    {
+    {   --
         size_t size = 1<<20;
 
         // num_chunks = len(offsets) - 1 = len(output_tokens_lens)

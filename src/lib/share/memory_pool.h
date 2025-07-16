@@ -36,9 +36,12 @@ private:
     block* _current_block = nullptr; //内存池的当前正在使用的内存block起始位置指针
 
     std::mutex _mtx; //互斥锁, 保证多线程安全
+    // 比如在allocate方法里加入互斥锁，那么会发生如下：
+    // 线程A在函数域内调用对象mempool的allocate方法以获得内存，这个时候lock_guard类就在线程A的作用域里生成了，传入互斥量mtx_，生成对象 lock 
+    // 这个时候如果另一个线程试图调用mempool的allocate方法，它就拿不到互斥量mtx_，所以就只能堵塞，这样就能保证线程A allocate拿到的内存只有线程A能用。
+    // 当线程A函数在return后，对象 lock 就离开了线程A的作用域，自动销毁，那么互斥量mtx_就被释放了
 
     
-
     // 禁止拷贝构造和赋值操作
     memory_pool(const memory_pool&) = delete;
     memory_pool& operator=(const memory_pool&) = delete;
@@ -54,9 +57,9 @@ public:
 
     void* allocate(size_t size); //分配指定大小的内存, 如果当前块不足以容纳, 则申请新块
 
-    void dealloc_large(void* ptr, size_t size); //如果 ptr是大对象(大于_block_size)的，会被释放; 否则不会被释放
+    void dealloc_large(void* ptr); //如果 ptr 记录在 _large_allocs 中，会被释放; 否则不会被释放
 
-    void shrink(); //缩小block数量，把used=false的block销毁掉. 必须要在 reset之前用. 因为reset会重置所有block.used=false
+    void shrink(size_t max_num = 1); //缩小block数量, 释放部分尚未使用的block. 必须要在 reset之前用. 因为reset会重置所有block.used=false
 
     void reset(); //复用内存池（全部复用，所有已经申请好的内存block都reset成从头可用）
 
