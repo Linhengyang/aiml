@@ -1129,7 +1129,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         print(f'aggregating pair-counts')
         agg_p_counts, agg_colname = self._aggregate_p_counts(part_p_counts_pqs)
         if not agg_p_counts:
-            self.save(self._buffer_dir) # 在raise error前先保存已经train好的tokenizer
+            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok')) # 在raise error前先保存已经train好的tokenizer
             raise_run_out_corpus_error(rank, len(self._special_marks))
         
         # obtain the pair with most occurrence
