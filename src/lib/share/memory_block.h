@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstring>
+#include <cstddef>
 
 
 // 内部内存对齐的内存块

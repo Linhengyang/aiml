@@ -11,7 +11,7 @@
 
 extern "C" {
 
-// 结构体，用于封装多个指针
+// 结构体，用于封装多个函数返回指针
 struct return_bundle {
     int* output_tokens_flat_ptr;
     bool* output_filter_ptr;
