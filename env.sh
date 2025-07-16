@@ -1,3 +1,4 @@
-export PYTHONPATH=$(pwd)/src/bin:$PYTHONPATH
+cd ../aiml
+export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
 echo "PYTHONPATH as: "
 echo $PYTHONPATH

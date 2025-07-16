@@ -20,7 +20,6 @@
 * lib:  
     * share: &nbsp;&nbsp;shared cpp headers & files  
     * tokenizer:  &nbsp;&nbsp;cpp & cython files to boost tokenizer  
-* bin:  &nbsp;&nbsp;binary *.so files built from lib
 * projs:  
 &nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:  
     * function
@@ -53,17 +52,16 @@ also recommend to have:
 * `cache`: -- to save files may be saved or not
 
 set env:
-* `PYTHONPATH`: -- add absolute path of `{path}/{to}/aiml/src/bin`, e.g.  
+* `PYTHONPATH`: -- add absolute path of `{path}/{to}/aiml/bin`, e.g.  
 `source env.sh` where `env.sh` like following:
 ```
 cd ./aiml
-export PYTHONPATH=$(pwd)/src/bin:$PYTHONPATH
+export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
 ```
 
 ---
     aiml
     ├── src
-    │   ├── bin
     │   ├── core
     │   │   ├── base
     │   │   │   ├── compute
@@ -93,6 +91,7 @@ export PYTHONPATH=$(pwd)/src/bin:$PYTHONPATH
     │       ├── gpt
     │       ├── transformer
     │       └── vit
+    ├── bin
     ├── tests
     ├── notebooks
     ├── README.md
