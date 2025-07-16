@@ -1,7 +1,7 @@
 #include <stdexcept>
 #include <cstddef>
 #include <iostream>
-#include "tokenizer.h"
+#include "merge_pair.h"
 #include "memory_pool.h"
 
 
@@ -70,15 +70,17 @@ return_bundle c_merge_pair_batch(
 // 创建内存池（全局单例）
 void init_memory_pool(size_t block_size, size_t alignment) {
     memory_pool::get_mempool(block_size, alignment);
-    std::cout << "global memory pool initialized" << std::endl;
+    std::cout << "global memory pool with initialized" << std::endl;
 }
 
 
 
 
-// 缩小内存池
+// 缩小内存池(如果存在)
 void shrink_memory_pool() {
-    memory_pool::get_mempool().shrink();
+    if (memory_pool::mempool_exist()) {
+        memory_pool::get_mempool().shrink();
+    }
 }
 
 
@@ -93,6 +95,7 @@ void reset_memory_pool() {
 // 销毁内存池
 void release_memory_pool() {
     memory_pool::get_mempool().release();
+    memory_pool::mempool_destroy();
     std::cout << "global memory pool released" << std::endl;
 }
 
