@@ -49,7 +49,7 @@ def bpe_build():
     corpora = [valid_pq,]
     text_columns=['text',]
 
-    tok.train_bpe(corpora, text_columns, num_merges=3, verbose=True)
+    tok.train_bpe(corpora, text_columns, num_merges=4, verbose=True)
 
     # save tokenizer
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}.tok')
@@ -79,5 +79,5 @@ def bpe_continue(continue_num_merges):
     # view vocab
     tok.view(tmpsave_dir = vocab_cache_dir)
 
-    print('f{continue_num_merges} BPE ends')
+    print(f'{continue_num_merges} BPE ends')
     return tok_fpath, vocab_cache_dir
