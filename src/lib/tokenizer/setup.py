@@ -25,6 +25,7 @@ setup(
     name="merge_pair",
     ext_modules=cythonize(
         ext_modules,
+        build_dir="build/cython_temp",
         compiler_directives={
             "language_level": "3",
             "boundscheck": True,
