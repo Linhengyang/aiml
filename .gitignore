@@ -6,3 +6,4 @@
 **/.cpptest_cache
 tests/temp
 **/build
+.env
