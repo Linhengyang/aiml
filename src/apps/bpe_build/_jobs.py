@@ -49,7 +49,7 @@ def bpe_build():
     corpora = [valid_pq,]
     text_columns=['text',]
 
-    tok.train_bpe(corpora, text_columns, num_merges=4, verbose=True)
+    tok.train_bpe(corpora, text_columns, num_merges=3, verbose=True)
 
     # save tokenizer
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}.tok')
@@ -65,15 +65,15 @@ def bpe_build():
 
 def bpe_continue(continue_num_merges):
     print('continue to run BPE on dataset TinyStories')
-    tok = boostBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
+    tok = boostBBPETokenizer(name='init', buffer_dir=buffer_dir)
     # load tokenizer
-    tok.load(os.path.join(tokenizer_save_dir, 'tinyTok_3.tok'))
+    tok.load(os.path.join(tokenizer_save_dir, 'tinyTok_6.tok'))
 
     # continue to train `continue_num_merges` epoch
     tok.continue_bpe(continue_num_merges)
 
     # save/view the new tokenizer in different name
-    tok.name = 'tinyTok_4'
+    tok.name = 'tinyTok_13'
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}.tok')
     tok.save(tok_fpath)
     # view vocab
