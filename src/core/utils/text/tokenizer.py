@@ -1129,7 +1129,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         print(f'aggregating pair-counts')
         agg_p_counts, agg_colname = self._aggregate_p_counts(part_p_counts_pqs)
         if not agg_p_counts:
-            self.save(self._buffer_dir) # 在raise error前先保存已经train好的tokenizer
+            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok')) # 在raise error前先保存已经train好的tokenizer
             raise_run_out_corpus_error(rank, len(self._special_marks))
         
         # obtain the pair with most occurrence
@@ -1158,25 +1158,26 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         tokens_pqs = self._prepare_train(num_merges, corpora, text_columns, buffer_size)
 
         for rank in range(self._num_merges):
-            # rank = i = 0, ..., _num_merges-1
+            try:
+                # rank = i = 0, ..., _num_merges-1
 
-            occur_most_pair, max_occurence = self._get_merge_info(tokens_pqs)
-            new_token, occurence = rank + 256, max_occurence if verbose else None
+                occur_most_pair, max_occurence = self._get_merge_info(tokens_pqs)
+                new_token, occurence = rank + 256, max_occurence if verbose else None
 
-            # update tokenizer: len(self._merge_rank) += 1
-            self._update_tokenizer(occur_most_pair, new_token, occurence)
+                # update tokenizer: len(self._merge_rank) += 1
+                self._update_tokenizer(occur_most_pair, new_token, occurence)
 
-            # rank = i = len(self._merge_rank) - 1
-            if rank == self._num_merges - 1:
-                break
-            
-            tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
-
-            # keep the init and `keep_window` tokens/p_counts parquet file
-            to_remove = rank - keep_window
-            if to_remove > 0:
-                clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
-                clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
+                # rank = i = len(self._merge_rank) - 1
+                if rank == self._num_merges - 1:
+                    break
+                tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
+                
+            finally:
+                # keep the init and `keep_window` tokens/p_counts parquet file
+                to_remove = rank - keep_window
+                if to_remove > 0:
+                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
+                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
 
         self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
         self._register_special_tokens()
@@ -1245,26 +1246,27 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # e.g, merge_rank = 0 时, tokens/0 是材料, 它们所经的 num_merges = 0
         start_merge_rank = len(self._merge_ranks)
         for rank in range(start_merge_rank, start_merge_rank+continue_num_merges):
-            # merge_rank = ini num_merges,...,ini num_merges+continue_num_merges-1
-            occur_most_pair, max_occurence = self._get_merge_info(tokens_pqs)
-            
-            new_token, occurence = rank + 256, max_occurence if verbose else None
+            try:
+                # merge_rank = ini num_merges,...,ini num_merges+continue_num_merges-1
+                occur_most_pair, max_occurence = self._get_merge_info(tokens_pqs)
+                
+                new_token, occurence = rank + 256, max_occurence if verbose else None
 
-            # update tokenizer: len(self._merge_rank) += 1
-            self._update_tokenizer(occur_most_pair, new_token, occurence)
+                # update tokenizer: len(self._merge_rank) += 1
+                self._update_tokenizer(occur_most_pair, new_token, occurence)
 
-            if rank == start_merge_rank + continue_num_merges - 1:
-                break
+                if rank == start_merge_rank + continue_num_merges - 1:
+                    break
+                tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
 
-            tokens_pqs = self._next_tokens_pqs(tokens_pqs, occur_most_pair, new_token)
-
-            # keep the init and `keep_window` tokens/p_counts parquet file
-            # e.g., keep_window = 3, merge_ranks size 在本轮从 93 -> 94. 那么本轮次里
-            # 读取了 tokens/93, 生成了p_counts/93 和 tokens/94(if). 那么to_remove=93-3=90, 留下91/92/93
-            to_remove = rank - keep_window
-            if to_remove > 0:
-                clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
-                clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
+            finally:
+                # keep the init and `keep_window` tokens/p_counts parquet file
+                # e.g., keep_window = 3, merge_ranks size 在本轮从 93 -> 94. 那么本轮次里
+                # 读取了 tokens/93, 生成了p_counts/93 和 tokens/94(if). 那么to_remove=93-3=90, 留下91/92/93
+                to_remove = rank - keep_window
+                if to_remove > 0:
+                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
+                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
         
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()

@@ -65,19 +65,19 @@ def bpe_build():
 
 def bpe_continue(continue_num_merges):
     print('continue to run BPE on dataset TinyStories')
-    tok = boostBBPETokenizer(name='tinyTok_3', buffer_dir=buffer_dir)
+    tok = boostBBPETokenizer(name='init', buffer_dir=buffer_dir)
     # load tokenizer
-    tok.load(os.path.join(tokenizer_save_dir, 'tinyTok_3.tok'))
+    tok.load(os.path.join(tokenizer_save_dir, 'tinyTok_6.tok'))
 
     # continue to train `continue_num_merges` epoch
     tok.continue_bpe(continue_num_merges)
 
     # save/view the new tokenizer in different name
-    tok.name = 'tinyTok_4'
+    tok.name = 'tinyTok_13'
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}.tok')
     tok.save(tok_fpath)
     # view vocab
     tok.view(tmpsave_dir = vocab_cache_dir)
 
-    print('f{continue_num_merges} BPE ends')
+    print(f'{continue_num_merges} BPE ends')
     return tok_fpath, vocab_cache_dir

@@ -7,7 +7,7 @@
 * invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
 
 ## src:
-* core:
+* core:  
     * base: 
         * compute:&nbsp;&nbsp;performance & tools & hardware-sensitive  
         * functions:&nbsp;&nbsp;fundamental functions  
@@ -17,8 +17,12 @@
         * root_layers:&nbsp;&nbsp;nn layers  
         * sub_modules:&nbsp;&nbsp;customized module blocks/bulks for projs
     * utils:&nbsp;&nbsp;data & algo & preprocess  
+* lib:  
+    * share: &nbsp;&nbsp;shared cpp headers & files  
+    * tokenizer:  &nbsp;&nbsp;cpp & cython files to boost tokenizer  
+* bin:  &nbsp;&nbsp;binary .so files built from lib
 * projs:  
-&nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:
+&nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:  
     * function
     * dataset
     * network
@@ -29,7 +33,11 @@
     * loss
     * configs
     * _jobs
-
+* apps:  
+&nbsp;&nbsp;&nbsp;&nbsp;a complete application needs to implement followings:  
+    * functions
+    * configs
+    * _jobs
 
 ## Work Note:
 
@@ -44,75 +52,40 @@ also recommend to have:
 * `tmp`: -- temporary results to be deleted safely
 * `cache`: -- to save files may be saved or not
 
+set env:
+* `PYTHONPATH`: -- add absolute path of `{path}/{to}/aiml/src/bin`, e.g.
+`source env.sh` where `env.sh` like following:
+```
+cd ./aiml
+export PYTHONPATH=$(pwd)/src/bin:$PYTHONPATH
+```
+
 ---
-    artifact
-    ├── app1
-    cache
-    ├── proj2
-    model
-    ├── proj3
-    logs
-    ├── proj1
-    ├── app1
-    tmp
-    ├── proj1
-    ├── app1
-    tool
-    ├── database
-    ├── hf_download.py
     aiml
     ├── src
+    │   ├── bin
     │   ├── core
     │   │   ├── base
-    │   │   │   ├── functions
-    │   │   │   │   ├── mask.py
-    │   │   │   │   └── patch_operation.py
-    │   │   │   └── compute
-    │   │   │       ├── evaluate_tools.py
-    │   │   │       ├── predict_tools.py
-    │   │   │       ├── sampling_tools.py
-    │   │   │       ├── train_tools.py
-    │   │   │       └── visualize_tools.py
+    │   │   │   ├── compute
+    │   │   │   └── functions
+    │   │   ├── design
     │   │   ├── loss
-    │   │   │   ├── bp_ranking_loss.py
-    │   │   │   ├── l2penalty_mse_loss.py
-    │   │   │   └── mask_ce_loss.py
     │   │   ├── nn_components
     │   │   │   ├── meta_frames
-    │   │   │   │   ├── __init__.py
-    │   │   │   │   └── architectures.py
     │   │   │   ├── root_layers
-    │   │   │   │   ├── add_layer_norm.py
-    │   │   │   │   ├── attention_pools.py
-    │   │   │   │   ├── mc_feat_emb.py
-    │   │   │   │   ├── patchify.py
-    │   │   │   │   └── positional_encodings.py
-    │   │   │   └── modules
-    │   │   │       ├── _recsys.py
-    │   │   │       ├── _transformer.py
-    │   │   │       └── _vit.py
+    │   │   │   └── submodules
     │   │   └── utils
     │   │       ├── common
-    │   │       │   └── seq_operation.py
     │   │       ├── data
-    │   │       │   ├── data_assemble.py
-    │   │       │   ├── data_split.py
-    │   │       │   └── data_transform.py
     │   │       ├── file
-    │   │       │   └── text_split.py
     │   │       ├── image
-    │   │       │   ├── display.py
-    │   │       │   └── mnist.py
     │   │       ├── system
-    │   │       │   ├── math.py
-    │   │       │   └── statistics.py
     │   │       └── text
-    │   │           ├── glossary.py
-    │   │           ├── string_segment.py
-    │   │           ├── text_preprocess.py
-    │   │           ├── tokenizer.py
-    │   │           └── vocabulize.py
+    │   ├── lib
+    │   │   ├── share
+    │   │   └── tokenizer
     │   ├── apps
+    │   │   ├── bpe_build
     │   │   ├── semantic_segmentation
     │   │   └── sentiment_analysis
     │   └── projs
@@ -122,10 +95,21 @@ also recommend to have:
     │       └── vit
     ├── tests
     ├── notebooks
-    │   ├── speedup.ipynb
-    │   └── tokenizer.ipynb
     ├── README.md
     ├── learn.py
     ├── main.py
-    └── test.py
+    ├── test.py
+    artifact
+    ├── app
+    cache
+    ├── proj
+    model
+    ├── proj
+    logs
+    ├── app
+    tmp
+    ├── proj
+    tool
+    ├── database
+    └── hf_download.py
 ---
