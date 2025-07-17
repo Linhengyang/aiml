@@ -174,6 +174,11 @@ def encode_to_ints(s:str, encoding='utf-8') -> t.List[int]:
 
 
 class baseBBPETokenizer(Tokenizer):
+    '''
+    merge_ranks 是 dict of [token_L, token_R] ---> merged_token
+    其中 merged_token 是从 256 开始编号, 即 rank + 256, rank = 0, ..., num_merges-1
+    故 rank(等同 merge_rank)是0开始的、merged_token 相对 256 的偏移量
+    '''
     def __init__(
             self,
             name: str,
@@ -204,21 +209,23 @@ class baseBBPETokenizer(Tokenizer):
             # 可以直接 注册 special_tokens，因为已经有 merge_ranks，无需 BPE train
             self._register_special_tokens()
 
-            # 总的 vocab_size, 即 explicit_n_vocab 也随之 确定。不过若输入了 explicit_n_vocab，检查是否和 merge+special 匹配
+            # 总的 vocab_size, 即 explicit_n_vocab 也随之 确定。若输入了 explicit_n_vocab，检查是否和 merge+special 匹配
             if explicit_n_vocab:
-                assert explicit_n_vocab == 256 + len(merge_ranks) + len(special_marks) # 总 vocab size 应该等于 256 + merge tokens size + n_special_tokens
+                # 总 vocab size 应该等于 256 + merge tokens size + n_special_tokens
+                assert explicit_n_vocab == 256 + len(merge_ranks) + len(special_marks)
+
             self.explicit_n_vocab = 256 + len(merge_ranks) + len(special_marks)
 
         else: # 如果 没有输入非空的 merge_ranks
-            # 那么需要 run BPE train process to build merges_ranks forrest. corpus text 将随后输入，但在这里可以 确定 number of merges
-            if isinstance(explicit_n_vocab, int): # 如果输入了 explicit_n_vocab
+            # 那么需要 run BPE train process to build merges_ranks forrest. corpus text 将随后输入
+            # 如果输入了 explicit_n_vocab, 只要 valid, 那么总 explicit_n_vocab将在这里确定
+            if isinstance(explicit_n_vocab, int):
                 assert explicit_n_vocab >= 256 + len(special_marks), \
-                    f'pretrained merge_ranks forrest empty.\n' + 'input explicit_n_vocab (shall be at least greater ' + \
+                    f'pretrained merge_ranks forrest empty.\ninput explicit_n_vocab (shall be at least greater ' + \
                     f'than 256+{len(special_marks)}(num_special_marks)={256+len(special_marks)}.\n' + \
                     f'e.g, GPT2 tokenizer has explicit_n_vocab as 50257, with 1 special marks and 50000 merges.'
                 
-                # 需要执行 merge 的次数。但不一定能执行到，因为可能存在 run out of corpus 的情况（即所有 corpus 被merge到一起了）。此时 raise error
-                self._num_merges = explicit_n_vocab - 256 - len(special_marks)
+                self.explicit_n_vocab = explicit_n_vocab
 
 
 
@@ -228,6 +235,7 @@ class baseBBPETokenizer(Tokenizer):
         self._vocab = {i: bytes([i]) for i in range(256)} # initialize 0 - 255 --> bytes
         for (L_int, R_int), merged_int in self._merge_ranks.items():
             self._vocab[merged_int] = self._vocab[L_int] + self._vocab[R_int] # two bytes concatenate
+
 
 
     def _register_special_tokens(self):
@@ -256,25 +264,36 @@ class baseBBPETokenizer(Tokenizer):
         self.inverse_special_tokens = {v: k for k, v in self.special_tokens.items()} # special token id --> special mark str
 
 
+
     def _prepare_train(self, num_merges:int|None = None, *args, **kwargs):
-        # if _num_merges not set, must input num_merges here
-        if not hasattr(self, '_num_merges'):
+        '''
+        num_merges 是希望 tokenizer 最后达到的 merge_ranks 的大小. 它与 explicit_n_vocab(如果有)的关系是:
+        explicit_n_vocab = 256 + num_merges + num_special_marks. 如果冲突, 以 explicit_n_vocab 为准
+
+        真正在这里为训练轮次准备的 变量是 num_train_epochs
+        '''
+        # if explicit_n_vocab not exist, must input num_merges here
+        if not hasattr(self, 'explicit_n_vocab'):
             assert isinstance(num_merges, int) and num_merges >= 0, f'num merges not set. must input num_merges >= 0.'
             self._num_merges = num_merges
-        # if _num_merges already set, but not equal to num_merges
-        elif isinstance(num_merges, int) and self._num_merges != num_merges:
+        # if explicit_n_vocab already set, and num_merges input here. warning if not match
+        elif isinstance(num_merges, int) and self.explicit_n_vocab - 256 - len(self._special_marks) != num_merges:
             # warning. used pre-set _num_merges
             import warnings
             warnings.warn(
                 f'input `num_merges`{num_merges} is not consistent with `explicit_n_vocab` from initialization.\n'
-                f'merge times derived from `explicit_n_vocab` shall be `explicit_n_vocab`-num_specials-256 = {self._num_merges}.\n'
+                f'merge times derived from `explicit_n_vocab` shall be `explicit_n_vocab`-num_specials-256 = '
+                f'{self.explicit_n_vocab-256-len(self._special_marks)}.\n'
                 f'ignore `num_merges`, use `explicit_n_vocab` to run BPE.')
-        # if _num_merges already set, and equal to num_merges or num_merges is None
+            self._num_merges = self.explicit_n_vocab-256-len(self._special_marks)
+        # if explicit_n_vocab already set, and match with num_merges or num_merges is None
         else:
-            pass
+            self._num_merges = self.explicit_n_vocab-256-len(self._special_marks)
         
-        self._merge_ranks: dict[tuple[int, int], int] = {} # 初始化 _merge_ranks
-        self._vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
+        assert self._num_merges > len(self._merge_ranks)-256, f'current size of merge_ranks - 256 must be smaller to num_merges'
+
+        self._num_train_epochs = self._num_merges - len(self._merge_ranks)
+        
 
 
     def _update_tokenizer(self, occur_most_pair:tuple[int, int], new_token:int, occurence:int|None):
@@ -285,6 +304,25 @@ class baseBBPETokenizer(Tokenizer):
         if occurence: # occurence 不会是0
             print(f'merge process {len(self._merge_ranks)}/{self._num_merges}: {occur_most_pair} -> {new_token}'
                   f'[{self._vocab[new_token]}] had {occurence} occurences')
+
+
+
+    def _init_tokens(self, corpora:t.List[str]|str, *args, **kwargs) -> t.Generator:
+        if isinstance(corpora, str):
+            corpora = [corpora]
+        
+        corpus = ENDOFTEXT.join( corpora )
+        chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
+
+        with ThreadPoolExecutor(max_workers=8) as e:
+             yield_tokens = e.map(encode_to_ints, chunks_str) # a generator
+        
+        return yield_tokens
+
+
+    def _clear(self):
+        self._merge_ranks: dict[tuple[int, int], int] = {} # 初始化 _merge_ranks
+        self._vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
 
 
     def bpe_single_merge(self, rank:int, tokens_generator:t.Generator, verbose:bool=False):
@@ -300,7 +338,7 @@ class baseBBPETokenizer(Tokenizer):
             stored_tokens.append( tokens )
         
         if not agg_p_counts:
-            self.save(self._buffer_dir) # 在raise error前先保存已经train好的tokenizer
+            self.save(self._buffer_dir) # 在raise error前先保存已经train好的tokenizer防止前功尽弃
             raise_run_out_corpus_error(rank, len(self._special_marks))
         
         occur_most_pair: tuple[int, int] = max(agg_p_counts, key=agg_p_counts.get)
@@ -316,20 +354,16 @@ class baseBBPETokenizer(Tokenizer):
     
 
     def train_bpe(self, corpora:t.List[str]|str, num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
-        if isinstance(corpora, str):
-            corpora = [corpora]
-        
-        corpus = ENDOFTEXT.join( corpora )
+        # baseTokenizer 因为没有中间结果可以缓存, 故续训（load merge_ranks 之后再输入corpus train），是没办法校对的
+        # 所以 baseTokenizer 只能从头开始 train
+        self._clear()
         self._prepare_train(num_merges)
-        
-        chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
-
-        with ThreadPoolExecutor(max_workers=8) as e:
-             yield_tokens = e.map(encode_to_ints, chunks_str) # a generator
+        yield_tokens:t.Generator = self._init_tokens(corpora)
         
         # <merge循环有前后依赖，所以不能并行>
-        for i in range(self._num_merges):
-            # rank = i: 0, ..., _num_mergs-1
+        # <从init_merge_ranks_size续训num_train_epochs轮次, rank从init_merge_ranks_size到total_size-1>
+        for i in range(self._num_train_epochs):
+            # rank := i + init_merge_ranks_size = i + 0 = i: 0, ..., _num_mergs-1
             yield_output = self.bpe_single_merge(i, yield_tokens, verbose)
             occur_most_pair, occurence, new_token = next(yield_output) # first yield
             
@@ -337,13 +371,10 @@ class baseBBPETokenizer(Tokenizer):
             
             yield_tokens = yield_output # continue to yield tokens. update yield_tokens
 
-        # explicit_n_vocab = num_actual_merges + 256 + num_specials
-        # 循环正常结束时, i = _num_merges - 1,  num_actual_merges = _num_merges ---> n_vocab = i + 1 + 256 + num_specials
-        # 循环提前结束时, i = num_actual_merges                                 ---> n_vocab = i + 256 + num_specials
-        # 都等于最近的 new_token + 1 + num_specials, 除非极端情况下 _num_merges = 0
-        # 所以还是用最稳妥的计算方式
-        self.explicit_n_vocab = 256 + self._num_merges + len(self._special_marks)
+        # set down others
+        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
+
 
 
     def _encode_chunk(self, tokens:t.List[int]) -> t.List[int]:
@@ -810,17 +841,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         super().__init__(*args, **kwargs)
 
     
-    def text_to_tokens_pa_table(self, text):
+    @classmethod
+    def text_to_tokens_pa_table(cls, pre_split_pat, text):
         if not text.endswith(ENDOFTEXT):
             text = text + ENDOFTEXT
-        chunks_str = re.findall(self.pat_str, text) # list of tokens(string)
+        chunks_str = re.findall(pre_split_pat, text) # list of tokens(string)
         
         # list of list of integers(every list of integers as tokens)
         chunks_tokens = [encode_to_ints(chunk) for chunk in chunks_str]
         
         # 创建 pa table
-        batch_table = pa.Table.from_pydict({self.tokens_schema[0].name: chunks_tokens}, self.tokens_schema)
-
+        batch_table = pa.Table.from_pydict({cls.tokens_schema[0].name: chunks_tokens}, cls.tokens_schema)
         return batch_table
 
 
