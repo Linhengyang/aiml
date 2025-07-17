@@ -2,7 +2,7 @@ import pytest
 import os
 import shutil
 from src.core.utils.file.folder_op import clean_folder
-from src.core.utils.text.tokenizer import baseBBPETokenizer
+from src.core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer
 
 # -----------------------------------------------------------------------------
 # common test data
@@ -63,12 +63,12 @@ clean_folder(buffer, method='all')
 # tests
 
 # test encode/decode identity for a few different strings
-@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer,])
 @pytest.mark.parametrize("text", test_strings)
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab = 261) # 256 + 5, zero-merge
-    tokenizer.train_bpe('')
+    tokenizer.train_bpe(corpora='')
     ids = tokenizer.encode(text)
     decoded = tokenizer.decode(ids)
     assert text == decoded
@@ -76,7 +76,7 @@ def test_encode_decode_identity(tokenizer_factory, text):
 
 
 # test bpe basic logic
-@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer,])
 def test_wikipedia_example(tokenizer_factory):
     """
     Quick unit test, following along the Wikipedia example:
@@ -100,7 +100,7 @@ def test_wikipedia_example(tokenizer_factory):
     """
     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab=256+3+5)
     corpus = "aaabdaaabac"
-    tokenizer.train_bpe(corpus)
+    tokenizer.train_bpe(3, corpora=corpus)
     tokens = tokenizer.encode(corpus)
     assert tokens == [258, 100, 258, 97, 99]
     assert tokenizer.decode(tokens) == corpus
@@ -108,7 +108,7 @@ def test_wikipedia_example(tokenizer_factory):
 
 
 # test save/load/view
-@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer,])
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_save_load(tokenizer_factory, special_marks):
     num_specials = len(special_marks)
@@ -116,7 +116,7 @@ def test_save_load(tokenizer_factory, special_marks):
     tokenizer = tokenizer_factory(name='test1', special_marks=special_marks, buffer_dir=buffer, explicit_n_vocab=256+3+num_specials)
     # test on text "aaabdaaabac"
     corpus = "aaabdaaabac"
-    tokenizer.train_bpe(corpus)
+    tokenizer.train_bpe(corpora=corpus)
     # verify that save/load work as expected
     tokens = tokenizer.encode(corpus)
     # save the tokenizer
@@ -136,7 +136,7 @@ def test_save_load(tokenizer_factory, special_marks):
 
 
 # test save/load
-@pytest.mark.parametrize("tokenizer_factory", [baseBBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [bufferBBPETokenizer])
 @pytest.mark.parametrize("text", [llama_text, ])
 @pytest.mark.parametrize("special_marks", [  list(special_tokens.keys()) ])
 def test_complicated_text(tokenizer_factory, text, special_marks):
@@ -144,8 +144,8 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     tokenizer = tokenizer_factory(name='llama', special_marks=special_marks, buffer_dir=buffer)
     # test on llama_text & timemachine.txt, with 495 merges
     corpus = unpack(text)
-    num_merges = 495
-    tokenizer.train_bpe(corpus, num_merges=num_merges)
+    num_merges = 295
+    tokenizer.train_bpe(num_merges, corpora=corpus)
     # verify the vocab_size
     assert tokenizer.vocab_size == num_merges+num_specials+256
     # verify that save/load work as expected
@@ -155,7 +155,7 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
     tokenizer.load("temp/test_llama.tok")
     # verify that reload is good as well
-    # tokenizer.continue_bpe(200)
+    tokenizer.train_bpe(200, corpora=None)
     tokens = tokenizer.encode(text, 'all')
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
