@@ -1,44 +1,6 @@
 # Tokenizer.py
 # new version of Tokenizer inspired by GPT tokenizer(tiktokenizer)
 
-# 新版本的 Tokenizer 应该满足：
-# 1. 一站式满足 encode（original string --> indices）, decode (indices --> original string），且保证是 round-trips
-# 2. 可序列化
-# 3. 可扩展
-# 4. 高效
-# 5. 行为对齐：word with its preceding space are part of the same token，即 单空格作为原始字符串参与tokenize
-#             在 Glossary 中实现的经典 BPE 方法，实际蕴含了一个 “ 预分词 ” 步骤，即整个文本流（添加EOW后），用单空格切分，然后基于切分的结果作 BPE 进一步切分
-#             这里的 用单空格切分，就是 预分词。预分词其实否定了“LLM学习单空格”：即单空格不是需要学习的token（甚至不是需要学习的token的一部分）。
-#             它依赖于语言的空格约定。并且对 python 这样的代码文本也不友好（因为python代码里空格蕴含语义信息）。
-
-#             一, 预分词可以改进，比如英文文献可以使用 GPT2_TOKENIZER_REGEX 来 预分词。
-#             二，预分词可以彻底摒弃：现代的 Tokenizer 比如 SentencePiece，不依赖 pre-tokenize 或 语言的空格约定，它将整个文本流视作一个序列，并学习子词
-#             它将空格显示地包含在 token 中（通常作为前缀），明确地标记了单词的开始，从而简化了逆向转换过程，也能确保信息不丢失。特别适合多语言环境。
-#             在学习过程中，首先把单空格转化为一个特殊、可见的符号（U+2581），然后它与其他字符一起参与BPE学习。由于自然语言中的空格真实频率，大量自带前导空格的
-#             token 会出现在词表中，代表了新word的开始。 好处是1：文本序列（不需要eow） <--> token 序列相互 转换无损，2: 不依赖语言的空格约定，对东亚语言友好
-# 6. 训练过程: 字节级 byte-level BPE 以解决 out-of-vocabulary 问题。BBPE 把所有 原始字符串 转换成 字节序列，然后从 UTF-8 字节序列（而不是 unicoode字符序列）
-#             初始开始。意味着 初始 词汇表是 256 个 可能的字节，然后 迭代地合并出现最频繁的字节对。
-#             Byte-BPE 和 Char-BPE 的 merge 过程是相同的。
-#             Char-BPE 的缺点在于 OOV 问题 和 无损 round-trips 无法同时保证。Char-BPE 的最原子字符集是 train corpus 的原子字符集，但是若在推理tokenize时
-#             遇到了不在 train corpus 原子字符集 中的 character，就会把它以及它后面chunk 部分映射到 UNK token。然而 UNK token 导致了 encode-decode 不是
-#             round-trips（不是无损编解码）。
-#             Byte-BPE 不会有 类似的问题，因为无论是否 出现在 train corpus 中的字符，都是 unicode 字符，由utf-8字节组成，其 encode-decode 是 round-trips。
-
-#             当然 Byte-BPE 会引入独属于它自己的问题，即跨字符分割可能出错（英文是单字节的，不存在跨字符分割；欧洲和中日韩文是2-3字节的，可能会在encode时，
-#             把属于同一个字符的字节，分割到了不同token里。这样会使得 流式decode 时出现 UnicodeDecodeError：比如 某个 token(此时它是字节序列)要么多了个字节，
-#             要么少了字节。所以 Byte-BPE 的 解码器要特别编写。
-#             Char-BPE 的 流式解码器可以即时输出，比如拿到一个 token 就马上打印（因为此时它是字符序列）
-#             但是 Byte-BPE 的流式解码器需要一个 queue 来 buffer 输出，生成的 tokens 不断进入 queue。流式解码器从 queue 的头部开始，依次尝试解码 1 2 3 4字节
-#             以生成字符，若成功生成字符，则消耗对应字节；若生成失败，则停止输出等待下一个token进入。全部生成结束后，对 queue 中剩余字节作最后尝试。
-#             不过 非流式解码器（生成全部token之后，再一次性输出）不存在这个问题。比如 经典 transformer 中的 beam search，需要对 生成 sequence 的长度奖惩，
-#             所以需要生成 num_steps 步后，再一起输出。这种情况下跨字符tokenize的问题会比较轻。 
-
-# 7. 推理过程：按照merge的顺序，多次遍历tokens(原始bytes状态)到各种merged tokens，直到无可merge
-
-
-# 一个合适的 tokenizer：合适的压缩率，使得 string tokenized 之后的 token 数量少，这样 attention 机制能尽量抓住序列信息（attention 对序列长度的消耗是L^2）
-# 尽量少的 token 数量，要求 vocab_size 尽量大。但过大的 vocab_size 将使得 next token prediction 的softmax 机制不准确。
-
 from abc import ABC
 import typing as t
 
@@ -259,6 +221,7 @@ class baseBBPETokenizer(Tokenizer):
                 self._num_merges = explicit_n_vocab - 256 - len(special_marks)
 
 
+
     def _build_vocab(self):
         # vocab: token_ID --> bytes
         assert hasattr(self, "_merge_ranks")
@@ -294,16 +257,21 @@ class baseBBPETokenizer(Tokenizer):
 
 
     def _prepare_train(self, num_merges:int|None = None, *args, **kwargs):
-        if not hasattr(self, '_num_merges'): # if _num_merges not set, must input num_merges here
+        # if _num_merges not set, must input num_merges here
+        if not hasattr(self, '_num_merges'):
             assert isinstance(num_merges, int) and num_merges >= 0, f'num merges not set. must input num_merges >= 0.'
             self._num_merges = num_merges
-        elif isinstance(num_merges, int) and self._num_merges != num_merges: # if _num_merges already set, but not equal to num_merges
+        # if _num_merges already set, but not equal to num_merges
+        elif isinstance(num_merges, int) and self._num_merges != num_merges:
             # warning. used pre-set _num_merges
             import warnings
             warnings.warn(
                 f'input `num_merges`{num_merges} is not consistent with `explicit_n_vocab` from initialization.\n'
                 f'merge times derived from `explicit_n_vocab` shall be `explicit_n_vocab`-num_specials-256 = {self._num_merges}.\n'
                 f'ignore `num_merges`, use `explicit_n_vocab` to run BPE.')
+        # if _num_merges already set, and equal to num_merges or num_merges is None
+        else:
+            pass
         
         self._merge_ranks: dict[tuple[int, int], int] = {} # 初始化 _merge_ranks
         self._vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
@@ -969,15 +937,15 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     def _get_p_counts_pq(self, tokens_pq):
 
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-        part_p_counts:t.Dict[tuple[int, int], int] = {}
+        file_p_counts:t.Dict[tuple[int, int], int] = {} # parquet file 的 pari-counts
 
         for batch in yield_tokens: # 遍历读取当前 tokens_pq
             chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
             for tokens in chunks_tokens:
-                get_pair_counts(tokens, part_p_counts)
+                get_pair_counts(tokens, file_p_counts)
         
-        # buffer the part_p_counts. 虽然可以用 build_pa_table 直接用行数据创建, 但列数据的效率高很多
-        datapoints = [ (l, r, count) for (l, r), count in part_p_counts.items() ]
+        # buffer the file_p_counts. 虽然可以用 build_pa_table 直接用行数据创建, 但列数据的效率高很多
+        datapoints = [ (l, r, count) for (l, r), count in file_p_counts.items() ]
         if datapoints:
             L_tokens, R_tokens, counts = zip(*datapoints)
         else:
@@ -987,16 +955,16 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             self.p_counts_schema[1].name: list(R_tokens), # R: R_tokens
             self.p_counts_schema[2].name: list(counts), # counts: counts
             }
-        del part_p_counts # 节省内存
+        del file_p_counts # 节省内存
         
         rank, token_fname = tokens_pq.split('/')[-2:] # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
         os.makedirs( os.path.join(self._buffer_pcounts_dir, rank), exist_ok=True) # 创建 本次 rank 的 buffer_pcounts_dir
-        part_p_counts_pq = os.path.join(self._buffer_pcounts_dir, rank, token_fname)
+        file_p_counts_pq = os.path.join(self._buffer_pcounts_dir, rank, token_fname)
 
-        with pq.ParquetWriter(part_p_counts_pq, self.p_counts_schema) as writer:
+        with pq.ParquetWriter(file_p_counts_pq, self.p_counts_schema) as writer:
             writer.write_table( pa.Table.from_pydict(data, self.p_counts_schema) )
         
-        return part_p_counts_pq
+        return file_p_counts_pq
     
 
     def _aggregate_p_counts(self, part_pcounts_pqs):
@@ -1112,7 +1080,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         rank = len(self._merge_ranks)
         # tokens_pqs 所在的 dir_name N 代表这些 tokens_pq 经过了 N 次 merge
         assert all([rank == int(Path(f).parent.name) for f in tokens_pqs])
-        print(f'merge epoch {rank}')
+        print(f'merge rank {rank}(epoch {rank+1})')
 
         # compute pair_counts for every tokens parquet into p_counts parquet, and collect them
         print(f'collecting partial pair-counts')
