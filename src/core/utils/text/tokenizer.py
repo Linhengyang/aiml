@@ -1207,8 +1207,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 # update tokenizer: len(self._merge_rank) += 1
                 self._update_tokenizer(occur_most_pair, new_token, occurence)
 
-                # rank = i = len(self._merge_rank) - 1
-                if rank == self._num_merges - 1:
+                # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
+                if rank == end - 1:
                     break
 
                 tokens_dir = self._next_tokens_dir(tokens_dir, occur_most_pair, new_token)
