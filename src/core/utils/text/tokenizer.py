@@ -1167,7 +1167,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     def train_bpe(self,
-                  num_merges:int|None = None,
+                  num_merges:int|None = None, # global num merges fir the tokenizer
                   *,
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
