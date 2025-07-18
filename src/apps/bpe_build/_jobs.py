@@ -92,5 +92,6 @@ def bpe_continue():
     # save tokenizer
     tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}_new.tok')
     tok.save(tok_fpath)
-    
+    # view vocab
+    tok.view(tmpsave_dir = vocab_cache_dir)
     print('BPE ends')

@@ -71,7 +71,7 @@ return_bundle c_merge_pair_batch(
 void init_memory_pool(size_t block_size, size_t alignment) {
     memory_pool::get_mempool(block_size, alignment);
     const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
-    std::cout << "global memory pool with " << block_size/BYTES_IN_GB << " initialized" << std::endl;
+    std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
 }
 
 
