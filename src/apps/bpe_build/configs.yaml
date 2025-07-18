@@ -24,6 +24,8 @@ app_name: 'bpe_build' # /logs /model /tmp /cache 的项目目录
 train_pq: '../../data/TinyStories/raw/train.parquet'
 valid_pq: '../../data/TinyStories/raw/validation.parquet'
 
+backup_init_dir: '../../data/TinyStories/bytes'
+
 
 
 

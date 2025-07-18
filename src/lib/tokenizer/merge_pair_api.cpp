@@ -70,7 +70,8 @@ return_bundle c_merge_pair_batch(
 // 创建内存池（全局单例）
 void init_memory_pool(size_t block_size, size_t alignment) {
     memory_pool::get_mempool(block_size, alignment);
-    std::cout << "global memory pool with initialized" << std::endl;
+    const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
+    std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
 }
 
 
