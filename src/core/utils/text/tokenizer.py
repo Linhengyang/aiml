@@ -916,7 +916,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         # 如果输入了 extra_save_dir 且 extra_save_dir 不为空, 就从 extra_save_dir 拷贝到 _buffer_dir/tokens/0
         if extra_save_dir and os.listdir(extra_save_dir):
-            if len(os.listdir(extra_save_dir) == len(corpora)):
+            if len(os.listdir(extra_save_dir)) == len(corpora):
                 import shutil
                 shutil.copytree(extra_save_dir, tokens_dir_0, dirs_exist_ok=True)
                 return
@@ -990,29 +990,30 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # 由于 bufferTokenizer 存在一个续train的概念, 要检查 _buffer_dir_tokens 和 merge_ranks 的状态
         # 对于 merge_ranks size = 0：buffer_dir_tokens/0 不为空，即可开始训练
         if len(self._merge_ranks) == 0:
-            tokens_dir = os.path.join(self._buffer_tokens_dir, '0')
-            assert os.listdir(tokens_dir)
+            tokens_dir_0 = os.path.join(self._buffer_tokens_dir, '0')
+            assert os.listdir(tokens_dir_0)
 
-            return tokens_dir
+            return tokens_dir_0
         
         # 对于 merge_ranks size = s > 0：训练 next token, 即 merge_ranks s+1 的素材是 buffer_dir_tokens/s
 
         latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
-        latest_tokens_dir = os.path.join(self._buffer_tokens_dir, f'{latest}')
+        tokens_dir_latest = os.path.join(self._buffer_tokens_dir, f'{latest}')
 
         if latest == len(self._merge_ranks):
-            return latest_tokens_dir
+            return tokens_dir_latest
         
         elif latest + 1 == len(self._merge_ranks): # merge_ranks 不会是空
             # 取出 merge_ranks 的最后一对
             to_merge_pair, new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
 
-            return self._next_tokens_dir(latest_tokens_dir, to_merge_pair, new_token)
+            return self._next_tokens_dir(tokens_dir_latest, to_merge_pair, new_token)
         
         else:
             raise RuntimeError(
-                f'current merge_ranks size {len(self._merge_ranks)} not match with buffer_tokens_dir '
-                f"{self._buffer_tokens_dir}'s buffer status.")
+                f"current merge_ranks size {len(self._merge_ranks)} not match with buffer_tokens_dir "
+                f"{self._buffer_tokens_dir}'s latest buffer tokens {tokens_dir_latest}, merge_ranks "
+                f"size shall be equal to latest dir, or latest dir + 1")
 
 
     def _get_p_counts_pq(self, tokens_pq) -> str:
@@ -1126,7 +1127,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
     def _next_tokens_dir(
             self,
-            tokens_dir:str,
+            tokens_dir_this:str,
             occur_most_pair:t.Tuple,
             new_token:int,
             ) -> str:
@@ -1134,22 +1135,22 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # 并更新了 tokenizer._merge_rank，使得其 + 1。所以 cur_dir_for_tokens_pq = len(_merge_rank) - 1
         # next_dir_for_tokens_pq = cur_dir_for_tokens_pq + 1 = len(cur_merge_rank)
         next_rank = len(self._merge_ranks)
-        assert next_rank == int( os.path.basename(tokens_dir) ) + 1
+        assert next_rank == int( os.path.basename(tokens_dir_this) ) + 1
         
-        next_tokens_dir = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
-        os.makedirs( next_tokens_dir, exist_ok=True)
+        tokens_dir_next = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
+        os.makedirs( tokens_dir_next, exist_ok=True)
 
-        for f in os.listdir(tokens_dir):
+        for f in os.listdir(tokens_dir_this):
 
-            tokens_pq = os.path.join(tokens_dir, f)
+            tokens_pq = os.path.join(tokens_dir_this, f)
             self._merge_tokens_save(
-                save_dir = next_tokens_dir,
+                save_dir = tokens_dir_next,
                 to_merge_pair = occur_most_pair, 
                 new_token = new_token,
                 tokens_pq = tokens_pq,
                 )
         
-        return next_tokens_dir # update tokens_dir
+        return tokens_dir_next # update
 
 
 
@@ -1191,9 +1192,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   *,
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
-                  buffer_size:int = 4194304*128, # max num of tokens-chunks in memory
-                  keep_window:int = 10, # max reserved tokens_pq file in disk
-                  extra_save_dir_corpus_bytes:str|None = None, # extra save the init tokens files of corpus
+                  backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
+                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommen to 0.5GB
+                  keep_window:int = 1, # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
         
@@ -1205,33 +1206,36 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         self._set_buffer_env(buffer_size)
 
         # corpora 为 t.List[str], 模式是 从头train
+        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
+        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
         if corpora is not None:
             self._clear()
-            self._init_tokens(corpora, colnames, extra_save_dir_corpus_bytes)
-        # corpora 为 None 时, 模式是 续train. 续train需要满足的条件会由 _prepair_train 检查或满足
+            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
+        # corpora 为 None 时, 模式是 续train
+        # 续train需要满足的条件会由 _prepair_train 检查或满足
         else:
             pass
 
         # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
-        # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点
-        tokens_dir = self._prepare_train(num_merges)
+        # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
+        tokens_dir_start = self._prepare_train(num_merges)
         
         start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
 
+        tokens_dir_this = tokens_dir_start
         for rank in range(start, end):
-
             try:
-                occur_most_pair, max_occurence = self._get_merge_info(tokens_dir)
+                top_pair, max_occurence = self._get_merge_info(tokens_dir_this)
                 new_token, occurence = rank + 256, max_occurence if verbose else None
 
                 # update tokenizer: len(self._merge_rank) += 1
-                self._update_tokenizer(occur_most_pair, new_token, occurence)
+                self._update_tokenizer(top_pair, new_token, occurence)
 
                 # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
                 if rank == end - 1:
                     break
 
-                tokens_dir = self._next_tokens_dir(tokens_dir, occur_most_pair, new_token)
+                tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token)
                 
             finally:
                 # keep the init and `keep_window` tokens/p_counts parquet file
@@ -1260,7 +1264,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
 class boostBBPETokenizer(bufferBBPETokenizer):
-
+    '''
+    save_dir
+    '''
     def _merge_tokens_save(
             self,
             save_dir,
@@ -1283,8 +1289,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
             import merge_pair as merge_pair
 
-            # 测算设定 block_size = 40 * batch_size, 就使得最大块的内存需求落在同一个 block
-            # 根据本机64GB内存，反推最佳 batch_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
+            # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
+            # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
             merge_pair.allocate_memory(40*self._buffer_size)
 
             for batch in yield_tokens:
