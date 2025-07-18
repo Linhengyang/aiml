@@ -876,22 +876,27 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
 
-    def _init_tokens(self, corpora, text_colnames, tokens_extra_save_dir:str|None):
+    def _init_tokens(self, corpora:str|t.List[str], text_colnames:t.List[None|str], extra_save_dir:str|None):
         '''
+        如果 extra_save_dir 是path str, 且目录不为空, 那么copy extra_save_dir里的文件到 _buffer_dir/tokens/0
+        如果 extra_save_dir 是None,
+        生成 _buffer_dir/tokens/0 目录, 并在其中生成 corpora 的 byte-tokens .pq文件们
+
         corpora: list of string or parquet files
         text_colnames: corresponding column names for parquet files. None for string
-        e.g.,
-        corpora: ['aaabbc', '../data/raw/train.pq', '../data/raw/valid.pq']
-        text_colnames: [None, 'text', 'text']
-        step1: save string corpus as .pq file with column 'text' under _buffer_dir
-        step2: byte-level tokenize all parquet corpus files into .pq files with column 'tokens'
-               under _buffer_dir/tokens/0 & tokens_extra_save_dir(if any)
-
-        the resulting _buffer_dir/tokens/0 & tokens_extra_save_dir(if any) would be like as:
+            e.g.,
+            corpora: ['aaabbc', '../data/raw/train.pq', '../data/raw/valid.pq']
+            text_colnames: [None, 'text', 'text']
+        
+        the resulting _buffer_dir/tokens/0 & extra_save_dir(if any) would be like as:
         [   /buffer_dir/tokens/0/{name1}.pq
             /buffer_dir/tokens/0/{name2}.pq
                       ...
             /buffer_dir/tokens/0/{name_}.pq   ]
+
+        step1: save string corpus as .pq file with column 'text' under _buffer_dir
+        step2: byte-level tokenize all parquet corpus files into .pq files with column 'tokens'
+               under _buffer_dir/tokens/0 & extra_save_dir(if any)
 
         .pq file generating:
         从 corpus 中读取 batch of text, join/split 成 chunks 之后, 把每个 chunk encode 成 tokens(list of integers)
@@ -904,8 +909,24 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             列名: tokens
             column type: list_of_ints_type, which is pa.list_(pa.field('token', pa.int32()))
         '''
+        # create and clean starting directory: _buffer_dir/tokens/0
+        tokens_dir_0 = os.path.join(self._buffer_tokens_dir, '0')
+        os.makedirs( tokens_dir_0, exist_ok=True)
+        clean_folder( tokens_dir_0 )
+
+        # 如果输入了 extra_save_dir 且 extra_save_dir 不为空, 就从 extra_save_dir 拷贝到 _buffer_dir/tokens/0
+        if extra_save_dir and os.listdir(extra_save_dir):
+            if len(os.listdir(extra_save_dir) == len(corpora)):
+                import shutil
+                shutil.copytree(extra_save_dir, tokens_dir_0, dirs_exist_ok=True)
+                return
+            else:
+                raise ValueError(
+                    f'extra_save_dir {extra_save_dir} conflicts with {len(corpora)} corpora'
+                    )
+
+        # 如果没有输入 extra_save_dir 亦或 extra_save_dir 为空. 从 corpora 生产 init tokens pq files
         assert len(corpora) == len(text_colnames), f"length of corpora must match with length of columns"
-        # collecting .pq files & colnames. if not .pq files, create
         corpus_col_pair = []
         for i, corpus in enumerate(corpora):
             if not corpus.endswith('.parquet'):
@@ -923,9 +944,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 raise FileNotFoundError(
                     f'corpus parquet file {corpus} column for text {text_colnames[i]} not exiting')
 
-        # create and clean starting directory: _buffer_dir/tokens/0
-        os.makedirs( os.path.join(self._buffer_tokens_dir, '0'), exist_ok=True)
-        clean_folder( os.path.join(self._buffer_tokens_dir, '0') )
         # create corresponding tokens .pq files
         init_tokens_pqs = []
         for corpus_pq, _ in corpus_col_pair:
@@ -951,19 +969,23 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # clean corpus parquet file from string input
         clean_folder(self._buffer_dir, method='only_file')
 
-        if tokens_extra_save_dir and os.path.isdir(tokens_extra_save_dir):
+        # copy init_tokens file to extra_save_dir if it is an empty dir
+        if extra_save_dir and os.path.isdir(extra_save_dir) and os.listdir(extra_save_dir) == []:
             import shutil
-            shutil.copytree(os.path.join(self._buffer_tokens_dir, '0'), tokens_extra_save_dir, dirs_exist_ok=True)
+            shutil.copytree(tokens_dir_0, extra_save_dir, dirs_exist_ok=True)
 
 
 
-    def _prepare_train(self, num_merges, engine, *args, **kwargs) -> str:
+    def _prepare_train(self, num_merges, *args, **kwargs) -> str:
         '''
         检查是否满足训练条件, 返回与当前_merge_ranks匹配的 本次训练的开始点 _buffer_tokens_dir/?
         对于 size = S 的 _merge_ranks 来说, 匹配的本次训练开始点是 _buffer_tokens_dir/S
         '''
         # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突. 确定 num_train_epochs
         super()._prepare_train(num_merges)
+
+        # 确保 _buffer_tokens_dir 不为空, 在里面选取一个作为 训练起始点
+        assert os.listdir(self._buffer_tokens_dir), f'empty buffer dir for tokens {self._buffer_tokens_dir}'
 
         # 由于 bufferTokenizer 存在一个续train的概念, 要检查 _buffer_dir_tokens 和 merge_ranks 的状态
         # 对于 merge_ranks size = 0：buffer_dir_tokens/0 不为空，即可开始训练
@@ -981,11 +1003,11 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         if latest == len(self._merge_ranks):
             return latest_tokens_dir
         
-        elif latest + 1 == len(self._merge_ranks):
+        elif latest + 1 == len(self._merge_ranks): # merge_ranks 不会是空
             # 取出 merge_ranks 的最后一对
             to_merge_pair, new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
 
-            return self._next_tokens_dir(latest_tokens_dir, to_merge_pair, new_token, engine)
+            return self._next_tokens_dir(latest_tokens_dir, to_merge_pair, new_token)
         
         else:
             raise RuntimeError(
@@ -1059,7 +1081,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             to_merge_pair,
             new_token,
             tokens_pq,
-            optimize:t.Literal['twoloop', 'parallel', 'mem_contiguous', 'cspeed']
+            optimize:t.Literal['twoloop', 'parallel', 'mem_contiguous'] = 'mem_contiguous'
             ):
         '''
         given tokens parquet file `tokens_pq`,
@@ -1107,7 +1129,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             tokens_dir:str,
             occur_most_pair:t.Tuple,
             new_token:int,
-            optimize:t.Literal['twoloop', 'parallel', 'mem_contiguous'] = 'parallel'
             ) -> str:
         # 在计算获得 tokens parquet for next merge_rank 时, 当前 tokens_pq 已经提炼出了 merge_info
         # 并更新了 tokenizer._merge_rank，使得其 + 1。所以 cur_dir_for_tokens_pq = len(_merge_rank) - 1
@@ -1124,9 +1145,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             self._merge_tokens_save(
                 save_dir = next_tokens_dir,
                 to_merge_pair = occur_most_pair, 
-                new_token = new_token, 
+                new_token = new_token,
                 tokens_pq = tokens_pq,
-                optimize = optimize
                 )
         
         return next_tokens_dir # update tokens_dir
@@ -1174,7 +1194,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   buffer_size:int = 4194304*128, # max num of tokens-chunks in memory
                   keep_window:int = 10, # max reserved tokens_pq file in disk
                   extra_save_dir_corpus_bytes:str|None = None, # extra save the init tokens files of corpus
-                  engine:t.Literal["py", "c"] = "c", # default backend train engine is c
                   verbose:bool = False
                   ):
         
@@ -1189,12 +1208,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         if corpora is not None:
             self._clear()
             self._init_tokens(corpora, colnames, extra_save_dir_corpus_bytes)
-        
-        # corpora 为 None 时, 模式是 续train
+        # corpora 为 None 时, 模式是 续train. 续train需要满足的条件会由 _prepair_train 检查或满足
+        else:
+            pass
 
         # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
-        # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回训练起点
-        tokens_dir = self._prepare_train(num_merges, engine)
+        # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点
+        tokens_dir = self._prepare_train(num_merges)
         
         start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
 
