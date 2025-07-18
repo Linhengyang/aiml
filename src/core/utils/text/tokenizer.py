@@ -845,7 +845,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    
+
     @classmethod
     def text_to_tokens_pa_table(cls, pre_split_pat, text):
         if not text.endswith(ENDOFTEXT):
@@ -860,7 +860,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return batch_table
 
 
-    def _set_buffer_env(self, buffer_size):
+    def _set_config(self, buffer_size, fc_merge_pair_batch:t.Callable):
 
         os.makedirs(self._buffer_dir, exist_ok=True)
         
@@ -872,8 +872,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         self._buffer_tokens_dir = buffer_tokens_dir
         self._buffer_pcounts_dir = buffer_pcounts_dir
-        self._buffer_size = buffer_size
 
+        self._buffer_size = buffer_size
+        self._func_merge_pair_batch = fc_merge_pair_batch
 
 
     def _init_tokens(self, corpora:str|t.List[str], text_colnames:t.List[None|str], extra_save_dir:str|None):
@@ -973,7 +974,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         if extra_save_dir and os.path.isdir(extra_save_dir) and os.listdir(extra_save_dir) == []:
             import shutil
             shutil.copytree(tokens_dir_0, extra_save_dir, dirs_exist_ok=True)
-
 
 
     def _prepare_train(self, num_merges, *args, **kwargs) -> str:
@@ -1076,13 +1076,15 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return occur_most_pair, max_occur
 
     
+    @classmethod
     def _merge_tokens_save(
-            self,
+            cls,
             save_dir,
             to_merge_pair,
             new_token,
             tokens_pq,
-            optimize:t.Literal['twoloop', 'parallel', 'mem_contiguous'] = 'mem_contiguous'
+            fc_merge_pair_batch:t.Callable,
+            buffer_size,
             ):
         '''
         given tokens parquet file `tokens_pq`,
@@ -1090,46 +1092,37 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         then save result tokens chunks into a same-file-name parquet file to `save_dir`
         '''
         # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 occur_most_pair, 缓存 merged tokens parquet file
-        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
 
         # merged result 也是下一个 merge rank 要读取的 parquet
         merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
         
-        with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
+        with pq.ParquetWriter(merged_tokens_pq, cls.tokens_schema) as writer:
             for batch in yield_tokens:
                 # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
-                tokens_flat = batch[self.tokens_schema[0].name].values.to_numpy().data
+                tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy().data
                 # tokens_schema: list dtype pa.int64array --> offsets: int64
-                offsets = batch[self.tokens_schema[0].name].offsets.to_numpy().data
+                offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy().data
                 L, R = map(np.int32, to_merge_pair)
                 new_token = np.int32(new_token)
-                if optimize == 'parallel':
-                    merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_parallel(
-                        tokens_flat, offsets, L, R, new_token)
-                elif optimize == 'mem_contiguous':
-                    merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_memcontiguous(
-                        tokens_flat, offsets, L, R, new_token)
-                elif optimize == 'twoloop':
-                    merged_batch_tokens_flat, merged_batch_offsets = merge_pair_batch_twoloop(
-                        tokens_flat, offsets, L, R, new_token)
-                else:
-                    chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
-                    merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
-                    new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
-                    writer.write_batch( new_batch )
-                    return
+                merged_batch_tokens_flat, merged_batch_offsets = \
+                    fc_merge_pair_batch(tokens_flat, offsets, L, R, new_token)
                 
                 merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
-                new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
+                new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
                 writer.write_batch( new_batch )
 
+                # chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
+                # merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
+                # new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
+                # writer.write_batch( new_batch )
 
 
     def _next_tokens_dir(
             self,
             tokens_dir_this:str,
             occur_most_pair:t.Tuple,
-            new_token:int,
+            new_token:int
             ) -> str:
         # 在计算获得 tokens parquet for next merge_rank 时, 当前 tokens_pq 已经提炼出了 merge_info
         # 并更新了 tokenizer._merge_rank，使得其 + 1。所以 cur_dir_for_tokens_pq = len(_merge_rank) - 1
@@ -1141,13 +1134,15 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         os.makedirs( tokens_dir_next, exist_ok=True)
 
         for f in os.listdir(tokens_dir_this):
-
             tokens_pq = os.path.join(tokens_dir_this, f)
+
             self._merge_tokens_save(
                 save_dir = tokens_dir_next,
                 to_merge_pair = occur_most_pair, 
                 new_token = new_token,
                 tokens_pq = tokens_pq,
+                fc_merge_pair_batch = self._func_merge_pair_batch,
+                buffer_size = self._buffer_size
                 )
         
         return tokens_dir_next # update
@@ -1186,44 +1181,21 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return occur_most_pair, max_occurence
 
 
-
-    def train_bpe(self,
-                  num_merges:int|None = None, # global num merges fir the tokenizer
-                  *,
-                  corpora:t.List[str]|str|None,
-                  colnames:t.List[str|None]|None = None,
-                  backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommen to 0.5GB
-                  keep_window:int = 1, # max reserved tokens_pq file in disk
-                  verbose:bool = False
-                  ):
+    def _train_loop(self, tokens_dir_start:str, start:int, end:int, keep_window:int, verbose:bool):
+        '''
+        merge_rank 遍历 start --> end(不含) 地 BPE train 循环.
+        tokens_dir_start 是起始 tokens 文件夹, buffer_dir_tokens/tokens/start
         
-        assert keep_window >= 0
-        if isinstance(corpora, str):
-            corpora = [corpora]
-            colnames = [None]
-
-        self._set_buffer_env(buffer_size)
-
-        # corpora 为 t.List[str], 模式是 从头train
-        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
-        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
-        if corpora is not None:
-            self._clear()
-            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
-        # corpora 为 None 时, 模式是 续train
-        # 续train需要满足的条件会由 _prepair_train 检查或满足
-        else:
-            pass
-
-        # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
-        # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
-        tokens_dir_start = self._prepare_train(num_merges)
-        
-        start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
+        merge_rank 是此次merge相对第1次merge的偏移, 比如第1次merge的merge_rank=0
+        merge_rank + 256是此次merge生成的new_token. 
+        此次merge完成后, merge_ranks 的size = merge_rank of final merge + 1
+        由此, 在 train_loop 开始时, merge_rank = start, merge_ranks size = start+1
+        在 train_loop 结束时, merge_rank = end-1, merge_ranks size = end
+        '''
 
         tokens_dir_this = tokens_dir_start
         for rank in range(start, end):
+            print(f'epoch {rank} / {start} to {end-1}')
             try:
                 top_pair, max_occurence = self._get_merge_info(tokens_dir_this)
                 new_token, occurence = rank + 256, max_occurence if verbose else None
@@ -1244,6 +1216,46 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                     clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
                     clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
 
+
+
+    def train_bpe(self,
+                  num_merges:int|None = None, # global num merges fir the tokenizer
+                  *,
+                  corpora:t.List[str]|str|None,
+                  colnames:t.List[str|None]|None = None,
+                  backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
+                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommen to 0.5GB
+                  keep_window:int = 1, # max reserved tokens_pq file in disk
+                  fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
+                  verbose:bool = False
+                  ):
+        
+        assert keep_window >= 0
+        if isinstance(corpora, str):
+            corpora = [corpora]
+            colnames = [None]
+
+        self._set_config(buffer_size, fc_merge_pair_batch)
+
+        # corpora 为 t.List[str], 模式是 从头train
+        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
+        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
+        if corpora is not None:
+            self._clear()
+            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
+        # corpora 为 None 时, 模式是 续train
+        # 续train需要满足的条件会由 _prepair_train 检查或满足
+        else:
+            pass
+
+        # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
+        # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
+        tokens_dir_start = self._prepare_train(num_merges)
+        
+        start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
+
+        self._train_loop(tokens_dir_start, start, end, keep_window, verbose)
+
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
@@ -1257,62 +1269,77 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         pass
 
 
+from ..common.base_class import MemorySwitch
+    
 
 
+class memory_control:
+    def __init__(self, trigger:MemorySwitch, block_size):
+        self.trigger = trigger
+        self.block_size = block_size
+
+    def __enter__(self):
+        self.trigger.allocate_memory(self.block_size)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.trigger.release_memory()
 
 
 
 
 class boostBBPETokenizer(bufferBBPETokenizer):
-    '''
-    save_dir
-    '''
-    def _merge_tokens_save(
-            self,
-            save_dir,
-            to_merge_pair,
-            new_token,
-            tokens_pq,
-            *args, **kwargs
-            ):
-        '''
-        given tokens parquet file `tokens_pq`,
-        merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
-        then save result tokens chunks into a same-file-name parquet file to `save_dir`
-        '''
-        # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 occur_most_pair, 缓存 merged tokens parquet file
-        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
 
-        # merged result 也是下一个 merge rank 要读取的 parquet
-        merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def train_bpe(self,
+                  num_merges:int|None = None, # global num merges fir the tokenizer
+                  *,
+                  corpora:t.List[str]|str|None,
+                  colnames:t.List[str|None]|None = None,
+                  backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
+                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommen to 0.5GB
+                  keep_window:int = 1, # max reserved tokens_pq file in disk
+                  verbose:bool = False
+                  ):
         
-        with pq.ParquetWriter(merged_tokens_pq, self.tokens_schema) as writer:
-            import merge_pair as merge_pair
+        assert keep_window >= 0
+        if isinstance(corpora, str):
+            corpora = [corpora]
+            colnames = [None]
 
-            # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
-            # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
-            merge_pair.allocate_memory(40*self._buffer_size)
+        import merge_pair as booster
 
-            for batch in yield_tokens:
-                # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
-                tokens_flat = batch[self.tokens_schema[0].name].values.to_numpy().data
-                # tokens_schema: list dtype pa.int64array --> offsets: int64
-                offsets = batch[self.tokens_schema[0].name].offsets.to_numpy().data
-                L, R = map(np.int32, to_merge_pair)
-                new_token = np.int32(new_token)
+        self._set_config(
+            buffer_size = buffer_size,
+            fc_merge_pair_batch= booster.merge_pair_batch)
 
-                merged_batch_tokens_flat, merged_batch_offsets = merge_pair.merge_pair_batch(
-                    tokens_flat, offsets, L, R, new_token)
-                
-                merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
-                new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
-                writer.write_batch( new_batch )
+        # corpora 为 t.List[str], 模式是 从头train
+        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
+        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
+        if corpora is not None:
+            self._clear()
+            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
+        # corpora 为 None 时, 模式是 续train.
+        # 续train需要满足的条件会由 _prepair_train 检查或满足. 
+        else:
+            pass
+
+        # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
+        # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
+        with memory_control(booster, block_size = 40*self._buffer_size):
+            # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
+            # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
+            tokens_dir_start = self._prepare_train(num_merges)
             
-            merge_pair.release_memory()
-        
-        return merged_tokens_pq
+            start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
 
+            self._train_loop(tokens_dir_start, start, end, keep_window, verbose)
 
+        # set down others
+        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
+        self._register_special_tokens()
 
 
 
@@ -1325,7 +1352,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 #TODO
-class asyncBBPETokenizer(bufferBBPETokenizer):
+class asyncBBPETokenizer(boostBBPETokenizer):
     '''
     bpe_single_merge: 
     前半部分：生产者不断生产 tokens(list of ints)

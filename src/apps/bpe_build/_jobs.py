@@ -41,21 +41,22 @@ def bpe_prepare():
 
 
 
-def bpe_train():
+def bpe_train(num_merges:int, save_tok_name:str):
     print('begin to run BPE on dataset TinyStories')
     train_pq = configs['train_pq']
     valid_pq = configs['valid_pq']
     for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
         os.makedirs(folder, exist_ok=True)
         
-    tok = boostBBPETokenizer(name='tinyTok', buffer_dir=buffer_dir)
+    tok = boostBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir)
     corpora = [valid_pq,]
     colnames=['text',]
 
-    tok.train_bpe(0,
+    tok.train_bpe(num_merges,
                   corpora=corpora,
                   colnames=colnames,
-                  backup_init_tokens_dir=backup_init_dir
+                  backup_init_tokens_dir=backup_init_dir,
+                  verbose=True
                   )
 
     # save tokenizer
@@ -70,28 +71,25 @@ def bpe_train():
 
 
 
-def bpe_continue():
+def bpe_continue(num_merges:int, save_tok_name:str, *, tok_path:str|None):
+
     print('continue to run BPE on dataset TinyStories')
+    tok = boostBBPETokenizer(name='init', buffer_dir=buffer_dir)
 
-    train_pq = configs['train_pq']
-    valid_pq = configs['valid_pq']
-    for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
-        os.makedirs(folder, exist_ok=True)
-    
-    corpora = [valid_pq,]
-    colnames=['text',]
+    if tok_path and os.path.isfile(tok_path):
+        tok.load(tok_path)
 
-    tok = boostBBPETokenizer(name='tinyTok', buffer_dir=buffer_dir)
-    tok_path = os.path.join(tokenizer_save_dir, f'tinyTok.tok')
-    tok.load(tok_path)
+    # continue train 只要 buffer_dir 的环境正确, load 的tok正确
+    # 就会自动分析该读取的中间文件，以继续训练
 
-    tok.train_bpe(4,
-                  corpora=corpora,
-                  colnames=colnames,
-                  backup_init_tokens_dir=backup_init_dir)
-    # save tokenizer
-    tok_fpath = os.path.join(tokenizer_save_dir, f'{tok.name}_new.tok')
+    # continue train 下, corpora必须显式地输入None
+    tok.train_bpe(num_merges, corpora=None)
+
+    # rename and save the updated tokenizer
+    tok.name = save_tok_name
+    tok_fpath = os.path.join(tokenizer_save_dir, f'{save_tok_name}.tok')
     tok.save(tok_fpath)
+
     # view vocab
     tok.view(tmpsave_dir = vocab_cache_dir)
     print('BPE ends')
