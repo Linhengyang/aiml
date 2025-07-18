@@ -2,5 +2,5 @@
 cd ../tokenizer
 python setup.py build_ext --inplace
 
-# then move *.so file to aiml/src/bin
+# then move *.so file to aiml/bin
 # set PYTHONPATH environment for correct import
