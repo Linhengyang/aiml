@@ -75,7 +75,7 @@ def merge_pair_batch(
     if num_chunks <= 0:
         return np.array([], dtype=np.int32), np.array([0], dtype=np.int64)
     
-    cdef size_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
+    cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
         sys.exit(1)
     
@@ -99,14 +99,14 @@ def merge_pair_batch(
     )
 
     # build output tokens array & filter array
-    tokens_ptr = ctypes.cast(<size_t> result.output_tokens_flat_ptr, ctypes.POINTER(ctypes.c_int32))
+    tokens_ptr = ctypes.cast(<int32_t> result.output_tokens_flat_ptr, ctypes.POINTER(ctypes.c_int32))
     output_tokens_flat_np = np.ctypeslib.as_array(tokens_ptr, shape=(_LENGTH,))
 
-    filter_ptr = ctypes.cast(<size_t> result.output_filter_ptr, ctypes.POINTER(ctypes.c_bool))
+    filter_ptr = ctypes.cast(<bool_t> result.output_filter_ptr, ctypes.POINTER(ctypes.c_bool))
     output_filter_np = np.ctypeslib.as_array(filter_ptr, shape=(_LENGTH,))
 
     # build output tokens offsets
-    lens_ptr = ctypes.cast(<size_t> result.output_tokens_lens_ptr, ctypes.POINTER(ctypes.c_int64))
+    lens_ptr = ctypes.cast(<int64_t> result.output_tokens_lens_ptr, ctypes.POINTER(ctypes.c_int64))
     output_tokens_lens_np = np.ctypeslib.as_array(lens_ptr, shape=(num_chunks,))
 
     output_offsets_np = np.cumsum(np.insert(output_tokens_lens_np, 0, 0), dtype=np.int64)
