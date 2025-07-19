@@ -8,18 +8,18 @@
 extern "C" {
 
 return_bundle c_merge_pair_batch(
-    const int* tokens_flat,
-    const long* offsets,
+    const int32_t* tokens_flat,
+    const int64_t* offsets,
     const size_t num_chunks, // num_chunks = len(offsets) - 1
-    const int pair_L,
-    const int pair_R,
-    const int new_token
+    const int32_t pair_L,
+    const int32_t pair_R,
+    const int32_t new_token
 ) {
     try
     {
         // num_chunks = len(offsets) - 1 = len(output_tokens_lens)
         // need size = sizeof(long) * num_chunks
-        long* output_tokens_lens = static_cast<long*>(memory_pool::get_mempool().allocate(num_chunks*sizeof(long)));
+        int64_t* output_tokens_lens = static_cast<int64_t*>(memory_pool::get_mempool().allocate(num_chunks*sizeof(int64_t)));
 
         // 初始化数组
         for (size_t i = 0; i < num_chunks; ++i) {
@@ -27,19 +27,19 @@ return_bundle c_merge_pair_batch(
         }
 
         // offsets 的最后一个值是 tokens_flat 的长度，也是 output_tokens_flat/output_filter 的长度
-        size_t _LENGTH = offsets[num_chunks];
+        int64_t _LENGTH = offsets[num_chunks];
 
         // _LENGTH 长度
         // need size = sizeof(bool) * _LENGTH
         bool* output_filter = static_cast<bool*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(bool)));
-        for (size_t i = 0; i < _LENGTH; ++i) {
+        for (int64_t i = 0; i < _LENGTH; ++i) {
             output_filter[i] = false; // 全部初始化为 false
         }
 
         // _LENGTH 长度
         // need size = sizeof(int) * _LENGTH
-        int* output_tokens_flat = static_cast<int*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(int)));
-        for (size_t i = 0; i < _LENGTH; ++i) {
+        int32_t* output_tokens_flat = static_cast<int32_t*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(int32_t)));
+        for (int64_t i = 0; i < _LENGTH; ++i) {
             output_tokens_flat[i] = -1; // 全部初始化为 -1
         }
 

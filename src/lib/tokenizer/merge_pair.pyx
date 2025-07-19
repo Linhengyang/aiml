@@ -1,7 +1,7 @@
 # distutils: language = c++
 # cython: language_level=3, boundscheck=True, wraparound=True
 
-import numpy as np
+import numpy as pynp
 import sys
 cimport numpy as np
 from libc.stdint cimport int32_t, int64_t
@@ -73,9 +73,9 @@ def merge_pair_batch(
 
     cdef size_t num_chunks = offsets.shape[0] - 1
     if num_chunks <= 0:
-        return np.array([], dtype=np.int32), np.array([0], dtype=np.int64)
+        return pynp.array([], dtype=pynp.int32), pynp.array([0], dtype=pynp.int64)
     
-    cdef size_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
+    cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
         sys.exit(1)
     
@@ -98,18 +98,19 @@ def merge_pair_batch(
         new_token,
     )
 
+
     # build output tokens array & filter array
     tokens_ptr = ctypes.cast(<size_t> result.output_tokens_flat_ptr, ctypes.POINTER(ctypes.c_int32))
-    output_tokens_flat_np = np.ctypeslib.as_array(tokens_ptr, shape=(_LENGTH,))
+    output_tokens_flat_np = pynp.ctypeslib.as_array(tokens_ptr, shape=(_LENGTH,))
 
     filter_ptr = ctypes.cast(<size_t> result.output_filter_ptr, ctypes.POINTER(ctypes.c_bool))
-    output_filter_np = np.ctypeslib.as_array(filter_ptr, shape=(_LENGTH,))
+    output_filter_np = pynp.ctypeslib.as_array(filter_ptr, shape=(_LENGTH,))
 
     # build output tokens offsets
     lens_ptr = ctypes.cast(<size_t> result.output_tokens_lens_ptr, ctypes.POINTER(ctypes.c_int64))
-    output_tokens_lens_np = np.ctypeslib.as_array(lens_ptr, shape=(num_chunks,))
+    output_tokens_lens_np = pynp.ctypeslib.as_array(lens_ptr, shape=(num_chunks,))
 
-    output_offsets_np = np.cumsum(np.insert(output_tokens_lens_np, 0, 0), dtype=np.int64)
+    output_offsets_np = pynp.cumsum(pynp.insert(output_tokens_lens_np, 0, 0), dtype=pynp.int64)
 
     return output_tokens_flat_np[output_filter_np], output_offsets_np
 
