@@ -49,8 +49,8 @@ def bpe_train(num_merges:int, save_tok_name:str):
         os.makedirs(folder, exist_ok=True)
         
     tok = boostBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir)
-    corpora = [valid_pq,]
-    colnames=['text',]
+    corpora = [train_pq, valid_pq,]
+    colnames=['text', 'text']
 
     tok.train_bpe(num_merges,
                   corpora=corpora,
