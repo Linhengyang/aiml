@@ -49,8 +49,8 @@ def bpe_train(num_merges:int, save_tok_name:str):
         os.makedirs(folder, exist_ok=True)
         
     tok = boostBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir)
-    corpora = [train_pq, valid_pq,]
-    colnames=['text', 'text']
+    corpora = [valid_pq,]
+    colnames=['text',]
 
     tok.train_bpe(num_merges,
                   corpora=corpora,
@@ -83,7 +83,7 @@ def bpe_continue(num_merges:int, save_tok_name:str, *, tok_path:str|None):
     # 就会自动分析该读取的中间文件，以继续训练
 
     # continue train 下, corpora必须显式地输入None
-    tok.train_bpe(num_merges, corpora=None)
+    tok.train_bpe(num_merges, corpora=None, verbose=True)
 
     # rename and save the updated tokenizer
     tok.name = save_tok_name

@@ -624,7 +624,7 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 import pyarrow.compute as pc
 import numpy as np
-from pathlib import Path
+from collections import defaultdict
 from ..file.parquet_io import yield_parquet_batch
 from ..file.folder_op import clean_folder
 
@@ -1016,16 +1016,33 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 f"size shall be equal to latest dir, or latest dir + 1")
 
 
-    def _get_p_counts_pq(self, tokens_pq) -> str:
+    @classmethod
+    def _pcounts_batch(cls, batch):
+        local_pcounts = {}
+        chunks = batch[cls.tokens_schema[0].name].to_pylist()
+        for tokens in chunks:
+            get_pair_counts(tokens, local_pcounts)
+        return local_pcounts
 
+
+    def _get_p_counts_pq(self, tokens_pq, executor) -> str:
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-        file_p_counts:t.Dict[tuple[int, int], int] = {} # parquet file 的 pari-counts
+        # ============== 需要加速-start ============== #
+        # file_p_counts:t.Dict[tuple[int, int], int] = {} # parquet file 的 pair-counts
 
-        for batch in yield_tokens: # 遍历读取当前 tokens_pq
-            chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
-            for tokens in chunks_tokens:
-                get_pair_counts(tokens, file_p_counts)
-        
+        # for batch in yield_tokens: # 遍历读取当前 tokens_pq
+        #     chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
+        #     for tokens in chunks_tokens:
+        #         get_pair_counts(tokens, file_p_counts)
+        # ============== 需要加速-end ================ #
+        file_p_counts = defaultdict(int) # parquet file 的 pair-counts
+
+        futures = [executor.submit(self._pcounts_batch, batch) for batch in yield_tokens]
+        for future in as_completed(futures):
+            local_counts = future.result()
+            for p, counts in local_counts.items():
+                file_p_counts[p] += counts
+        # =========================================== #
         # buffer the file_p_counts. 虽然可以用 build_pa_table 直接用行数据创建, 但列数据的效率高很多
         datapoints = [ (l, r, count) for (l, r), count in file_p_counts.items() ]
         if datapoints:
@@ -1085,6 +1102,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             tokens_pq,
             fc_merge_pair_batch:t.Callable,
             buffer_size,
+            executor
             ):
         '''
         given tokens parquet file `tokens_pq`,
@@ -1112,17 +1130,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
                 writer.write_batch( new_batch )
 
-                # chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
-                # merged_tokens = [ merge_pair(tokens, to_merge_pair, new_token) for tokens in chunks_tokens if len(tokens) > 1 ]
-                # new_batch = pa.RecordBatch.from_pydict({self.tokens_schema[0].name: merged_tokens}, self.tokens_schema)
-                # writer.write_batch( new_batch )
-
 
     def _next_tokens_dir(
             self,
             tokens_dir_this:str,
             occur_most_pair:t.Tuple,
-            new_token:int
+            new_token:int,
+            executor
             ) -> str:
         # 在计算获得 tokens parquet for next merge_rank 时, 当前 tokens_pq 已经提炼出了 merge_info
         # 并更新了 tokenizer._merge_rank，使得其 + 1。所以 cur_dir_for_tokens_pq = len(_merge_rank) - 1
@@ -1142,14 +1156,15 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 new_token = new_token,
                 tokens_pq = tokens_pq,
                 fc_merge_pair_batch = self._func_merge_pair_batch,
-                buffer_size = self._buffer_size
+                buffer_size = self._buffer_size,
+                executor = executor
                 )
         
         return tokens_dir_next # update
 
 
 
-    def _get_merge_info(self, tokens_dir):
+    def _get_merge_info(self, tokens_dir, executor):
         # 从当前 tokens_dir, 统计得到 next merge pair 和 new token
         num_merged_epochs = len(self._merge_ranks)
         assert num_merged_epochs == int(os.path.basename(tokens_dir))
@@ -1163,7 +1178,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 raise FileNotFoundError(
                     f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
                     )
-            part_p_counts_pqs.append( self._get_p_counts_pq(tokens_pq) )
+            part_p_counts_pqs.append( self._get_p_counts_pq(tokens_pq, executor) )
 
         # aggregate pair counts to agg_p_counts(pa.Tabel)
         agg_p_counts, agg_colname = self._aggregate_p_counts(part_p_counts_pqs)
@@ -1194,27 +1209,28 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         '''
 
         tokens_dir_this = tokens_dir_start
-        for rank in range(start, end):
-            print(f'epoch {rank} / {start} to {end-1}')
-            try:
-                top_pair, max_occurence = self._get_merge_info(tokens_dir_this)
-                new_token, occurence = rank + 256, max_occurence if verbose else None
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+            for rank in range(start, end):
+                print(f'epoch {rank} / {start} to {end-1}')
+                try:
+                    top_pair, max_occurence = self._get_merge_info(tokens_dir_this, executor)
+                    new_token, occurence = rank + 256, max_occurence if verbose else None
 
-                # update tokenizer: len(self._merge_rank) += 1
-                self._update_tokenizer(top_pair, new_token, occurence)
+                    # update tokenizer: len(self._merge_rank) += 1
+                    self._update_tokenizer(top_pair, new_token, occurence)
 
-                # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
-                if rank == end - 1:
-                    break
+                    # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
+                    if rank == end - 1:
+                        break
 
-                tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token)
-                
-            finally:
-                # keep the init and `keep_window` tokens/p_counts parquet file
-                to_remove = rank - keep_window
-                if to_remove > 0:
-                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
-                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
+                    tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
+                    
+                finally:
+                    # keep the init and `keep_window` tokens/p_counts parquet file
+                    to_remove = rank - keep_window
+                    if to_remove > 0:
+                        clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
+                        clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
 
 
 
@@ -1324,7 +1340,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         # corpora 为 None 时, 模式是 续train.
         # 续train需要满足的条件会由 _prepair_train 检查或满足. 
         else:
-            pass
+            self._build_vocab()
 
         # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
         # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
