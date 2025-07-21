@@ -1274,16 +1274,16 @@ from ..common.base_class import MemorySwitch
 
 
 class memory_control:
-    def __init__(self, trigger:MemorySwitch, block_size):
-        self.trigger = trigger
+    def __init__(self, switch:MemorySwitch, block_size):
+        self.switch = switch
         self.block_size = block_size
 
     def __enter__(self):
-        self.trigger.allocate_memory(self.block_size)
+        self.switch.allocate_memory(self.block_size)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.trigger.release_memory()
+        self.switch.release_memory()
 
 
 
@@ -1328,7 +1328,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
         # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
         # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
-        with memory_control(booster, block_size = 40*self._buffer_size):
+        with memory_control(switch = booster, block_size = 40*self._buffer_size):
             # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
             # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
             tokens_dir_start = self._prepare_train(num_merges)
