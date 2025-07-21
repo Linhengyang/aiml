@@ -3,6 +3,7 @@
 #include <vector>
 #include <omp.h>
 #include <cstddef>
+#include <cstdint>
 
 
 extern "C" {
