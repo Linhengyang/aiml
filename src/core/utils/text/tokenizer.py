@@ -1211,7 +1211,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         tokens_dir_this = tokens_dir_start
         with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
             for rank in range(start, end):
-                print(f'epoch {rank} / {start} to {end-1}')
+                print(f'merge rank {rank} / {start} to {end-1}')
                 try:
                     top_pair, max_occurence = self._get_merge_info(tokens_dir_this, executor)
                     new_token, occurence = rank + 256, max_occurence if verbose else None
