@@ -1018,6 +1018,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
     @classmethod
     def _pcounts_batch(cls, batch):
+        '''
+        对一个 batch 统计 pair-counts
+        '''
         local_pcounts = {}
         chunks = batch[cls.tokens_schema[0].name].to_pylist()
         for tokens in chunks:
@@ -1027,14 +1030,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
     def _get_p_counts_pq(self, tokens_pq, executor) -> str:
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-        # ============== 需要加速-start ============== #
-        # file_p_counts:t.Dict[tuple[int, int], int] = {} # parquet file 的 pair-counts
-
-        # for batch in yield_tokens: # 遍历读取当前 tokens_pq
-        #     chunks_tokens = batch[self.tokens_schema[0].name].to_pylist()
-        #     for tokens in chunks_tokens:
-        #         get_pair_counts(tokens, file_p_counts)
-        # ============== 需要加速-end ================ #
         file_p_counts = defaultdict(int) # parquet file 的 pair-counts
 
         futures = [executor.submit(self._pcounts_batch, batch) for batch in yield_tokens]
@@ -1042,7 +1037,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             local_counts = future.result()
             for p, counts in local_counts.items():
                 file_p_counts[p] += counts
-        # =========================================== #
+        
         # buffer the file_p_counts. 虽然可以用 build_pa_table 直接用行数据创建, 但列数据的效率高很多
         datapoints = [ (l, r, count) for (l, r), count in file_p_counts.items() ]
         if datapoints:
