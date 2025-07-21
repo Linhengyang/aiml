@@ -625,6 +625,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import numpy as np
 from collections import defaultdict
+from multiprocessing import get_context, Manager
 from ..file.parquet_io import yield_parquet_batch
 from ..file.folder_op import clean_folder
 
@@ -1103,27 +1104,47 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         given tokens parquet file `tokens_pq`,
         merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
         then save result tokens chunks into a same-file-name parquet file to `save_dir`
+
+        读(从tokens_pq)
+        算(从fc_merge_pair_batch)
+        写(save_dir)
+        batches(buffer_size确定batch大小)
         '''
         # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 occur_most_pair, 缓存 merged tokens parquet file
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
 
         # merged result 也是下一个 merge rank 要读取的 parquet
         merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
-        
+
+        L, R = map(np.int32, to_merge_pair)
+        new_token = np.int32(new_token)
+
         with pq.ParquetWriter(merged_tokens_pq, cls.tokens_schema) as writer:
+            # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用同步顺序处理
             for batch in yield_tokens:
-                # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
-                tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy().data
-                # tokens_schema: list dtype pa.int64array --> offsets: int64
-                offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy().data
-                L, R = map(np.int32, to_merge_pair)
-                new_token = np.int32(new_token)
-                merged_batch_tokens_flat, merged_batch_offsets = \
-                    fc_merge_pair_batch(tokens_flat, offsets, L, R, new_token)
-                
-                merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
-                new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
+                new_batch = cls._atomic_process_tokens_batch(batch, fc_merge_pair_batch, L, R, new_token)
                 writer.write_batch( new_batch )
+
+
+    @classmethod
+    def _atomic_process_tokens_batch(
+        cls,
+        batch,
+        fc_merge_pair_batch:t.Callable,
+        L:np.int32,
+        R:np.int32,
+        new_token:np.int32
+        ):
+        # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
+        tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy().data
+        # tokens_schema: list dtype pa.int64array --> offsets: int64
+        offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy().data
+        merged_batch_tokens_flat, merged_batch_offsets = fc_merge_pair_batch(tokens_flat, offsets, L, R, new_token)
+
+        merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
+        new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
+
+        return new_batch
 
 
     def _next_tokens_dir(
@@ -1204,6 +1225,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         '''
 
         tokens_dir_this = tokens_dir_start
+        # ctx = get_context('spawn')
         with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
             for rank in range(start, end):
                 print(f'merge rank {rank} / {start} to {end-1}')
