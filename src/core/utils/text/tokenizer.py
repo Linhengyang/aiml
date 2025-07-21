@@ -1224,7 +1224,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommen to 0.5GB
+                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 0.5GB
                   keep_window:int = 1, # max reserved tokens_pq file in disk
                   fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
                   verbose:bool = False
