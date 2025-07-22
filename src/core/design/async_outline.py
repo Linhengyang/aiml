@@ -7,13 +7,17 @@ import typing as t
 # 生产和消费两个异步task可以自顾自运行
 
 # 同步的 generator --> 异步put的queue
+async def wrap_sync_as_async(gen:t.Generator):
+    for item in gen:
+        yield item
+
 async def async_queue_get(yield_generator:t.Generator, queue:asyncio.Queue):
     '''
     异步读取 generator 的导出结果, 并放入 queue
     '''
-    async for product in yield_generator:
+    async for product in wrap_sync_as_async(yield_generator):
         await queue.put(product) # 异步地放入 queue: 当 queue 满的时候，要等待空间
-
+    
     await queue.put(None) # 生产结束的信号
 
 
@@ -21,10 +25,10 @@ async def async_queue_get(yield_generator:t.Generator, queue:asyncio.Queue):
 # 单消费者: queue 中的 output 全部由一个消费任务消费
 async def async_queue_process(
         queue:asyncio.Queue,
-        process_fc:t.Callable,
         executor,
+        process_fc:t.Callable,
         collector:t.Callable|None=None,
-        *args, **kwargs):
+        *args):
     '''
     异步处理 queue 中的导出结果.
     处理函数 process_fc 是同步的, 且可并行. 它的第一个位置参数必须是队列中的 product
@@ -45,39 +49,47 @@ async def async_queue_process(
     async def collector(result):
         shared_container.append(result)
     '''
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
+    # 事件循环由 asyncio.run自动创建关闭, 不再使用 get_event_loop
 
     while True:
         product = await queue.get()
 
         if product is None: # 收到结束信号
+            await queue.put(None) # 把结束信号放回去，以通知多个消费者
             break
-        
-        results = await loop.run_in_executor(executor, process_fc, product, *args, **kwargs)
+        # 这里 collector 也可以用一个asyncio.Queue来接收. 这是因为
+        # 主线程 await 得到子进程 process_fc(product, *args) 的result, loop会执行一次跨进程拷贝
+        result = await loop.run_in_executor(executor, process_fc, product, *args)
 
-        # 聚合逻辑
+        # 以一个in-place状态改变的方式，聚合异步消费的结果
         if collector:
-            collector(results)
+            await collector(result)
     
-    return results
 
 
 
-# 主协程: 建立队列，启动异步生产者-消费者任务
-async def main_pipeline_producter_consumer(
+# 主协程
+async def pipeline_producer_consumer(
         yield_generator:t.Generator,
         process_fc:t.Callable,
         executor,
-        max_queue_size:int, 
-        *args, **kwargs):
+        num_consumers:int=1,
+        collector:t.Callable|None=None,
+        max_queue_size:int=10,
+        *args):
     # 创建队列
     queue = asyncio.Queue(max_queue_size)
 
     producer_task = asyncio.create_task(async_queue_get(yield_generator, queue))
-
-    consumer_task = asyncio.create_task(async_queue_process(queue, executor, process_fc, *args, **kwargs))
+    
+    consumer_tasks = [
+        asyncio.create_task(async_queue_process(queue, executor, process_fc, collector, *args))
+        for i in range(num_consumers)
+    ]
 
     await producer_task
-    results = await consumer_task
+    await asyncio.gather(*consumer_tasks)
 
-    return results
+    if collector:
+        await collector(None)
