@@ -1139,21 +1139,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy().data
         # tokens_schema: list dtype pa.int64array --> offsets: int64
         offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy().data
-        merged_batch_tokens_flat, merged_batch_offsets = fc_merge_pair_batch(tokens_flat, offsets, L, R, new_token)
-        # 剔除掉 merge 之后长度为 1 的chunk of tokens
-        merged_tokens_lens = merged_batch_offsets[1:] - merged_batch_offsets[:-1] # 不会是空
 
-        len1_chunks_inds = np.where(merged_tokens_lens==1)[0].astype(np.int64) # 保证即使是空, 也能正确slice
-        len1_chunks_tokens_inds = merged_batch_offsets[len1_chunks_inds] # 这里即使是空, 由于确保了dtype, 也能正确slice
-
-        mask = np.array([True]*len(merged_batch_tokens_flat)) # 用mask筛选出 len>1 的chunks 的tokens
-        mask[len1_chunks_tokens_inds] = False # len=1 的chunks的tokens 设为 False
-        
-        valid_chunks_inds = np.where(merged_tokens_lens>1)[0].astype(np.int64) # 保证即使是空, 也能正确slice
-        valid_merged_tokens_lens = merged_tokens_lens[valid_chunks_inds]
-
-        valid_merged_tokens_flat = merged_batch_tokens_flat[mask]
-        valid_merged_offsets = np.cumsum(np.insert(valid_merged_tokens_lens, 0, 0))
+        # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
+        valid_merged_tokens_flat, valid_merged_offsets = fc_merge_pair_batch(
+            tokens_flat,
+            offsets,
+            L, R, new_token
+            )
 
         merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
         new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
@@ -1269,7 +1261,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 0.5GB
+                  buffer_size:int = 1 << 30, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 1, # max reserved tokens_pq file in disk
                   fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
                   verbose:bool = False
@@ -1345,8 +1337,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommen to 0.5GB
-                  keep_window:int = 1, # max reserved tokens_pq file in disk
+                  buffer_size:int = 1 << 28, # max num of tokens-chunks in memory. recommend to 1GB
+                  keep_window:int = 3, # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
         
@@ -1374,7 +1366,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
         # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
         # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
-        with memory_control(booster, 40*self._buffer_size), ProcessPoolExecutor(os.cpu_count()) as executor:
+        memblock_size = 40 * self._buffer_size
+        with memory_control(booster, memblock_size), ProcessPoolExecutor(os.cpu_count()) as executor:
             # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
             # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
             tokens_dir_start = self._prepare_train(num_merges, executor)

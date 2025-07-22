@@ -108,11 +108,25 @@ def merge_pair_batch(
 
     # build output tokens offsets
     lens_ptr = ctypes.cast(<size_t> result.output_tokens_lens_ptr, ctypes.POINTER(ctypes.c_int64))
-    output_tokens_lens_np = pynp.ctypeslib.as_array(lens_ptr, shape=(num_chunks,))
+    output_chunks_lens_np = pynp.ctypeslib.as_array(lens_ptr, shape=(num_chunks,))
 
-    output_offsets_np = pynp.cumsum(pynp.insert(output_tokens_lens_np, 0, 0), dtype=pynp.int64)
+    merged_offsets = pynp.cumsum(pynp.insert(output_chunks_lens_np, 0, 0), dtype=pynp.int64)
+    merged_tokens_flat = output_tokens_flat_np[output_filter_np]
 
-    return output_tokens_flat_np[output_filter_np], output_offsets_np
+    # return merged_tokens_flat, merged_offsets
+
+    # filter out chunks whose length = 1
+    len1_chunks_ = pynp.where(output_chunks_lens_np == 1)[0].astype(pynp.int64) # 保证即使是空, 也能正确slice
+    len1_chunks_tokens_ = merged_offsets[len1_chunks_] # invalid tokens 在 flat 中的 inds, 会被filter out
+    mask = pynp.full(merged_tokens_flat.shape[0], True, dtype = pynp.bool_) # 用mask筛选出 len>1 的chunks 的tokens
+    mask[len1_chunks_tokens_] = False
+    valid_merged_tokens_flat = merged_tokens_flat[mask]
+
+    valid_chunks_ = pynp.where(output_chunks_lens_np > 1)[0].astype(pynp.int64) # 保证即使是空, 也能正确slice
+    valid_chunks_lens = output_chunks_lens_np[valid_chunks_]
+    valid_merged_offsets = pynp.cumsum(pynp.insert(valid_chunks_lens, 0, 0), dtype=pynp.int64)
+
+    return valid_merged_tokens_flat, valid_merged_offsets
 
 
 
