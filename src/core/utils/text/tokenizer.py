@@ -977,7 +977,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             shutil.copytree(tokens_dir_0, extra_save_dir, dirs_exist_ok=True)
 
 
-    def _prepare_train(self, num_merges, *args, **kwargs) -> str:
+    def _prepare_train(self, num_merges, executor, *args, **kwargs) -> str:
         '''
         检查是否满足训练条件, 返回与当前_merge_ranks匹配的 本次训练的开始点 _buffer_tokens_dir/?
         对于 size = S 的 _merge_ranks 来说, 匹配的本次训练开始点是 _buffer_tokens_dir/S
@@ -1008,7 +1008,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             # 取出 merge_ranks 的最后一对
             to_merge_pair, new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
 
-            return self._next_tokens_dir(tokens_dir_latest, to_merge_pair, new_token)
+            return self._next_tokens_dir(tokens_dir_latest, to_merge_pair, new_token, executor)
         
         else:
             raise RuntimeError(
@@ -1122,12 +1122,12 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         with pq.ParquetWriter(merged_tokens_pq, cls.tokens_schema) as writer:
             # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用同步顺序处理
             for batch in yield_tokens:
-                new_batch = cls._atomic_process_tokens_batch(batch, fc_merge_pair_batch, L, R, new_token)
+                new_batch = cls._thrd_process_tokens_batch(batch, fc_merge_pair_batch, L, R, new_token)
                 writer.write_batch( new_batch )
 
 
     @classmethod
-    def _atomic_process_tokens_batch(
+    def _thrd_process_tokens_batch(
         cls,
         batch,
         fc_merge_pair_batch:t.Callable,
@@ -1140,8 +1140,22 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # tokens_schema: list dtype pa.int64array --> offsets: int64
         offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy().data
         merged_batch_tokens_flat, merged_batch_offsets = fc_merge_pair_batch(tokens_flat, offsets, L, R, new_token)
+        # 剔除掉 merge 之后长度为 1 的chunk of tokens
+        merged_tokens_lens = merged_batch_offsets[1:] - merged_batch_offsets[:-1] # 不会是空
 
-        merged_tokens = pa.ListArray.from_arrays(merged_batch_offsets, merged_batch_tokens_flat)
+        len1_chunks_inds = np.where(merged_tokens_lens==1)[0].astype(np.int64) # 保证即使是空, 也能正确slice
+        len1_chunks_tokens_inds = merged_batch_offsets[len1_chunks_inds] # 这里即使是空, 由于确保了dtype, 也能正确slice
+
+        mask = np.array([True]*len(merged_batch_tokens_flat)) # 用mask筛选出 len>1 的chunks 的tokens
+        mask[len1_chunks_tokens_inds] = False # len=1 的chunks的tokens 设为 False
+        
+        valid_chunks_inds = np.where(merged_tokens_lens>1)[0].astype(np.int64) # 保证即使是空, 也能正确slice
+        valid_merged_tokens_lens = merged_tokens_lens[valid_chunks_inds]
+
+        valid_merged_tokens_flat = merged_batch_tokens_flat[mask]
+        valid_merged_offsets = np.cumsum(np.insert(valid_merged_tokens_lens, 0, 0))
+
+        merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
         new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
 
         return new_batch
@@ -1212,7 +1226,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return occur_most_pair, max_occurence
 
 
-    def _train_loop(self, tokens_dir_start:str, start:int, end:int, keep_window:int, verbose:bool):
+    def _train_loop(self, tokens_dir_start:str, start:int, end:int, executor, keep_window:int, verbose:bool):
         '''
         merge_rank 遍历 start --> end(不含) 地 BPE train 循环.
         tokens_dir_start 是起始 tokens 文件夹, buffer_dir_tokens/tokens/start
@@ -1225,29 +1239,27 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         '''
 
         tokens_dir_this = tokens_dir_start
-        # ctx = get_context('spawn')
-        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
-            for rank in range(start, end):
-                print(f'merge rank {rank} / {start} to {end-1}')
-                try:
-                    top_pair, max_occurence = self._get_merge_info(tokens_dir_this, executor)
-                    new_token, occurence = rank + 256, max_occurence if verbose else None
+        for rank in range(start, end):
+            print(f'merge rank {rank} / {start} to {end-1}')
+            try:
+                top_pair, max_occurence = self._get_merge_info(tokens_dir_this, executor)
+                new_token, occurence = rank + 256, max_occurence if verbose else None
 
-                    # update tokenizer: len(self._merge_rank) += 1
-                    self._update_tokenizer(top_pair, new_token, occurence)
+                # update tokenizer: len(self._merge_rank) += 1
+                self._update_tokenizer(top_pair, new_token, occurence)
 
-                    # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
-                    if rank == end - 1:
-                        break
+                # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
+                if rank == end - 1:
+                    break
 
-                    tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
-                    
-                finally:
-                    # keep the init and `keep_window` tokens/p_counts parquet file
-                    to_remove = rank - keep_window
-                    if to_remove > 0:
-                        clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
-                        clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
+                tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
+                
+            finally:
+                # keep the init and `keep_window` tokens/p_counts parquet file
+                to_remove = rank - keep_window
+                if to_remove > 0:
+                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
+                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
 
 
 
@@ -1281,13 +1293,14 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         else:
             pass
 
-        # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
-        # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
-        tokens_dir_start = self._prepare_train(num_merges)
-        
-        start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
+        with ProcessPoolExecutor(os.cpu_count()) as executor:
+            # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
+            # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
+            tokens_dir_start = self._prepare_train(num_merges, executor)
+            
+            start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
 
-        self._train_loop(tokens_dir_start, start, end, keep_window, verbose)
+            self._train_loop(tokens_dir_start, start, end, executor, keep_window, verbose)
 
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
@@ -1361,14 +1374,14 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
         # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
         # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
-        with memory_control(switch = booster, block_size = 40*self._buffer_size):
+        with memory_control(booster, 40*self._buffer_size), ProcessPoolExecutor(os.cpu_count()) as executor:
             # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
             # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
-            tokens_dir_start = self._prepare_train(num_merges)
+            tokens_dir_start = self._prepare_train(num_merges, executor)
             
             start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
 
-            self._train_loop(tokens_dir_start, start, end, keep_window, verbose)
+            self._train_loop(tokens_dir_start, start, end, executor, keep_window, verbose)
 
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
