@@ -1021,6 +1021,14 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     @classmethod
+    def yield_tokens_offsets(cls, yield_batch: t.Generator):
+        for batch in yield_batch:
+            tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
+            offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
+            yield (tokens_flat, offsets)
+    
+
+    @classmethod
     def _pcounts_batch(cls, batch):
         '''
         对一个 batch 统计 pair-counts
@@ -1121,19 +1129,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         # 遍历读取当前 tokens_pq
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
+        yield_tokens_offsets:t.Generator = cls.yield_tokens_offsets(yield_tokens)
 
-        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用同步顺序处理
-        for i, batch in enumerate(yield_tokens):
-            # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
-            tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
-            # tokens_schema: list dtype pa.int64array --> offsets: int64
-            offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
+        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用分片写入-同步合并处理
+        # TODO
+        for i, tokens_offsets in enumerate(yield_tokens_offsets):
+            # tokens_offsets: tuple of tokens_flat: int32 ndarray, offsets: int64 ndarray
 
             # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
             valid_merged_tokens_flat, valid_merged_offsets = fc_merge_pair_batch(
-                (tokens_flat, offsets),
-                L, R, new_token
-                )
+                tokens_offsets,
+                L, R, new_token)
 
             merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
             new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
@@ -1441,16 +1447,6 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         pq.write_table(table, save_path)
 
 
-
-    @classmethod
-    def yield_tokens_offsets(cls, yield_batch: t.Generator):
-        for batch in yield_batch:
-            tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
-            offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
-            yield (tokens_flat, offsets)
-
-
-
     @classmethod
     def _merge_tokens_save(
             cls,
@@ -1490,27 +1486,18 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         async def collector(result):
             await queue2.put(result)
         
-
-        with pq.ParquetWriter(merged_tokens_pq, cls.tokens_schema) as writer:
-            async def main():
-                await asyncio.gather(
-                    # 协程读 - 算
-                    pipeline_producer_consumer(
-                        producer,
-                        fc_merge_pair_batch,
-                        executor,
-                        os.cpu_count(),
-                        collector,
-                        cls.max_queue_size,
-                        L, R, new_token
-                        ),
-                    
-                    # 协程 写
-                    async_queue_process(
-                        queue2, executor,
-                        cls._write_batch,
-                        None,
-                        writer)
-                    )
+        async def main():
+            await asyncio.gather(
+                # 协程 读 - 算
+                pipeline_producer_consumer(producer, fc_merge_pair_batch, executor, os.cpu_count(),
+                                           collector, cls.max_queue_size, L, R, new_token),
+                
+                # 协程 写 TODO
+                async_queue_process(
+                    queue2, executor,
+                    cls._write_batch,
+                    None,
+                    writer)
+                )
             
-            asyncio.run(main())
+        asyncio.run(main())
