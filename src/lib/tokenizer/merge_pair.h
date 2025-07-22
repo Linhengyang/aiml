@@ -5,6 +5,7 @@
 #define TOKENIZER_H
 #include "memory_pool.h"  // 引入 memory_pool.h 以便访问 MemoryPool 类
 #include <cstddef>
+#include <cstdint>
 
 
 

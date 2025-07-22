@@ -83,7 +83,7 @@ def bpe_continue(num_merges:int, save_tok_name:str, *, tok_path:str|None):
     # 就会自动分析该读取的中间文件，以继续训练
 
     # continue train 下, corpora必须显式地输入None
-    tok.train_bpe(num_merges, corpora=None)
+    tok.train_bpe(num_merges, corpora=None, verbose=True)
 
     # rename and save the updated tokenizer
     tok.name = save_tok_name
