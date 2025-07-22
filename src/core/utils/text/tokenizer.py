@@ -1397,6 +1397,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 from ...design.async_outline import async_queue_get, async_queue_process, pipeline_producer_consumer
+from ...utils.file.parquet_io import concate_parquet_files
 import asyncio
 
 
@@ -1436,7 +1437,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens)
         batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
         table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
-        
+
         pq.write_table(table, save_path)
 
 
