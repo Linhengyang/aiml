@@ -58,12 +58,13 @@ def allocate_memory(block_size):
 
 # 返回np.array of merged_tokens_flat/offsets给python
 cpdef merge_pair_batch(
-    np.ndarray[np.int32_t, ndim=1, mode="c"] tokens_flat, # 1d continuous array of int32
-    np.ndarray[np.int64_t, ndim=1, mode="c"] offsets, # 1d continuous array of int64
-    pair_L, # int32
-    pair_R, # int32
-    new_token, # int32
+    object tokens_offsets,
+    np.int32_t pair_L,
+    np.int32_t pair_R,
+    np.int32_t new_token,
 ):
+    cdef np.ndarray[np.int32_t, ndim=1, mode="c"] tokens_flat = tokens_offsets[0]
+    cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets[1]
     # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
     shrink_memory_pool()
     

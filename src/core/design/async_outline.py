@@ -71,7 +71,7 @@ async def async_queue_process(
 
 # 主协程
 async def pipeline_producer_consumer(
-        yield_generator:t.Generator,
+        producer:t.Generator,
         process_fc:t.Callable,
         executor,
         num_consumers:int=1,
@@ -81,7 +81,7 @@ async def pipeline_producer_consumer(
     # 创建队列
     queue = asyncio.Queue(max_queue_size)
 
-    producer_task = asyncio.create_task(async_queue_get(yield_generator, queue))
+    producer_task = asyncio.create_task(async_queue_get(producer, queue))
     
     consumer_tasks = [
         asyncio.create_task(async_queue_process(queue, executor, process_fc, collector, *args))
