@@ -1377,7 +1377,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 12, # max num of tokens-chunks in memory. recommend to 1GB
+                  buffer_size:int = 1 << 20, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
@@ -1510,7 +1510,8 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         算(_thrd_process_tokens_batch) as 队列1 消费者, 队列2 生产者 ---> 队列2
         写(writer.write_batch to save_dir) as 队列2消费者
         '''
-        NUM_COMPUTERS = 4
+        NUM_COMPUTERS = 8
+        NUM_WRITERS = 1
         # 序列化步骤要合入 generator
         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
 
@@ -1557,7 +1558,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
                 asyncio.create_task(
                     async_queue_process(queue2, executor, cls._write_merge_batch, write_collector, save_dir, fname)
                     )
-                for _ in range(os.cpu_count()-NUM_COMPUTERS)]
+                for _ in range(NUM_WRITERS)]
 
             await asyncio.gather(read_task, asyncio.create_task(compute_end_tasks()), *write_tasks)
             return written_parts
