@@ -1029,7 +1029,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
 
     @classmethod
-    def _pcounts_batch(cls, batch):
+    def _get_pcounts_batch(cls, batch, b_order):
         '''
         对一个 batch 统计 pair-counts
         '''
@@ -1037,65 +1037,80 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         chunks = batch[cls.tokens_schema[0].name].to_pylist()
         for tokens in chunks:
             get_pair_counts(tokens, local_pcounts)
-        return local_pcounts
-
-
-    def _get_p_counts_pq(self, tokens_pq, executor) -> str:
-        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-        file_p_counts = defaultdict(int) # 记录该 parquet file 的 pair-counts
-
-        futures = [executor.submit(self._pcounts_batch, batch) for batch in yield_tokens]
-        for future in as_completed(futures):
-            local_counts = future.result()
-            for p, counts in local_counts.items():
-                file_p_counts[p] += counts
         
-        # buffer the file_p_counts. 虽然可以用 build_pa_table 直接用行数据创建, 但列数据的效率高很多
-        datapoints = [ (l, r, count) for (l, r), count in file_p_counts.items() ]
-        if datapoints:
-            L_tokens, R_tokens, counts = zip(*datapoints)
-        else:
-            L_tokens, R_tokens, counts = [], [], []
+        return local_pcounts, b_order
+
+
+    @classmethod
+    def _write_pcounts_batch(cls, pcounts_order, save_dir, src_tokens_fname) -> None|str:
+        '''
+        buffer the pair-counts for the batch with 'order'
+        如果该 batch 的 p-counts 为空, 那么返回None. 否则返回该 batch 对应的 p-counts parquet 文件path
+        '''
+        b_pcounts, b_order = pcounts_order
+        datapoints = [ (l, r, count) for (l, r), count in b_pcounts.items() ]
+
+        if not datapoints:
+            return None
+        
+        L_tokens, R_tokens, counts = zip(*datapoints)
         data = {
-            self.p_counts_schema[0].name: list(L_tokens), # L: L_tokens
-            self.p_counts_schema[1].name: list(R_tokens), # R: R_tokens
-            self.p_counts_schema[2].name: list(counts), # counts: counts
+            cls.p_counts_schema[0].name: list(L_tokens), # L: L_tokens
+            cls.p_counts_schema[1].name: list(R_tokens), # R: R_tokens
+            cls.p_counts_schema[2].name: list(counts), # counts: counts
             }
-        del file_p_counts # 节省内存
-        
-        rank, token_fname = tokens_pq.split('/')[-2:] # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
-        os.makedirs( os.path.join(self._buffer_pcounts_dir, rank), exist_ok=True) # 创建 本次 rank 的 buffer_pcounts_dir
-        file_p_counts_pq = os.path.join(self._buffer_pcounts_dir, rank, token_fname)
+        del b_pcounts # 节省内存
 
-        with pq.ParquetWriter(file_p_counts_pq, self.p_counts_schema) as writer:
-            writer.write_table( pa.Table.from_pydict(data, self.p_counts_schema) )
+        table = pa.Table.from_pydict(data, cls.p_counts_schema)
         
-        return file_p_counts_pq
+        save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
+        pq.write_table(table, save_path)
+
+        return save_path
+
+
+    def _write_pcounts(self, tokens_pq, executor) -> list:
+        # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
+        rank, tokens_fname = tokens_pq.split('/')[-2:]
+
+        # 创建 本次 rank 的 buffer_pcounts_dir
+        pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, rank)
+        os.makedirs(pcounts_save_dir, exist_ok=True) 
+
+        results = []
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
+
+        futures = [executor.submit(self._get_pcounts_batch, batch, i) for i, batch in enumerate(yield_tokens)]
+        for future in as_completed(futures):
+            b_pcounts, b_order = future.result()
+            results.append(
+                self._write_pcounts_batch( (b_pcounts, b_order), pcounts_save_dir, tokens_fname)
+                )
+        
+        return results
     
 
     @classmethod
-    def _aggregate_p_counts(cls, part_pcounts_pqs):
-        p_counts_collect = [] # list of pa tables
+    def _aggregate_pcounts(cls, pcounts_files):
 
-        for p_counts_pq in part_pcounts_pqs:
-            p_counts_collect.append( pq.read_table(p_counts_pq) )
+        tables = [pq.read_table(f) for f in pcounts_files]
+        concatenation = pa.concat_tables(tables)
 
-        _p_counts = pa.concat_tables( p_counts_collect )
         L, R, counts = cls.p_counts_schema[0].name, cls.p_counts_schema[1].name, cls.p_counts_schema[2].name
-        agg_p_counts = _p_counts.group_by([L, R]).aggregate([(counts, 'sum')]) # counts 列 --> counts_sum 列
+        agg_pcounts = concatenation.group_by([L, R]).aggregate([(counts, 'sum')]) # counts 列 --> counts_sum 列
 
-        return agg_p_counts, '_'.join([counts, 'sum'])
+        return agg_pcounts, L, R, '_'.join([counts, 'sum'])
 
 
-    @classmethod
-    def _get_occur_most(cls, agg_p_counts, agg_colname):
-        max_occur = pc.max(agg_p_counts[agg_colname]).as_py()
-        filter_mask = pc.equal(agg_p_counts[agg_colname], max_occur)
+    @staticmethod
+    def get_occur_most_info(agg_pcounts, L_col, R_col, agg_pcounts_col):
 
-        _row = agg_p_counts.filter(filter_mask).slice(0, 1)
+        max_occur = pc.max(agg_pcounts[agg_pcounts_col]).as_py()
+        filter_mask = pc.equal(agg_pcounts[agg_pcounts_col], max_occur)
 
-        L, R = cls.p_counts_schema[0].name, cls.p_counts_schema[1].name
-        occur_most_pair: tuple[int, int] = (_row[L][0].as_py(), _row[R][0].as_py())
+        _row = agg_pcounts.filter(filter_mask).slice(0, 1)
+
+        occur_most_pair: tuple[int, int] = (_row[L_col][0].as_py(), _row[R_col][0].as_py())
 
         return occur_most_pair, max_occur
 
@@ -1206,8 +1221,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         num_merged_epochs = len(self._merge_ranks)
         assert num_merged_epochs == int(os.path.basename(tokens_dir))
 
-        # compute pair_counts for every tokens parquet into p_counts parquet, and collect them
-        part_p_counts_pqs = []
+        # compute pair_counts for every batch of tokens parquet into p_counts parquet, and collect them
+        b_pcounts_pqs = []
         for f in os.listdir(tokens_dir):
             tokens_pq = os.path.join(tokens_dir, f)
 
@@ -1215,20 +1230,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 raise FileNotFoundError(
                     f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
                     )
-            part_p_counts_pqs.append( self._get_p_counts_pq(tokens_pq, executor) )
-
-        # aggregate pair counts to agg_p_counts(pa.Tabel)
-        agg_p_counts, agg_colname = self._aggregate_p_counts(part_p_counts_pqs)
-
-        if not agg_p_counts:
+            b_pcounts_pqs.extend( self._write_pcounts(tokens_pq, executor) )
+        
+        if not any(b_pcounts_pqs):
             # 在raise error前先保存已经train好的tokenizer
             self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
 
             raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
-        
+
+        # aggregate pair counts to agg_p_counts(pa.Tabel)
         # obtain the pair with most occurrence
-        occur_most_pair, max_occurence = self._get_occur_most(agg_p_counts, agg_colname)
-        del agg_p_counts
+        occur_most_pair, max_occurence = self.get_occur_most_info(*self._aggregate_pcounts(b_pcounts_pqs))
 
         return occur_most_pair, max_occurence
 
