@@ -85,7 +85,7 @@ async def pipeline_producer_consumer(
     
     consumer_tasks = [
         asyncio.create_task(async_queue_process(queue, executor, process_fc, collector, *args))
-        for i in range(num_consumers)
+        for _ in range(num_consumers)
     ]
 
     await producer_task

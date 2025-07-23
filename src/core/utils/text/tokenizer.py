@@ -626,7 +626,7 @@ import pyarrow.compute as pc
 import numpy as np
 from collections import defaultdict
 from multiprocessing import get_context, Manager
-from ..file.parquet_io import yield_parquet_batch
+from ..file.parquet_io import yield_parquet_batch, concate_parquet_files
 from ..file.folder_op import clean_folder
 
 
@@ -1021,11 +1021,11 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     @classmethod
-    def yield_tokens_offsets(cls, yield_batch: t.Generator):
-        for batch in yield_batch:
+    def yield_tokens_offsets_order(cls, yield_batch: t.Generator):
+        for i, batch in enumerate(yield_batch):
             tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
             offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
-            yield (tokens_flat, offsets)
+            yield (tokens_flat, offsets), i
     
 
     @classmethod
@@ -1042,7 +1042,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
     def _get_p_counts_pq(self, tokens_pq, executor) -> str:
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-        file_p_counts = defaultdict(int) # parquet file 的 pair-counts
+        file_p_counts = defaultdict(int) # 记录该 parquet file 的 pair-counts
 
         futures = [executor.submit(self._pcounts_batch, batch) for batch in yield_tokens]
         for future in as_completed(futures):
@@ -1099,6 +1099,29 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         return occur_most_pair, max_occur
 
+
+
+    @classmethod
+    def _write_merge_batch(cls, tokens_offsets, merge_func, L, R, new_token, save_dir, src_fname, b_order):
+        # tokens_offsets: tuple of tokens_flat: int32 ndarray, offsets: int64 ndarray
+        # merge_fun: 执行 merge pair的函数. L, R, new_token
+        # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
+        # b_order: 批次batch的序号
+
+        # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
+        valid_merged_tokens_flat, valid_merged_offsets = merge_func(
+            tokens_offsets,
+            L, R, new_token)
+        
+        merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
+        batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
+        table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
+        
+        batch_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
+        pq.write_table(table, batch_save_path)
+
+        return batch_save_path
+
     
     @classmethod
     def _merge_tokens_save(
@@ -1107,7 +1130,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             to_merge_pair,
             new_token,
             tokens_pq,
-            fc_merge_pair_batch:t.Callable,
+            fc_merge:t.Callable,
             buffer_size,
             executor
             ):
@@ -1121,32 +1144,26 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         写(writer.write_batch to save_dir)
         batches(buffer_size确定batch大小)
         '''
-        # merged result 也是下一个 merge rank 要读取的 parquet
-        merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
-
+        fname = os.path.basename(tokens_pq)
+        
         L, R = map(np.int32, to_merge_pair)
         new_token = np.int32(new_token)
 
         # 遍历读取当前 tokens_pq
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-        yield_tokens_offsets:t.Generator = cls.yield_tokens_offsets(yield_tokens)
+        yield_tokens_offsets_order:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
 
-        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用分片写入-同步合并处理
-        # TODO
-        for i, tokens_offsets in enumerate(yield_tokens_offsets):
-            # tokens_offsets: tuple of tokens_flat: int32 ndarray, offsets: int64 ndarray
+        parts = []
+        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入-统一合并处理
+        futures = [executor.submit(cls._write_merge_batch, tokens_offsets, fc_merge, L, R, new_token, save_dir, fname, order)
+                   for tokens_offsets, order in yield_tokens_offsets_order]
+        
+        for future in as_completed(futures):
+            parts.append( future.result() )
+        
+        concate_parquet_files(parts, os.path.join(save_dir, fname), clean=True)
 
-            # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
-            valid_merged_tokens_flat, valid_merged_offsets = fc_merge_pair_batch(
-                tokens_offsets,
-                L, R, new_token)
 
-            merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
-            new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
-
-            merged_batch_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
-            with pq.ParquetWriter(merged_tokens_pq, cls.tokens_schema) as writer:
-                writer.write_batch( new_batch )
 
 
     def _next_tokens_dir(
@@ -1173,7 +1190,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 to_merge_pair = occur_most_pair, 
                 new_token = new_token,
                 tokens_pq = tokens_pq,
-                fc_merge_pair_batch = self._func_merge_pair_batch,
+                fc_merge = self._func_merge_pair_batch,
                 buffer_size = self._buffer_size,
                 executor = executor
                 )
@@ -1346,7 +1363,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 28, # max num of tokens-chunks in memory. recommend to 1GB
+                  buffer_size:int = 1 << 12, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
@@ -1402,7 +1419,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 
-from ...design.async_outline import async_queue_get, async_queue_process, pipeline_producer_consumer
+from ...design.async_outline import async_queue_get, async_queue_process
 from ...utils.file.parquet_io import concate_parquet_files
 import asyncio
 
@@ -1436,15 +1453,43 @@ class asyncBBPETokenizer(boostBBPETokenizer):
     '''
     max_queue_size = 10
 
-
+    
     @classmethod
-    def _write_batch(cls, tokens_offsets, save_path):
-        merged_tokens, merged_offsets = tokens_offsets
+    def _write_merge_batch(cls, merged_tokens_offsets_order, save_dir, src_fname):
+        (merged_tokens, merged_offsets), b_order = merged_tokens_offsets_order
+
         merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens)
         batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
         table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
 
-        pq.write_table(table, save_path)
+        batch_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
+        pq.write_table(table, batch_save_path)
+
+        return batch_save_path
+
+
+    @classmethod
+    async def _async_compute(
+            queue:asyncio.Queue,
+            executor,
+            merge_pair_fc:t.Callable,
+            collector:t.Callable,
+            L, R, new_token
+            ):
+        loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
+
+        while True:
+            item = await queue.get() # item: (tokens, offsets), b_order
+
+            if item is None: # 收到结束信号
+                await queue.put(None) # 把结束信号放回去，以通知多个消费者
+                break
+
+            # 主线程接收 merged_tokens, merged_offsets
+            result = await loop.run_in_executor(executor, merge_pair_fc, item[0], L, R, new_token)
+
+            if collector:
+                await collector( (result, item[1]) ) # 收集 (merged_tokens, merged_offsets), b_order
 
 
     @classmethod
@@ -1479,25 +1524,43 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         new_token = np.int32(new_token)
 
         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-        producer:t.Generator = cls.yield_tokens_offsets(yield_batch)
+        # batch --> (tokens, offsets), order
+        yield_tokens_offsets_order:t.Generator = cls.yield_tokens_offsets_order(yield_batch)
 
-        # 在主线程接收 "算" 的result到 queue2. 这里跨进程会发生一次pickle+copy
+        # 在主线程接收 "读" 的result（tokens_offsets, b_order）到 queue1
+        queue1 = asyncio.Queue(cls.max_queue_size)
+
+        # 一个 read 任务即可
+        read_task = asyncio.create_task(async_queue_get(yield_tokens_offsets_order, queue1))
+
+        # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行fc_merge_pair_batch
+        # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
         queue2 = asyncio.Queue(cls.max_queue_size)
-        async def collector(result):
+        async def compute_collector(result):
             await queue2.put(result)
         
+        compute_task = cls._async_compute(queue1, executor, fc_merge_pair_batch, compute_collector, L, R, new_token)
+        compute_tasks = [
+            asyncio.create_task(compute_task) for _ in range(os.cpu_count())
+            ]
+        
+        # 计算任务全部执行完之后, 要加一个None作为结束信号到queue2
+        async def compute_end_tasks():
+            await asyncio.gather(*compute_tasks)
+            await compute_collector(None)
+
+        # 在主线程接收 "写" 的result（path）到 written_parts. 只有主线程改变 written_parts，所以它安全
+        written_parts = []
+        def write_collector(result):
+            written_parts.append(result)
+        
+        # 单个 write 任务: 从 queue2 中得到素材, 送入进程池执行 cls._write_merge_batch，
+        write_task = async_queue_process(queue2, executor, cls._write_merge_batch, write_collector)
+        write_tasks = [
+            asyncio.create_task(write_task) for _ in range(os.cpu_count())
+        ]
+
         async def main():
-            await asyncio.gather(
-                # 协程 读 - 算
-                pipeline_producer_consumer(producer, fc_merge_pair_batch, executor, os.cpu_count(),
-                                           collector, cls.max_queue_size, L, R, new_token),
-                
-                # 协程 写 TODO
-                async_queue_process(
-                    queue2, executor,
-                    cls._write_batch,
-                    None,
-                    writer)
-                )
+            await asyncio.gather(read_task, compute_end_tasks(), *write_tasks) 
             
         asyncio.run(main())
