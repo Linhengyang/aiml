@@ -57,14 +57,14 @@ def allocate_memory(block_size):
 
 
 # 返回np.array of merged_tokens_flat/offsets给python
-def merge_pair_batch(
-    memoryview tokens_flat, # memoryview of int32
-    memoryview offsets, # memoryview of int64
-    pair_L, # int32
-    pair_R, # int32
-    new_token, # int32
-    **kwargs
+cpdef merge_pair_batch(
+    object tokens_offsets,
+    np.int32_t pair_L,
+    np.int32_t pair_R,
+    np.int32_t new_token,
 ):
+    cdef np.ndarray[np.int32_t, ndim=1, mode="c"] tokens_flat = tokens_offsets[0]
+    cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets[1]
     # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
     shrink_memory_pool()
     
@@ -81,8 +81,8 @@ def merge_pair_batch(
     
     # const int32_t[::1]保证 memoryview是只读+内存连续的
     # 因为tokens_flat来自 np.array(..., dtype=..., copy=False) 共享了只读数据
-    cdef const int32_t[::1] tokens_flat_view = tokens_flat
-    cdef const int64_t[::1] offsets_view = offsets
+    cdef const int32_t[:] tokens_flat_view = tokens_flat
+    cdef const int64_t[:] offsets_view = offsets
 
     # get input ptr from memoryview input(zero-copy)
     cdef const int32_t* tokens_flat_ptr = &tokens_flat_view[0]

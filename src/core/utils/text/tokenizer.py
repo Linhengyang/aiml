@@ -626,7 +626,7 @@ import pyarrow.compute as pc
 import numpy as np
 from collections import defaultdict
 from multiprocessing import get_context, Manager
-from ..file.parquet_io import yield_parquet_batch
+from ..file.parquet_io import yield_parquet_batch, concate_parquet_files
 from ..file.folder_op import clean_folder
 
 
@@ -657,16 +657,17 @@ pa.schema([
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
 def merge_pair_batch_twoloop(
-        tokens_flat:memoryview, # memory of int32
-        offsets:memoryview, # memory of int64
+        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
         pair_L:np.int32,
         pair_R:np.int32,
         new_token:np.int32,
         **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
-    # tokens_flat: [1, 2, 3, 4, 5]
-    # offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
+    # tokens_flat:np.ndarray, # np.ndarray of int32
+    # offsets:np.ndarray, # np.ndarray of int64
+    # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
+    tokens_flat, offsets = tokens_offsets
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     # 第一遍遍历，确定 merged 后, 各个 tokens 的长度（通过offsets确定）
@@ -699,8 +700,8 @@ def merge_pair_batch_twoloop(
 
 
 def _merge_pair_core(
-        input_tokens:memoryview, # memory of int32
-        output_tokens:memoryview, # memory of int32
+        input_tokens:np.ndarray, # np.ndarray of int32
+        output_tokens:np.ndarray, # np.ndarray of int32
         pair_L:np.int32,
         pair_R:np.int32,
         new_token:np.int32
@@ -726,16 +727,17 @@ def _merge_pair_core(
 
 
 def merge_pair_batch_memcontiguous(
-        tokens_flat:memoryview, # memory of int32
-        offsets:memoryview, # memory of int64
+        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
         pair_L:np.int32,
         pair_R:np.int32,
         new_token:np.int32,
         **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
-    # tokens_flat: [1, 2, 3, 4, 5]
-    # offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
+    # tokens_flat:np.ndarray, # np.ndarray of int32
+    # offsets:np.ndarray, # np.ndarray of int64
+    # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
+    tokens_flat, offsets = tokens_offsets
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -766,16 +768,17 @@ def merge_pair_batch_memcontiguous(
 
 
 def merge_pair_batch_parallel(
-        tokens_flat:memoryview, # memory of int32
-        offsets:memoryview, # memory of int64
+        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
         pair_L:np.int32,
         pair_R:np.int32,
         new_token:np.int32,
         **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
-    # tokens_flat: [1, 2, 3, 4, 5]
-    # offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
+    # tokens_flat:np.ndarray, # np.ndarray of int32
+    # offsets:np.ndarray, # np.ndarray of int64
+    # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
+    tokens_flat, offsets = tokens_offsets
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -1018,6 +1021,14 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     @classmethod
+    def yield_tokens_offsets_order(cls, yield_batch: t.Generator):
+        for i, batch in enumerate(yield_batch):
+            tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
+            offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
+            yield (tokens_flat, offsets), i
+    
+
+    @classmethod
     def _pcounts_batch(cls, batch):
         '''
         对一个 batch 统计 pair-counts
@@ -1031,7 +1042,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
     def _get_p_counts_pq(self, tokens_pq, executor) -> str:
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-        file_p_counts = defaultdict(int) # parquet file 的 pair-counts
+        file_p_counts = defaultdict(int) # 记录该 parquet file 的 pair-counts
 
         futures = [executor.submit(self._pcounts_batch, batch) for batch in yield_tokens]
         for future in as_completed(futures):
@@ -1088,6 +1099,29 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         return occur_most_pair, max_occur
 
+
+
+    @classmethod
+    def _write_merge_batch(cls, tokens_offsets, merge_func, L, R, new_token, save_dir, src_fname, b_order):
+        # tokens_offsets: tuple of tokens_flat: int32 ndarray, offsets: int64 ndarray
+        # merge_fun: 执行 merge pair的函数. L, R, new_token
+        # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
+        # b_order: 批次batch的序号
+
+        # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
+        valid_merged_tokens_flat, valid_merged_offsets = merge_func(
+            tokens_offsets,
+            L, R, new_token)
+        
+        merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
+        batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
+        table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
+        
+        batch_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
+        pq.write_table(table, batch_save_path)
+
+        return batch_save_path
+
     
     @classmethod
     def _merge_tokens_save(
@@ -1096,7 +1130,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             to_merge_pair,
             new_token,
             tokens_pq,
-            fc_merge_pair_batch:t.Callable,
+            fc_merge:t.Callable,
             buffer_size,
             executor
             ):
@@ -1105,52 +1139,33 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
         then save result tokens chunks into a same-file-name parquet file to `save_dir`
 
-        读(从tokens_pq)
-        算(从fc_merge_pair_batch)
-        写(save_dir)
+        读(yield_tokens)
+        算(_thrd_process_tokens_batch)
+        写(writer.write_batch to save_dir)
         batches(buffer_size确定batch大小)
         '''
-        # 重新遍历读取当前 tokens_pq, merge 当前 tokens_pq 的 occur_most_pair, 缓存 merged tokens parquet file
-        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-
-        # merged result 也是下一个 merge rank 要读取的 parquet
-        merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
-
+        fname = os.path.basename(tokens_pq)
+        
         L, R = map(np.int32, to_merge_pair)
         new_token = np.int32(new_token)
 
-        with pq.ParquetWriter(merged_tokens_pq, cls.tokens_schema) as writer:
-            # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用同步顺序处理
-            for batch in yield_tokens:
-                new_batch = cls._thrd_process_tokens_batch(batch, fc_merge_pair_batch, L, R, new_token)
-                writer.write_batch( new_batch )
+        # 遍历读取当前 tokens_pq
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
+        yield_tokens_offsets_order:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
+
+        parts = []
+        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入-统一合并处理
+        futures = [
+            executor.submit(
+                cls._write_merge_batch, tokens_offsets, fc_merge, L, R, new_token, save_dir, fname, order
+                ) for tokens_offsets, order in yield_tokens_offsets_order]
+        
+        for future in as_completed(futures):
+            parts.append( future.result() )
+        
+        concate_parquet_files(parts, os.path.join(save_dir, fname), clean=True)
 
 
-    @classmethod
-    def _thrd_process_tokens_batch(
-        cls,
-        batch,
-        fc_merge_pair_batch:t.Callable,
-        L:np.int32,
-        R:np.int32,
-        new_token:np.int32
-        ):
-        # tokens_schema: token dtype pa.int32 --> tokens_flat: int32
-        tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy().data
-        # tokens_schema: list dtype pa.int64array --> offsets: int64
-        offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy().data
-
-        # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
-        valid_merged_tokens_flat, valid_merged_offsets = fc_merge_pair_batch(
-            tokens_flat,
-            offsets,
-            L, R, new_token
-            )
-
-        merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
-        new_batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
-
-        return new_batch
 
 
     def _next_tokens_dir(
@@ -1177,7 +1192,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 to_merge_pair = occur_most_pair, 
                 new_token = new_token,
                 tokens_pq = tokens_pq,
-                fc_merge_pair_batch = self._func_merge_pair_batch,
+                fc_merge = self._func_merge_pair_batch,
                 buffer_size = self._buffer_size,
                 executor = executor
                 )
@@ -1299,17 +1314,29 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         self._register_special_tokens()
 
 
+
     def extend_bpe(self, *args, **kwargs):
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'
         if not self._merge_ranks:
             raise RuntimeError(f'merge_ranks empty. should run `train_bpe`.')
         #TODO    
-        pass
+        raise NotImplementedError(f'tokenizer extend not implemented')
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 from ..common.base_class import MemorySwitch
-    
-
 
 class memory_control:
     def __init__(self, switch:MemorySwitch, block_size):
@@ -1331,13 +1358,14 @@ class boostBBPETokenizer(bufferBBPETokenizer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+
     def train_bpe(self,
                   num_merges:int|None = None, # global num merges fir the tokenizer
                   *,
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 28, # max num of tokens-chunks in memory. recommend to 1GB
+                  buffer_size:int = 1 << 12, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
@@ -1347,11 +1375,13 @@ class boostBBPETokenizer(bufferBBPETokenizer):
             corpora = [corpora]
             colnames = [None]
 
+        from merge_pair import merge_pair_batch
         import merge_pair as booster
+
 
         self._set_config(
             buffer_size = buffer_size,
-            fc_merge_pair_batch= booster.merge_pair_batch)
+            fc_merge_pair_batch= merge_pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
@@ -1390,28 +1420,154 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 
-#TODO
+
+from ...design.async_outline import async_queue_get, async_queue_process
+import asyncio
+
+
+
+def serialize_pa_batch(batch: pa.RecordBatch) -> bytes:
+    sink = pa.BufferOutputStream()
+    writer = pa.ipc.RecordBatchStreamWriter(sink, batch.schema)
+    writer.write_batch(batch)
+    writer.close()
+    return sink.getvalue()
+
+
+
+
+def deserialize_batch(buf: bytes) -> pa.RecordBatch:
+    reader = pa.ipc.RecordBatchStreamReader(buf)
+    return reader.read_next_batch()
+
+
+
+
+
+
+
+
 class asyncBBPETokenizer(boostBBPETokenizer):
     '''
-    bpe_single_merge: 
-    前半部分：生产者不断生产 tokens(list of ints)
-                消费者不断消费(一.把tokens写入disk stored_tokens; 二.计算partial_p_counts,累加到 agg_p_counts)
-    tokens_generator  --tokens-->  append in stored_tokens disk
-                        --tokens-->  get_pair_counts --> partial_p_counts --> aggregate in agg_p_counts
-
-    tokens_generator替换为一个 fetch-tokens 协程:
-    协程 tokens_generator:
-        协程开始
-        await fetch_next_tokens # 暂停直到 next tokens fetched
-        协程恢复
-        yield next_tokens # 吐出 next tokens
-
-    stored_tokens:
-    协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, write tokens to stored_tokens
-
-    agg_p_counts:
-    协程 tokens_generator 一旦吐出 tokens, if len(tokens) > 1, apply get_pair_counts on tokens, get p_counts, aggregate p_counts in agg_p_counts
-
-    直到 fetch all tokens
+    异步的生产者-消费这模式, 是通过一个queue连接, 但解耦了 生产数据 和 消费数据 两个步骤之间的依赖关系，使得
+    生产和消费两个异步task可以自顾自运行.
     '''
-    pass
+    max_queue_size = 10
+
+    
+    @classmethod
+    def _write_merge_batch(cls, merged_tokens_offsets_order, save_dir, src_fname):
+        (merged_tokens, merged_offsets), b_order = merged_tokens_offsets_order
+
+        merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens)
+        batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
+        table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
+
+        batch_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
+        pq.write_table(table, batch_save_path)
+
+        return batch_save_path
+
+
+    @classmethod
+    async def _async_compute(
+        cls,
+        queue:asyncio.Queue,
+        executor,
+        merge_pair_fc:t.Callable,
+        collector:t.Callable,
+        L, R, new_token
+        ):
+        loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
+
+        while True:
+            item = await queue.get() # item: (tokens, offsets), b_order
+
+            if item is None: # 收到结束信号
+                await queue.put(None) # 把结束信号放回去，以通知多个消费者
+                break
+
+            # 主线程接收 merged_tokens, merged_offsets
+            result = await loop.run_in_executor(executor, merge_pair_fc, item[0], L, R, new_token)
+
+            if collector:
+                await collector( (result, item[1]) ) # 收集 (merged_tokens, merged_offsets), b_order
+
+
+    @classmethod
+    def _merge_tokens_save(
+            cls,
+            save_dir,
+            to_merge_pair,
+            new_token,
+            tokens_pq,
+            fc_merge:t.Callable,
+            buffer_size,
+            executor,
+            ):
+        '''
+        given tokens parquet file `tokens_pq`,
+        merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
+        then save result tokens chunks into a same-file-name parquet file to `save_dir`
+
+        batches(buffer_size确定batch大小)
+        异步:
+        读(yield_tokens) as 生产者 ---> 队列1
+        算(_thrd_process_tokens_batch) as 队列1 消费者, 队列2 生产者 ---> 队列2
+        写(writer.write_batch to save_dir) as 队列2消费者
+        '''
+        NUM_COMPUTERS = 4
+        # 序列化步骤要合入 generator
+        yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
+
+        fname = os.path.basename(tokens_pq)
+
+        L, R = map(np.int32, to_merge_pair)
+        new_token = np.int32(new_token)
+
+        yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
+        # batch --> (tokens, offsets), order
+        yield_tokens_offsets_order:t.Generator = cls.yield_tokens_offsets_order(yield_batch)
+
+        async def main():
+            # 在主线程接收 "读" 的result（tokens_offsets, b_order）到 queue1
+            queue1 = asyncio.Queue(cls.max_queue_size)
+
+            # 一个 read 任务即可
+            read_task = asyncio.create_task(async_queue_get(yield_tokens_offsets_order, queue1))
+
+            # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行fc_merge_pair_batch
+            # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
+            queue2 = asyncio.Queue(cls.max_queue_size)
+            async def compute_collector(result):
+                await queue2.put(result)
+            
+            compute_tasks = [
+                asyncio.create_task(
+                    cls._async_compute(queue1, executor, fc_merge, compute_collector, L, R, new_token)
+                    )
+                for _ in range(NUM_COMPUTERS)]
+            
+            # 计算任务全部执行完之后, 要加一个None作为结束信号到queue2
+            async def compute_end_tasks():
+                await asyncio.gather(*compute_tasks)
+                await compute_collector(None)
+
+            # 在主线程接收 "写" 的result（path）到 written_parts. 只有主线程改变 written_parts，所以它安全
+            written_parts = []
+            async def write_collector(result):
+                written_parts.append(result)
+            
+            # 单个 write 任务: 从 queue2 中得到素材, 送入进程池执行 cls._write_merge_batch，
+            write_tasks = [
+                asyncio.create_task(
+                    async_queue_process(queue2, executor, cls._write_merge_batch, write_collector, save_dir, fname)
+                    )
+                for _ in range(os.cpu_count()-NUM_COMPUTERS)]
+
+            await asyncio.gather(read_task, asyncio.create_task(compute_end_tasks()), *write_tasks)
+            return written_parts
+            
+        written_parts = asyncio.run(main())
+
+        concate_parquet_files(written_parts, os.path.join(save_dir, fname), clean=True)
