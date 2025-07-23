@@ -96,8 +96,21 @@ def concate_parquet_files(files, concat_path, clean=True):
 
 
 
+def serialize_pa_batch(batch: pa.RecordBatch) -> bytes:
+    sink = pa.BufferOutputStream()
+    writer = pa.ipc.RecordBatchStreamWriter(sink, batch.schema)
+    writer.write_batch(batch)
+    writer.close()
+    return sink.getvalue()
 
 
+
+
+
+
+def deserialize_pa_batch(buf: bytes) -> pa.RecordBatch:
+    reader = pa.ipc.RecordBatchStreamReader(buf)
+    return reader.read_next_batch()
 
 
 
