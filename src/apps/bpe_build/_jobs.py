@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 import os
 import regex as re
-from ...core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer, boostBBPETokenizer
+from ...core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer, boostBBPETokenizer, asyncBBPETokenizer
 
 configs = yaml.load(open('src/apps/bpe_build/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -48,7 +48,7 @@ def bpe_train(num_merges:int, save_tok_name:str):
     for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
         os.makedirs(folder, exist_ok=True)
         
-    tok = boostBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir)
+    tok = asyncBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir)
     corpora = [valid_pq,]
     colnames=['text',]
 
@@ -74,7 +74,7 @@ def bpe_train(num_merges:int, save_tok_name:str):
 def bpe_continue(num_merges:int, save_tok_name:str, *, tok_path:str|None):
 
     print('continue to run BPE on dataset TinyStories')
-    tok = boostBBPETokenizer(name='init', buffer_dir=buffer_dir)
+    tok = asyncBBPETokenizer(name='init', buffer_dir=buffer_dir)
 
     if tok_path and os.path.isfile(tok_path):
         tok.load(tok_path)

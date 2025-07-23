@@ -1155,8 +1155,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         parts = []
         # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入-统一合并处理
-        futures = [executor.submit(cls._write_merge_batch, tokens_offsets, fc_merge, L, R, new_token, save_dir, fname, order)
-                   for tokens_offsets, order in yield_tokens_offsets_order]
+        futures = [
+            executor.submit(
+                cls._write_merge_batch, tokens_offsets, fc_merge, L, R, new_token, save_dir, fname, order
+                ) for tokens_offsets, order in yield_tokens_offsets_order]
         
         for future in as_completed(futures):
             parts.append( future.result() )
@@ -1420,7 +1422,6 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 from ...design.async_outline import async_queue_get, async_queue_process
-from ...utils.file.parquet_io import concate_parquet_files
 import asyncio
 
 
@@ -1470,12 +1471,13 @@ class asyncBBPETokenizer(boostBBPETokenizer):
 
     @classmethod
     async def _async_compute(
-            queue:asyncio.Queue,
-            executor,
-            merge_pair_fc:t.Callable,
-            collector:t.Callable,
-            L, R, new_token
-            ):
+        cls,
+        queue:asyncio.Queue,
+        executor,
+        merge_pair_fc:t.Callable,
+        collector:t.Callable,
+        L, R, new_token
+        ):
         loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
 
         while True:
@@ -1499,9 +1501,9 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             to_merge_pair,
             new_token,
             tokens_pq,
-            fc_merge_pair_batch:t.Callable,
+            fc_merge:t.Callable,
             buffer_size,
-            executor
+            executor,
             ):
         '''
         given tokens parquet file `tokens_pq`,
@@ -1514,11 +1516,11 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         算(_thrd_process_tokens_batch) as 队列1 消费者, 队列2 生产者 ---> 队列2
         写(writer.write_batch to save_dir) as 队列2消费者
         '''
+        NUM_COMPUTERS = 4
         # 序列化步骤要合入 generator
         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
 
-        # merged result 也是下一个 merge rank 要读取的 parquet
-        merged_tokens_pq = os.path.join(save_dir, os.path.basename(tokens_pq))
+        fname = os.path.basename(tokens_pq)
 
         L, R = map(np.int32, to_merge_pair)
         new_token = np.int32(new_token)
@@ -1527,40 +1529,45 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         # batch --> (tokens, offsets), order
         yield_tokens_offsets_order:t.Generator = cls.yield_tokens_offsets_order(yield_batch)
 
-        # 在主线程接收 "读" 的result（tokens_offsets, b_order）到 queue1
-        queue1 = asyncio.Queue(cls.max_queue_size)
-
-        # 一个 read 任务即可
-        read_task = asyncio.create_task(async_queue_get(yield_tokens_offsets_order, queue1))
-
-        # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行fc_merge_pair_batch
-        # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
-        queue2 = asyncio.Queue(cls.max_queue_size)
-        async def compute_collector(result):
-            await queue2.put(result)
-        
-        compute_task = cls._async_compute(queue1, executor, fc_merge_pair_batch, compute_collector, L, R, new_token)
-        compute_tasks = [
-            asyncio.create_task(compute_task) for _ in range(os.cpu_count())
-            ]
-        
-        # 计算任务全部执行完之后, 要加一个None作为结束信号到queue2
-        async def compute_end_tasks():
-            await asyncio.gather(*compute_tasks)
-            await compute_collector(None)
-
-        # 在主线程接收 "写" 的result（path）到 written_parts. 只有主线程改变 written_parts，所以它安全
-        written_parts = []
-        def write_collector(result):
-            written_parts.append(result)
-        
-        # 单个 write 任务: 从 queue2 中得到素材, 送入进程池执行 cls._write_merge_batch，
-        write_task = async_queue_process(queue2, executor, cls._write_merge_batch, write_collector)
-        write_tasks = [
-            asyncio.create_task(write_task) for _ in range(os.cpu_count())
-        ]
-
         async def main():
-            await asyncio.gather(read_task, compute_end_tasks(), *write_tasks) 
+            # 在主线程接收 "读" 的result（tokens_offsets, b_order）到 queue1
+            queue1 = asyncio.Queue(cls.max_queue_size)
+
+            # 一个 read 任务即可
+            read_task = asyncio.create_task(async_queue_get(yield_tokens_offsets_order, queue1))
+
+            # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行fc_merge_pair_batch
+            # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
+            queue2 = asyncio.Queue(cls.max_queue_size)
+            async def compute_collector(result):
+                await queue2.put(result)
             
-        asyncio.run(main())
+            compute_tasks = [
+                asyncio.create_task(
+                    cls._async_compute(queue1, executor, fc_merge, compute_collector, L, R, new_token)
+                    )
+                for _ in range(NUM_COMPUTERS)]
+            
+            # 计算任务全部执行完之后, 要加一个None作为结束信号到queue2
+            async def compute_end_tasks():
+                await asyncio.gather(*compute_tasks)
+                await compute_collector(None)
+
+            # 在主线程接收 "写" 的result（path）到 written_parts. 只有主线程改变 written_parts，所以它安全
+            written_parts = []
+            async def write_collector(result):
+                written_parts.append(result)
+            
+            # 单个 write 任务: 从 queue2 中得到素材, 送入进程池执行 cls._write_merge_batch，
+            write_tasks = [
+                asyncio.create_task(
+                    async_queue_process(queue2, executor, cls._write_merge_batch, write_collector, save_dir, fname)
+                    )
+                for _ in range(os.cpu_count()-NUM_COMPUTERS)]
+
+            await asyncio.gather(read_task, asyncio.create_task(compute_end_tasks()), *write_tasks)
+            return written_parts
+            
+        written_parts = asyncio.run(main())
+
+        concate_parquet_files(written_parts, os.path.join(save_dir, fname), clean=True)
