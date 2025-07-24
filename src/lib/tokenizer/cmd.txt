@@ -1,0 +1,6 @@
+# copy to build merge_pair package under directory `lib/tokenizer`:
+cd ../tokenizer
+python setup.py build_ext --inplace
+
+# then move *.so file to aiml/bin
+# set PYTHONPATH environment for correct import
