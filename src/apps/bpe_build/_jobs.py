@@ -74,7 +74,7 @@ def bpe_train(num_merges:int, save_tok_name:str):
 def bpe_continue(num_merges:int, save_tok_name:str, *, tok_path:str|None):
 
     print('continue to run BPE on dataset TinyStories')
-    tok = asyncBBPETokenizer(name='init', buffer_dir=buffer_dir)
+    tok = boostBBPETokenizer(name='init', buffer_dir=buffer_dir)
 
     if tok_path and os.path.isfile(tok_path):
         tok.load(tok_path)
