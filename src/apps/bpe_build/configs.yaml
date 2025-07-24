@@ -28,7 +28,7 @@ backup_init_dir: '../../data/TinyStories/bytes'
 
 
 # train-params
-num_merges: 32000
+num_merges: 1
 buffer_size: 1073741824
 save_tok_name: 'tinyTok'
 

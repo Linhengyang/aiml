@@ -62,7 +62,7 @@ def bpe_train():
         
     tok = asyncBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir, buffer_size=buffer_size)
     corpora = [valid_pq, train_pq]
-    colnames=['text',]
+    colnames = ['text']*len(corpora)
 
     tok.train_bpe(num_merges,
                   corpora=corpora,
