@@ -656,82 +656,11 @@ pa.schema([
 # merge_pair 如果是一个 C/C++ 封装的接口，那么传参 tokens 时, 会遍历整个list并拷贝。
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
-def merge_pair_batch_twoloop(
-        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
-        pair_L:np.int32,
-        pair_R:np.int32,
-        new_token:np.int32,
-        **kwargs
-        ) -> tuple[np.ndarray, np.ndarray]:
-    # tokens_flat:np.ndarray, # np.ndarray of int32
-    # offsets:np.ndarray, # np.ndarray of int64
-    # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
-    # tokens_lens: [1, 0, 2, 2]
-    tokens_flat, offsets = tokens_offsets
-    tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
-
-    # 第一遍遍历，确定 merged 后, 各个 tokens 的长度（通过offsets确定）
-    output_tokens_lens = tokens_lens # 直接修改 tokens_lens
-    for i in range( len(tokens_lens) ): # len(offsets)-1 == len(tokens_lens)
-        # 从 tokens_flat 中slice出 tokens
-        tokens = tokens_flat[offsets[i]:offsets[i+1]]
-        # 遍历 tokens, 看里面是否出现了 pair0 pair1
-        len_tokens, j = tokens_lens[i], 0
-        while j < len_tokens:
-            if j < len_tokens-1 and tokens[j] == pair_L and tokens[j+1] == pair_R:
-                j += 2
-                output_tokens_lens[i] -= 1 # 如果出现pair, 该tokens要发生一次merge, 长度-1
-            else:
-                j += 1
-
-    # # 确定output data 的size, 以及
-    output_tokens_flat = np.zeros(shape=(sum(output_tokens_lens),), dtype=np.int32)
-    output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
-
-    for i in range( len(output_tokens_lens) ): # len(output_tokens_lens) = len(output_offsets)-1
-        # 从 tokens_flat 中slice出 tokens
-        tokens = tokens_flat[offsets[i]:offsets[i+1]]
-        # 从 output_tokens_flat 中 slice 出 output tokens
-        output_tokens = output_tokens_flat[output_offsets[i]:output_offsets[i+1]]
-        _merge_pair_core(tokens, output_tokens, pair_L, pair_R, new_token)
-    
-    return output_tokens_flat, output_offsets
-
-
-
-def _merge_pair_core(
-        input_tokens:np.ndarray, # np.ndarray of int32
-        output_tokens:np.ndarray, # np.ndarray of int32
-        pair_L:np.int32,
-        pair_R:np.int32,
-        new_token:np.int32
-        ):
-    # 对 output_tokens 作 in-place 更新
-    _num_merges, i = 0, 0
-
-    if len(input_tokens) == 1: # 如果只剩下 一个 token, 那么就没有 merge pair 的必要
-        output_tokens[0] = new_token
-        return
-    
-    while i < len(input_tokens):
-        if i < len(input_tokens) - 1 and input_tokens[i] == pair_L and input_tokens[i+1] == pair_R:
-            output_tokens[i-_num_merges] = new_token
-            i += 2
-            _num_merges += 1
-        else:
-            output_tokens[i-_num_merges] = input_tokens[i]
-            i += 1
-    return
-
-
-
-
 def merge_pair_batch_memcontiguous(
         tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
         pair_L:np.int32,
         pair_R:np.int32,
         new_token:np.int32,
-        **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
     # tokens_flat:np.ndarray, # np.ndarray of int32
     # offsets:np.ndarray, # np.ndarray of int64
@@ -772,7 +701,6 @@ def merge_pair_batch_parallel(
         pair_L:np.int32,
         pair_R:np.int32,
         new_token:np.int32,
-        **kwargs
         ) -> tuple[np.ndarray, np.ndarray]:
     # tokens_flat:np.ndarray, # np.ndarray of int32
     # offsets:np.ndarray, # np.ndarray of int64
@@ -1029,17 +957,39 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
 
     @classmethod
-    def _get_pcounts_batch(cls, batch, b_order):
+    def _get_pcounts_batch(cls, tokens_offsets, b_order):
         '''
         对一个 batch 统计 pair-counts
+        batch: buffer_size 个 chunk of tokens
         '''
-        local_pcounts = {}
-        chunks = batch[cls.tokens_schema[0].name].to_pylist()
-        for tokens in chunks:
-            get_pair_counts(tokens, local_pcounts)
-        
-        return local_pcounts, b_order
+        tokens_flat, offsets = tokens_offsets
 
+        mask = np.full(shape=(len(tokens_flat),), fill_value=True)
+        chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
+        chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
+        # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
+        mask[np.where(chunk_ends_ == chunk_starts_)[0]] = False
+        mask_cp = mask.copy()
+
+        # 提取所有非chunk end的tokens
+        mask[chunk_ends_] = False
+        L_tokens_flat = tokens_flat[mask] # 保持dtype=int32, 可以为空
+        
+        # 提取所有非chunk start的tokens
+        mask_cp[chunk_starts_] = False
+        R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=int32, 可以为空
+
+        # 构建L_tokens_flat, R_tokens_flat作为列构建的(N, 2)的pairs 2darray
+        pairs = np.stack([L_tokens_flat.astype(np.int32), R_tokens_flat.astype(np.int32)], axis=1) # 可以为空
+        # 构建新的dtype, 使得每一行L_token,R_token作为一个元素
+        pair_dtype = np.dtype([('L', np.int32), ('R', np.int32)])
+        structured = pairs.view(pair_dtype).squeeze()
+        # 聚合计算频数
+        uniq_pairs, counts = np.unique(structured, return_counts=True)
+        pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts)).T # (N, 3)array as (L, R, counts)
+
+        return pcounts, b_order # pcounts 是(N,3)形状, dtype为(int32, int32, int64). 可以为空
+    
 
     @classmethod
     def _write_pcounts_batch(cls, pcounts_order, save_dir, src_tokens_fname) -> None|str:
@@ -1047,24 +997,23 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         buffer the pair-counts for the batch with 'order'
         如果该 batch 的 p-counts 为空, 那么返回None. 否则返回该 batch 对应的 p-counts parquet 文件path
         '''
-        b_pcounts, b_order = pcounts_order
-        datapoints = [ (l, r, count) for (l, r), count in b_pcounts.items() ]
+        b_pcounts, b_order = pcounts_order # b_pcounts: (N, 3)shape, (int32, int32, int64)dtypes
 
-        if not datapoints:
+        if not b_pcounts.shape[0]:
             return None
         
-        L_tokens, R_tokens, counts = zip(*datapoints)
         data = {
-            cls.p_counts_schema[0].name: list(L_tokens), # L: L_tokens
-            cls.p_counts_schema[1].name: list(R_tokens), # R: R_tokens
-            cls.p_counts_schema[2].name: list(counts), # counts: counts
+            cls.p_counts_schema[0].name: b_pcounts[:, 0], # L: L_tokens
+            cls.p_counts_schema[1].name: b_pcounts[:, 1], # R: R_tokens
+            cls.p_counts_schema[2].name: b_pcounts[:, 2], # counts: counts
             }
-        del b_pcounts # 节省内存
 
         table = pa.Table.from_pydict(data, cls.p_counts_schema)
         
         save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
         pq.write_table(table, save_path)
+
+        del b_pcounts # 已经落盘了就可以删了
 
         return save_path
 
@@ -1079,14 +1028,15 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         results = []
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
+        data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
 
-        futures = [executor.submit(self._get_pcounts_batch, batch, i) for i, batch in enumerate(yield_tokens)]
+        futures = [executor.submit(self._get_pcounts_batch, tokens_offsets, order) for tokens_offsets, order in data_gen]
         for future in as_completed(futures):
             b_pcounts, b_order = future.result()
             results.append(
                 self._write_pcounts_batch( (b_pcounts, b_order), pcounts_save_dir, tokens_fname)
                 )
-        
+            
         return results
     
 
@@ -1166,14 +1116,14 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         # 遍历读取当前 tokens_pq
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-        yield_tokens_offsets_order:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
+        data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
 
         parts = []
         # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入-统一合并处理
         futures = [
             executor.submit(
                 cls._write_merge_batch, tokens_offsets, fc_merge, L, R, new_token, save_dir, fname, order
-                ) for tokens_offsets, order in yield_tokens_offsets_order]
+                ) for tokens_offsets, order in data_gen]
         
         for future in as_completed(futures):
             parts.append( future.result() )
@@ -1512,9 +1462,6 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         '''
         NUM_COMPUTERS = 8
         NUM_WRITERS = 1
-        # 序列化步骤要合入 generator
-        yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-
         fname = os.path.basename(tokens_pq)
 
         L, R = map(np.int32, to_merge_pair)
@@ -1522,14 +1469,14 @@ class asyncBBPETokenizer(boostBBPETokenizer):
 
         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
         # batch --> (tokens, offsets), order
-        yield_tokens_offsets_order:t.Generator = cls.yield_tokens_offsets_order(yield_batch)
+        data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_batch)
 
         async def main():
             # 在主线程接收 "读" 的result（tokens_offsets, b_order）到 queue1
             queue1 = asyncio.Queue(cls.max_queue_size)
 
             # 一个 read 任务即可
-            read_task = asyncio.create_task(async_queue_get(yield_tokens_offsets_order, queue1))
+            read_task = asyncio.create_task(async_queue_get(data_gen, queue1))
 
             # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行fc_merge_pair_batch
             # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
