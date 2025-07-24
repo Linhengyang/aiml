@@ -3,4 +3,8 @@
 *.tok
 *.vocab
 **/.pytest_cache
+**/.cpptest_cache
 tests/temp
+**/build
+.env
+**/*.so
