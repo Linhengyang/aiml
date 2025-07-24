@@ -22,6 +22,18 @@ backup_init_dir = configs['backup_init_dir']
 
 
 
+################## backup init to data/TinyStories/bytes ##################
+num_merges = configs['num_merges']
+buffer_size = configs['buffer_size']
+save_tok_name = configs['save_tok_name']
+
+
+
+
+
+
+
+
 
 def bpe_prepare():
     print('insight on dataset TinyStories')
@@ -41,21 +53,22 @@ def bpe_prepare():
 
 
 
-def bpe_train(num_merges:int, save_tok_name:str):
+def bpe_train():
     print('begin to run BPE on dataset TinyStories')
     train_pq = configs['train_pq']
     valid_pq = configs['valid_pq']
     for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
         os.makedirs(folder, exist_ok=True)
         
-    tok = asyncBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir)
-    corpora = [valid_pq,]
+    tok = asyncBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir, buffer_size=buffer_size)
+    corpora = [valid_pq, train_pq]
     colnames=['text',]
 
     tok.train_bpe(num_merges,
                   corpora=corpora,
                   colnames=colnames,
                   backup_init_tokens_dir=backup_init_dir,
+                  buffer_size=buffer_size,
                   verbose=True
                   )
 
@@ -71,7 +84,7 @@ def bpe_train(num_merges:int, save_tok_name:str):
 
 
 
-def bpe_continue(num_merges:int, save_tok_name:str, *, tok_path:str|None):
+def bpe_continue(tok_path:str|None):
 
     print('continue to run BPE on dataset TinyStories')
     tok = asyncBBPETokenizer(name='init', buffer_dir=buffer_dir)
@@ -83,7 +96,7 @@ def bpe_continue(num_merges:int, save_tok_name:str, *, tok_path:str|None):
     # 就会自动分析该读取的中间文件，以继续训练
 
     # continue train 下, corpora必须显式地输入None
-    tok.train_bpe(num_merges, corpora=None, verbose=True)
+    tok.train_bpe(num_merges, corpora=None, verbose=True, buffer_size=buffer_size)
 
     # rename and save the updated tokenizer
     tok.name = save_tok_name

@@ -6,7 +6,6 @@ from src.core.utils.common.performance import timeit
 
 if __name__ == "__main__":
     bpe_prepare()
-    # tok_path = '../artifact/bpe_build/tokenizer/tinyTok_7.tok'
     with timeit():
-        bpe_continue(8, 'tinyTok', tok_path=None)
-    # tok_fpath, vocab_cache_dir = bpe_build()
+        # tok_path=None表示不load, 从0开始续train
+        bpe_continue(tok_path=None)
