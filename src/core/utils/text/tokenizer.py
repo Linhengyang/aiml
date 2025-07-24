@@ -736,6 +736,18 @@ def merge_pair_batch_parallel(
 
 
 
+def merge_pair_batch_np(
+        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
+        pair_L:np.int32,
+        pair_R:np.int32,
+        new_token:np.int32,
+        ) -> tuple[np.ndarray, np.ndarray]:
+    
+    tokens_flat, offsets = tokens_offsets
+
+
+
+
 
 
 
@@ -761,10 +773,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
     由于有中间结果可以和 merge_ranks 相互校对, 所以buffer之后存在一个"续训"的概念: 从init/load到的tok, 检查它的merge_ranks状
     态是否符合buffer_tokens文件。若符合, 则从buffer_tokens续train
+    
+    tokens ID: uint16是0-65536, 足够覆盖小的tokenizer了。2个bytes最多覆盖-32768(int16下限)到65535(uint16上限)=98304
+    目前最大的GPT4的词表大小(不包含special marks)是10W+256=100256.
+    定义vocab_size(不包含special marks)不超过98304的为tinyTokenizer, 因为其token用2个字节就可以表达.
     '''
+    # tokens ID: uint16是0-65536，足够覆盖小的tokenizer了。2个bytes最多覆盖-32768(int16下限)到65535(uint16上限)=98304
+    # 最大的GPT4的词表大小(不包含special marks)是10W+256=100256.
+    # 定义vocab_size(不包含special marks)不超过98304的为tinyTokenizer, 因为其token用2个字节就可以表达.
     p_counts_schema = pa.schema([
-        pa.field('L', pa.int32()),
-        pa.field('R', pa.int32()),
+        pa.field('L', pa.uint16()),
+        pa.field('R', pa.uint16()),
         pa.field('counts', pa.int64()),
         ])
     
@@ -960,7 +979,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     def _get_pcounts_batch(cls, tokens_offsets, b_order):
         '''
         对一个 batch 统计 pair-counts
-        batch: buffer_size 个 chunk of tokens
+        tokens: int32
         '''
         tokens_flat, offsets = tokens_offsets
 
