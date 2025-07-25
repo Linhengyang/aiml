@@ -774,23 +774,45 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     由于有中间结果可以和 merge_ranks 相互校对, 所以buffer之后存在一个"续训"的概念: 从init/load到的tok, 检查它的merge_ranks状
     态是否符合buffer_tokens文件。若符合, 则从buffer_tokens续train
     
-    tokens ID: uint16是0-65536, 足够覆盖小的tokenizer了。2个bytes最多覆盖-32768(int16下限)到65535(uint16上限)=98304
-    目前最大的GPT4的词表大小(不包含special marks)是10W+256=100256.
-    定义vocab_size(不包含special marks)不超过98304的为tinyTokenizer, 因为其token用2个字节就可以表达.
+    最大的中间结果: 全局 pair-counts, 一张形状为(N, 3)的表格. 每行三个元素分别是L_token, R_token, counts
+    首先分析一行占用空间:
+    考虑一个大小为 x GB的parquet语料文件, pq压缩率大概在2-10, 那么它应该是一个 10x GB左右的文本文件.
+    也即最多 10x G个token(单字节一个token). 从而pair-counts的counts(出现频数)最多就是10x G= x kW 左右. 如果用uint32(最大值43亿)
+    去存储, 那么得到可容纳的 x 大概是 43亿/1千万 = 430千万/1千万 = 430, 即430GB以内的 parquet语料文件, 其pair-counts值用uint32就好.
+    tokens ID而言, uint16值范围是0-65536, 足够覆盖小的tokenizer了。2个bytes最多覆盖65535(uint16上限).
+    GPT2的词表大小(不包含special marks)是5W+256=50256. vocab_size(不包含special marks)不超过65535的tok, 其token用2个字节(uint16)就可以表达.
+    总结一下:
+        一个counts占据 4(uint32, for 430GB parquet语料以下) 或 8(uint64, for 430GB parquet语料以上, 180万PB以下)字节.
+        两个tokens占据 4(uint16, for 6W 词表大小以下) 或 8(uint32, for 6W 词表大小以上)字节.
+    小语料+小词表 --> 每行8字节.   大语料+大词表 --> 每行16字节.   小语料大词表/大语料小词表都不考虑
+        
+    然后分析总行数N for merge epoch e:
+    考虑 e 时刻状态下的语料: 长度为L(个tokens), 词表大小为V(e=V-256), 它生成的 pair-tokens counts总行数, 有两个上限1: L, 上限2: V^2
+    两个上限共同起作用: 初期V^2小, L大, N < V^2. 随着merge进行, L逐渐降低(以衰减的速率降低), V^2逐渐增大(以2次的速率增大), 后期 N < L
+
+
+    当词表大小(不包括special marks)为N时, token-pair的总空间上限是N(N-1)-merge_times行. 对于merge epoch e(e=1,..,E), 在执行epoch e时, 
+    词表大小是 255+e, merge_times = e-1, 从而pair总空间大小上限 = e^2 + 508e + 64771. 比如merge 4W次, 那么pair总空间是16亿行. 假如
+    每行 2tokens+counts占据 a 字节, 那么pair-count的总占用空间上限大概是 16a 亿字节约等于 1526a GB.
+    
+    综上, 对于tinyTok(词表大小不超过65535), 以及430GB以下的parquet语料, 一行pair-counts用2*2+4=8字节. 但是, 6W次merge会造成pair-counts
+    统计表上限急剧(二次)增大, 仅merge 4W次就会有一个 1526*8 = 12000GB 的pair-counts上限. 对于超过6W次merge(要用4字节去存储tokens), 大于430GB
+    的parquet语料文件(要用8字节去存储counts), 那么一行就需要存储2*4+8=16字节, 配合急剧增大的pair-counts表格, 这个存储量是无法忍受的.
+    pair-counts表格除了跟随词表大小增大, 在实际运行中还受到语料大小限制: 长度为L的语料(L个token), 最多形成L-1行 pair-counts. 同样考虑一个大小为
+    x GB的parquet语料文件, 它应该是一个 10x GB左右的文本文件, 也就是说总token数量 < 10x G = x kW. 每行8/16字节, 那么整体pair-counts表格不超过
+    8000x W / 16000x W字节, 即76x / 150x GB
     '''
-    # tokens ID: uint16是0-65536，足够覆盖小的tokenizer了。2个bytes最多覆盖-32768(int16下限)到65535(uint16上限)=98304
-    # 最大的GPT4的词表大小(不包含special marks)是10W+256=100256.
-    # 定义vocab_size(不包含special marks)不超过98304的为tinyTokenizer, 因为其token用2个字节就可以表达.
     p_counts_schema = pa.schema([
         pa.field('L', pa.uint16()),
         pa.field('R', pa.uint16()),
-        pa.field('counts', pa.int64()),
+        pa.field('counts', pa.uint32()),
         ])
     
     
     tokens_schema = pa.schema([
-        pa.field( 'tokens', pa.large_list(pa.field('token', pa.int32())) ),
+        pa.field( 'tokens', pa.large_list(pa.field('token', pa.uint16())) ),
         ])
+
 
 
     def __init__(self, *args, **kwargs):
