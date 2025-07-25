@@ -1250,7 +1250,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
                   buffer_size:int = 1 << 30, # max num of tokens-chunks in memory. recommend to 1GB
-                  keep_window:int = 1, # max reserved tokens_pq file in disk
+                  keep_window:int = 3, # max reserved tokens_pq file in disk
                   fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
                   verbose:bool = False
                   ):
@@ -1268,10 +1268,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         if corpora is not None:
             self._clear()
             self._init_tokens(corpora, colnames, backup_init_tokens_dir)
-        # corpora 为 None 时, 模式是 续train
-        # 续train需要满足的条件会由 _prepair_train 检查或满足
+        # corpora 为 None 时, 模式是 续train.
+        # 续train需要满足的条件会由 _prepair_train 检查或满足. 
         else:
-            pass
+            self._build_vocab()
 
         with ProcessPoolExecutor(os.cpu_count()) as executor:
             # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突

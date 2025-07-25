@@ -60,7 +60,7 @@ def bpe_train():
     for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
         os.makedirs(folder, exist_ok=True)
         
-    tok = asyncBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir, buffer_size=buffer_size)
+    tok = bufferBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir, buffer_size=buffer_size)
     corpora = [valid_pq, train_pq]
     colnames = ['text']*len(corpora)
 
@@ -87,7 +87,7 @@ def bpe_train():
 def bpe_continue(tok_path:str|None):
 
     print('continue to run BPE on dataset TinyStories')
-    tok = asyncBBPETokenizer(name='init', buffer_dir=buffer_dir)
+    tok = bufferBBPETokenizer(name='init', buffer_dir=buffer_dir)
 
     if tok_path and os.path.isfile(tok_path):
         tok.load(tok_path)
