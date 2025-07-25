@@ -715,20 +715,6 @@ def merge_pair_batch_parallel(
 
 
 
-def merge_pair_batch_np(
-        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
-        pair_L:np.uint16,
-        pair_R:np.uint16,
-        new_token:np.uint16,
-        ) -> tuple[np.ndarray, np.ndarray]:
-    
-    tokens_flat, offsets = tokens_offsets
-
-
-
-
-
-
 
 
 
