@@ -632,37 +632,16 @@ from ..file.folder_op import clean_folder
 
 
 
-
-def check_tokens_schema(tokens_schema):
-    assert len(tokens_schema) == 1 and \
-           isinstance(tokens_schema.field(0).type, pa.ListType) and \
-           (tokens_schema.field(0).type.value_type.equals(pa.int32()) or \
-            tokens_schema.field(0).type.value_type.equals(pa.int64())), \
-f'''
-tokens_schema must be as following:
-pa.schema([
-    pa.field(
-        'tokens',
-        pa.list_(
-            pa.field('token', pa.int32())
-        )
-    )
-])
-'''
-
-
-
-
 # merge_pair 如果是一个 C/C++ 封装的接口，那么传参 tokens 时, 会遍历整个list并拷贝。
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
 def merge_pair_batch_memcontiguous(
         tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
-        pair_L:np.int32,
-        pair_R:np.int32,
-        new_token:np.int32,
+        pair_L:np.uint16,
+        pair_R:np.uint16,
+        new_token:np.uint16,
         ) -> tuple[np.ndarray, np.ndarray]:
-    # tokens_flat:np.ndarray, # np.ndarray of int32
+    # tokens_flat:np.ndarray, # np.ndarray of uint16
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
@@ -670,7 +649,7 @@ def merge_pair_batch_memcontiguous(
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
-    output_tokens_flat = np.zeros_like(tokens_flat, dtype=np.int32) # output tokens flat 只会比 token flat 短
+    output_tokens_flat = np.zeros_like(tokens_flat, dtype=np.uint16) # output tokens flat 只会比 token flat 短
 
     num_merges = 0
     for i in range( len(tokens_lens) ): # len(offsets)-1 == len(tokens_lens)
@@ -698,11 +677,11 @@ def merge_pair_batch_memcontiguous(
 
 def merge_pair_batch_parallel(
         tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
-        pair_L:np.int32,
-        pair_R:np.int32,
-        new_token:np.int32,
+        pair_L:np.uint16,
+        pair_R:np.uint16,
+        new_token:np.uint16,
         ) -> tuple[np.ndarray, np.ndarray]:
-    # tokens_flat:np.ndarray, # np.ndarray of int32
+    # tokens_flat:np.ndarray, # np.ndarray of uint16
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
@@ -710,7 +689,7 @@ def merge_pair_batch_parallel(
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
-    output_tokens_flat = np.zeros_like(tokens_flat, dtype=np.int32) # output tokens flat 只会比 token flat 短
+    output_tokens_flat = np.zeros_like(tokens_flat, dtype=np.uint16) # output tokens flat 只会比 token flat 短
     output_filter = np.zeros_like(tokens_flat, dtype=np.bool) # 从 output_tokens_flat 中 filter 出 output 的 mask
     
     # can parallel-program to speed upon loop i: thread-secure
@@ -738,9 +717,9 @@ def merge_pair_batch_parallel(
 
 def merge_pair_batch_np(
         tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
-        pair_L:np.int32,
-        pair_R:np.int32,
-        new_token:np.int32,
+        pair_L:np.uint16,
+        pair_R:np.uint16,
+        new_token:np.uint16,
         ) -> tuple[np.ndarray, np.ndarray]:
     
     tokens_flat, offsets = tokens_offsets
@@ -876,12 +855,12 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         从 corpus 中读取 batch of text, join/split 成 chunks 之后, 把每个 chunk encode 成 tokens(list of integers)
         把 tokens 写入到位于 buffer_dir 的 Parquet 文件。per tokens-chunk per row
 
-        tokens-chunk 是 ListArray 类型 --> list of int32 named 'token' --> list_of_ints_type
-            变长的 List Array, field 是 token, dtype 为 int32(token的最大vocab size 十几万即可, int32值域足够)
+        tokens-chunk 是 ListArray 类型 --> list of uint16 named 'token' --> list_of_ints_type
+            变长的 List Array, field 是 token, dtype 为 uint16(token的最大vocab size 十几万即可, 目前这个小tok uint16足够)
         
         Parquet table 的 schema:
             列名: tokens
-            column type: list_of_ints_type, which is pa.list_(pa.field('token', pa.int32()))
+            column type: list_of_ints_type, which is pa.list_(pa.field('token', pa.uint16()))
         '''
         # create and clean starting directory: _buffer_dir/tokens/0
         tokens_dir_0 = os.path.join(self._buffer_tokens_dir, '0')
@@ -992,8 +971,11 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     @classmethod
     def yield_tokens_offsets_order(cls, yield_batch: t.Generator):
         for i, batch in enumerate(yield_batch):
+            # 对于values, to_numpy() 会保留 原parquet 保存时设定的 dtype
             tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
+            # 对于offsets, to_numpy() 输出 int64
             offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
+
             yield (tokens_flat, offsets), i
     
 
@@ -1001,7 +983,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     def _get_pcounts_batch(cls, tokens_offsets, b_order):
         '''
         对一个 batch 统计 pair-counts
-        tokens: int32
+        tokens_flat: uint16
+        offsets: int64
         '''
         tokens_flat, offsets = tokens_offsets
 
@@ -1009,28 +992,37 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
         chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
         # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
-        mask[np.where(chunk_ends_ == chunk_starts_)[0]] = False
+        # 把这些 id 指向的位置设为 False
+        mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
         mask_cp = mask.copy()
 
         # 提取所有非chunk end的tokens
         mask[chunk_ends_] = False
-        L_tokens_flat = tokens_flat[mask] # 保持dtype=int32, 可以为空
+        L_tokens_flat = tokens_flat[mask] # 保持dtype=uint16, 可以为空
         
         # 提取所有非chunk start的tokens
         mask_cp[chunk_starts_] = False
-        R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=int32, 可以为空
+        R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=uint16, 可以为空
 
         # 构建L_tokens_flat, R_tokens_flat作为列构建的(N, 2)的pairs 2darray
-        pairs = np.stack([L_tokens_flat.astype(np.int32), R_tokens_flat.astype(np.int32)], axis=1) # 可以为空
+        dtype_L_tokens = cls.p_counts_schema[0].type.to_pandas_dtype()
+        dtype_R_tokens = cls.p_counts_schema[1].type.to_pandas_dtype()
+        pairs = np.stack([L_tokens_flat.astype(dtype_L_tokens), R_tokens_flat.astype(dtype_R_tokens)], axis=1) # 可以为空
+
         # 构建新的dtype, 使得每一行L_token,R_token作为一个元素
-        pair_dtype = np.dtype([('L', np.int32), ('R', np.int32)])
+        pair_dtype = np.dtype([('L', dtype_L_tokens), ('R', dtype_R_tokens)])
         structured = pairs.view(pair_dtype).squeeze()
+
         # 聚合计算频数
         uniq_pairs, counts = np.unique(structured, return_counts=True)
-        pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts)).T # (N, 3)array as (L, R, counts)
 
-        return pcounts, b_order # pcounts 是(N,3)形状, dtype为(int32, int32, int64). 可以为空
+        # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint32)
+        dtype_counts = cls.p_counts_schema[2].type.to_pandas_dtype()
+        pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts.astype(dtype_counts))).T
+
+        return pcounts, b_order # pcounts 是(N,3)形状, dtype为(uint16, uint16, uint32). 可以为空
     
+
 
     @classmethod
     def _write_pcounts_batch(cls, pcounts_order, save_dir, src_tokens_fname) -> None|str:
@@ -1038,7 +1030,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         buffer the pair-counts for the batch with 'order'
         如果该 batch 的 p-counts 为空, 那么返回None. 否则返回该 batch 对应的 p-counts parquet 文件path
         '''
-        b_pcounts, b_order = pcounts_order # b_pcounts: (N, 3)shape, (int32, int32, int64)dtypes
+        b_pcounts, b_order = pcounts_order # b_pcounts: (N, 3)shape, (uint16, uint16, uint32)dtypes
 
         if not b_pcounts.shape[0]:
             return None
@@ -1088,9 +1080,19 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         concatenation = pa.concat_tables(tables)
 
         L, R, counts = cls.p_counts_schema[0].name, cls.p_counts_schema[1].name, cls.p_counts_schema[2].name
+        
+        # group sum 会提升精度, 默认执行把dtype为 uint32 的counts 提升到 uint64 的counts_sum
         agg_pcounts = concatenation.group_by([L, R]).aggregate([(counts, 'sum')]) # counts 列 --> counts_sum 列
+        
+        # cast column counts_sum from uint64 to uint32
+        agg_col = '_'.join([counts, 'sum'])
+        agg_pcounts = agg_pcounts.set_column(
+            2,
+            agg_col,
+            agg_pcounts[agg_col].cast(cls.p_counts_schema[2].type, safe=False) # 强制从 uint64 到设定好的 dtype
+        )
 
-        return agg_pcounts, L, R, '_'.join([counts, 'sum'])
+        return agg_pcounts, L, R, agg_col
 
 
     @staticmethod
@@ -1109,8 +1111,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
     @classmethod
     def _write_merge_batch(cls, tokens_offsets, merge_func, L, R, new_token, save_dir, src_fname, b_order):
-        # tokens_offsets: tuple of tokens_flat: int32 ndarray, offsets: int64 ndarray
-        # merge_fun: 执行 merge pair的函数. L, R, new_token
+        # tokens_offsets: tuple of tokens_flat: uint16 ndarray, offsets: int64 ndarray
+        # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
         # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
         # b_order: 批次batch的序号
 
@@ -1151,13 +1153,16 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         batches(buffer_size确定batch大小)
         '''
         fname = os.path.basename(tokens_pq)
-        
-        L, R = map(np.int32, to_merge_pair)
-        new_token = np.int32(new_token)
+
+        dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
+
+        L, R = map(dtype_tokens, to_merge_pair)
+        new_token = dtype_tokens(new_token)
 
         # 遍历读取当前 tokens_pq
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
         data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
+        # data_gen yields: (tokens_flat:uint16 array, offsets:int64 array), i
 
         parts = []
         # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入-统一合并处理
@@ -1505,8 +1510,10 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         NUM_WRITERS = 1
         fname = os.path.basename(tokens_pq)
 
-        L, R = map(np.int32, to_merge_pair)
-        new_token = np.int32(new_token)
+        dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
+
+        L, R = map(dtype_tokens, to_merge_pair)
+        new_token = dtype_tokens(new_token)
 
         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
         # batch --> (tokens, offsets), order
