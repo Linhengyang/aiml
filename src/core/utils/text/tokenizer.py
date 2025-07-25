@@ -771,17 +771,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     两个上限共同起作用:
         初期V^2小, L大, N 主要由 V^2 限制
         随着merge进行, L逐渐降低(以衰减的速率), V^2逐渐增大(以2次的速率增大), 后期 N 主要由 L 限制
-
-    当词表大小(不包括special marks)为N时, token-pair的总空间上限是N(N-1)-merge_times行. 对于merge epoch e(e=1,..,E), 在执行epoch e时, 
-    词表大小是 255+e, merge_times = e-1, 从而pair总空间大小上限 = e^2 + 508e + 64771. 比如merge 4W次, 那么pair总空间是16亿行. 假如
-    每行 2tokens+counts占据 a 字节, 那么pair-count的总占用空间上限大概是 16a 亿字节约等于 1526a GB.
     
-    综上, 对于tinyTok(词表大小不超过65535), 以及430GB以下的parquet语料, 一行pair-counts用2*2+4=8字节. 但是, 6W次merge会造成pair-counts
-    统计表上限急剧(二次)增大, 仅merge 4W次就会有一个 1526*8 = 12000GB 的pair-counts上限. 对于超过6W次merge(要用4字节去存储tokens), 大于430GB
-    的parquet语料文件(要用8字节去存储counts), 那么一行就需要存储2*4+8=16字节, 配合急剧增大的pair-counts表格, 这个存储量是无法忍受的.
-    pair-counts表格除了跟随词表大小增大, 在实际运行中还受到语料大小限制: 长度为L的语料(L个token), 最多形成L-1行 pair-counts. 同样考虑一个大小为
-    x GB的parquet语料文件, 它应该是一个 10x GB左右的文本文件, 也就是说总token数量 < 10x G = x kW. 每行8/16字节, 那么整体pair-counts表格不超过
-    8000x W / 16000x W字节, 即76x / 150x GB
+    对于小词表而言, pair-count的 V^2 上限大概是 6W^2 = 36亿行, 每行12字节 ----> 40GB
     '''
     p_counts_schema = pa.schema([
         pa.field('L', pa.uint16()),
