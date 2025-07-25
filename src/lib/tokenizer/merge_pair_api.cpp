@@ -9,12 +9,12 @@
 extern "C" {
 
 return_bundle c_merge_pair_batch(
-    const int32_t* tokens_flat,
+    const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks, // num_chunks = len(offsets) - 1
-    const int32_t pair_L,
-    const int32_t pair_R,
-    const int32_t new_token
+    const uint16_t pair_L,
+    const uint16_t pair_R,
+    const uint16_t new_token
 ) {
     try
     {
@@ -39,7 +39,7 @@ return_bundle c_merge_pair_batch(
 
         // _LENGTH 长度
         // need size = sizeof(int) * _LENGTH
-        int32_t* output_tokens_flat = static_cast<int32_t*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(int32_t)));
+        uint16_t* output_tokens_flat = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(uint16_t)));
         for (int64_t i = 0; i < _LENGTH; ++i) {
             output_tokens_flat[i] = -1; // 全部初始化为 -1
         }
