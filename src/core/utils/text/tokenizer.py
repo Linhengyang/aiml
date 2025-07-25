@@ -1249,7 +1249,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 30, # max num of tokens-chunks in memory. recommend to 1GB
+                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
                   fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
                   verbose:bool = False
@@ -1338,7 +1338,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 20, # max num of tokens-chunks in memory. recommend to 1GB
+                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
@@ -1349,7 +1349,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
             colnames = [None]
 
         from merge_pair import merge_pair_batch
-        import merge_pair as booster
+        import merge_pair as switch
 
 
         self._set_config(
@@ -1370,7 +1370,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
         # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
         memblock_size = 40 * self._buffer_size
-        with memory_control(booster, memblock_size), ProcessPoolExecutor(os.cpu_count()) as executor:
+        with memory_control(switch, memblock_size), ProcessPoolExecutor(os.cpu_count()) as executor:
             # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
             # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
             tokens_dir_start = self._prepare_train(num_merges, executor)
