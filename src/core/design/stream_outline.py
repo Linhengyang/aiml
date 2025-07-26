@@ -22,7 +22,8 @@ def stream_parallel_process_with_pending(
     process_fn: t.Callable[[t.Any], t.Any],
     result_handler: t.Callable[[t.Any], None],
     max_pending: int = 8,
-    *args # 提交给 process_fn 的其他参数
+    process_args=(),
+    result_handler_args=(),
     ):
     '''
     流式并发处理生成器中的任务, 控制内存占用
@@ -30,15 +31,15 @@ def stream_parallel_process_with_pending(
     Args:
         executor: ProcessPoolExecutor / ThreadPoolExecutor
         data_gen: generator, 逐批生成任务数据
-        process_fn: 对每一批的处理函数(子进程中执行)
-        result_handler: 对任务结果的处理(在主线程中执行)
+        process_fn: 对每一批的处理函数(子进程中执行), 必须可以pickle
+        result_handler: 对任务结果的处理(在主线程中执行), 对pickle没有要求
         max_pending: 最大挂起任务数(根据内存控制)
     '''
     futures = set()
 
     for item in data_gen:
         # 提交任务
-        future = executor.submit(process_fn, item, *args)
+        future = executor.submit(process_fn, item, *process_args)
         futures.add(future)
 
         # 当任务队列长度达到 max_pending 时, 暂停提交任务, 等到部分已提交的任务完成并处理
@@ -47,9 +48,9 @@ def stream_parallel_process_with_pending(
             done, futures = wait(futures, return_when=FIRST_COMPLETED)
             for f in done:
                 result = f.result()
-                result_handler(result)
+                result_handler(result, *result_handler_args)
 
     # 收尾, 处理剩下的任务
     for f in futures:
         result = f.result()
-        result_handler(result)
+        result_handler(result, *result_handler_args)

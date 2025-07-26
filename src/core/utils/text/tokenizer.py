@@ -628,6 +628,7 @@ from collections import defaultdict
 from multiprocessing import get_context, Manager
 from ..file.parquet_io import yield_parquet_batch, concate_parquet_files
 from ..file.folder_op import clean_folder
+from ...design.stream_outline import stream_parallel_process_with_pending
 
 
 
@@ -957,7 +958,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     @classmethod
-    def _write_pcounts_batch(cls, pcounts_order, save_dir, src_tokens_fname) -> None|str:
+    def _write_pcounts_batch(cls, pcounts_order, save_dir, src_tokens_fname, collector:list):
         '''
         buffer the pair-counts for the batch with 'order'
         '''
@@ -978,18 +979,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         pq.write_table(table, save_path)
 
         del b_pcounts # 已经落盘了就可以删了
-
-        return save_path
+        collector.append(save_path)
     
 
     @staticmethod
-    def count_pair_batch(tokens_offsets, b_order, token_dtype):
+    def count_pair_batch(tokens_offsets_border, token_dtype):
         '''
         对一个 batch 统计 pair-counts: 返回一个 np.ndarray of L, R, counts
         tokens_flat: uint16
         offsets: int64
         '''
-        tokens_flat, offsets = tokens_offsets
+        (tokens_flat, offsets), b_order = tokens_offsets_border
 
         mask = np.full(shape=(len(tokens_flat),), fill_value=True)
         chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
@@ -1033,19 +1033,23 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, rank)
         os.makedirs(pcounts_save_dir, exist_ok=True) 
 
-        results = []
+        pcounts_path_collector = []
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
+        # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
         token_dtype = self.tokens_schema[0].type.value_type.to_pandas_dtype()
 
-        futures = [executor.submit(self.count_pair_batch, tokens_offsets, order, token_dtype) for tokens_offsets, order in data_gen]
-        for future in as_completed(futures):
-            b_pcounts, b_order = future.result()
-            results.append(
-                self._write_pcounts_batch( (b_pcounts, b_order), pcounts_save_dir, tokens_fname)
-                )
-            
-        return results
+        stream_parallel_process_with_pending(
+            executor,
+            data_gen, # data_gen: (tokens_flat, offsets), i
+            process_fn = self.count_pair_batch, # return (pcounts, b_order)
+            result_handler = self._write_pcounts_batch, 
+            max_pending = 8,
+            process_args = (token_dtype),
+            result_handler_args = (pcounts_save_dir, tokens_fname, pcounts_path_collector)
+        )
+
+        return pcounts_path_collector
     
 
     @classmethod
@@ -1077,12 +1081,12 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     @classmethod
-    def _write_merge_batch(cls, tokens_offsets, merge_func, L, R, new_token, save_dir, src_fname, b_order):
+    def _write_merge_batch(cls, tokens_offsets_border, merge_func, L, R, new_token, save_dir, src_fname):
         # tokens_offsets: tuple of tokens_flat: uint16 ndarray, offsets: int64 ndarray
+        # b_order: 批次batch的序号
         # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
         # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
-        # b_order: 批次batch的序号
-
+        tokens_offsets, b_order = tokens_offsets_border
         # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
         valid_merged_tokens_flat, valid_merged_offsets = merge_func(
             tokens_offsets,
@@ -1092,10 +1096,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
         table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
         
-        batch_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
-        pq.write_table(table, batch_save_path)
+        merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
+        pq.write_table(table, merged_save_path)
 
-        return batch_save_path
+        return merged_save_path
 
     
     @classmethod
@@ -1119,7 +1123,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         写(writer.write_batch to save_dir)
         batches(buffer_size确定batch大小)
         '''
-        fname = os.path.basename(tokens_pq)
+        src_fname = os.path.basename(tokens_pq)
 
         dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
 
@@ -1128,20 +1132,21 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         # 遍历读取当前 tokens_pq
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-        data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
         # data_gen yields: (tokens_flat:uint16 array, offsets:int64 array), i
+        data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
 
-        parts = []
+        merged_save_path_collector = []
         # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入-统一合并处理
-        futures = [
-            executor.submit(
-                cls._write_merge_batch, tokens_offsets, fc_merge, L, R, new_token, save_dir, fname, order
-                ) for tokens_offsets, order in data_gen]
+        stream_parallel_process_with_pending(
+            executor,
+            data_gen, # data_gen: (tokens_flat, offsets), i
+            process_fn = cls._write_merge_batch, # return merged_save_path
+            result_handler = lambda merged_save_path: merged_save_path_collector.append(merged_save_path), 
+            max_pending = 8,
+            process_args = (fc_merge, L, R, new_token, save_dir, src_fname)
+            )
         
-        for future in as_completed(futures):
-            parts.append( future.result() )
-        
-        concate_parquet_files(parts, os.path.join(save_dir, fname), clean=True)
+        concate_parquet_files(merged_save_path_collector, os.path.join(save_dir, src_fname), clean=True)
 
 
 
