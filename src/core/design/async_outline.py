@@ -40,7 +40,7 @@ async def async_queue_process(
         2. result从子进程pickle后拷贝到主线程
     所以要求 1. process_fc必须是可pickle的; 2. product必须是可pickle的; 3. result必须是可pickle的
     
-    考虑到collector只在主线程里执行, 而主线程是顺序的, collector可以是普通的容器.
+    考虑到collector只在主线程里执行, 而主线程是顺序的, collector可以是普通的容器(但必须要包一层异步以适配await)
     '''
     loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
     # 事件循环由 asyncio.run自动创建关闭, 不再使用 get_event_loop
@@ -55,7 +55,7 @@ async def async_queue_process(
         # 主线程 await 得到子进程 process_fc(product, *args) 的result, loop会执行一次跨进程拷贝
         result = await loop.run_in_executor(executor, process_fc, product, *args)
 
-        # 以一个in-place状态改变的方式，聚合异步消费的结果
+        # 以一个in-place状态改变的方式，在主线程异步聚合异步消费的结果
         if collector:
             await collector(result)
     
@@ -67,9 +67,9 @@ async def pipeline_producer_consumer(
         producer:t.Generator,
         process_fc:t.Callable,
         executor,
-        num_consumers:int=1,
-        collector:t.Callable|None=None,
-        max_queue_size:int=10,
+        max_queue_size:int,
+        num_consumers:int,
+        collector:t.Callable|None,
         *args):
     # 创建队列
     queue = asyncio.Queue(max_queue_size)
@@ -80,16 +80,17 @@ async def pipeline_producer_consumer(
         asyncio.create_task(async_queue_process(queue, executor, process_fc, collector, *args))
         for _ in range(num_consumers)
     ]
-
-    await producer_task
-    await asyncio.gather(*consumer_tasks)
+    
+    await asyncio.gather(producer_task, *consumer_tasks)
 
     if collector:
         await collector(None)
 
 
+# 以上三个公版异步函数, 只有 process_fc 在进程池/线程池, read到queue, await拿到process_fc的结果,
+# 以及收集结果 result 到 collector, 都是在主线程执行的.
 
-# 若在 executor 中执行 collector, 那么需要根据线程池/进程池的区别, 有不同的线程安全/内存贡献设计
+# 若要在 executor 中执行 collector, 那么需要根据线程池/进程池的区别, 有不同的线程安全/内存贡献设计
 # 若executor是线程池, 那么collector的设计如下:
 # shared_container = []
 # lock = asyncio.Lock()

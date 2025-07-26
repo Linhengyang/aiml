@@ -1036,7 +1036,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, rank)
         os.makedirs(pcounts_save_dir, exist_ok=True) 
 
-        pcounts_path_collector = []
+        pcounts_paths = []
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
         # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
@@ -1049,10 +1049,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             result_handler = self._write_pcounts_batch, 
             max_pending = 8,
             process_args = (token_dtype,),
-            result_handler_args = (pcounts_save_dir, tokens_fname, pcounts_path_collector)
+            result_handler_args = (pcounts_save_dir, tokens_fname, pcounts_paths)
         )
 
-        return pcounts_path_collector
+        return pcounts_paths
     
 
     @classmethod
@@ -1404,7 +1404,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 
-from ...design.async_outline import async_queue_get, async_queue_process
+from ...design.async_outline import async_queue_get, async_queue_process, pipeline_producer_consumer
 import asyncio
 
 
@@ -1417,9 +1417,51 @@ class asyncBBPETokenizer(boostBBPETokenizer):
     异步的生产者-消费这模式, 是通过一个queue连接, 但解耦了 生产数据 和 消费数据 两个步骤之间的依赖关系，使得
     生产和消费两个异步task可以自顾自运行.
     '''
-    max_queue_size = 10
+    _MAX_QUEUE_SIZE = 10
+    _NUM_COMPUTERS = 8
+    _NUM_WRITERS = 1
 
     
+    def _write_pcounts(self, tokens_pq, executor) -> list:
+        # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
+        rank, tokens_fname = tokens_pq.split('/')[-2:]
+
+        # 创建 本次 rank 的 buffer_pcounts_dir
+        pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, rank)
+        os.makedirs(pcounts_save_dir, exist_ok=True) 
+
+        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
+        # data_gen: (tokens_flat, offsets), i
+        data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
+        token_dtype = self.tokens_schema[0].type.value_type.to_pandas_dtype()
+
+        async def main():
+            # 一个in-place改变状态的收集函数.
+            pcounts_paths = []
+            async def collector(pcounts_order):
+                # 把落盘写到 collector 步骤中. 安全因为它 await 拿到process_fc 计算结果, 以及collector都在主线程中
+                if pcounts_order is not None:
+                    self._write_pcounts_batch(pcounts_order, pcounts_save_dir, tokens_fname, pcounts_paths)
+                else:
+                    pcounts_paths.append(None)
+            
+            pipeline_producer_consumer(
+                data_gen, # yield (tokens_flat, offsets), b_order
+                self.count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
+                executor,
+                self._MAX_QUEUE_SIZE,
+                1,
+                collector, # arg: (pcounts, b_order) --> in-place change pcounts_paths
+                token_dtype
+                )
+            
+            return pcounts_paths
+        
+        pcounts_paths = asyncio.run(main())
+
+        return [path for path in pcounts_paths if path] # collector会收集None作为结束信号
+
+
     @classmethod
     def _write_merge_batch(cls, merged_tokens_offsets_order, save_dir, src_fname):
         (merged_tokens, merged_offsets), b_order = merged_tokens_offsets_order
@@ -1428,15 +1470,16 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
         table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
 
-        batch_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
-        pq.write_table(table, batch_save_path)
+        merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
+        pq.write_table(table, merged_save_path)
 
-        return batch_save_path
+        return merged_save_path
 
 
-    @classmethod
+    # 公版的 async_queue_process 无法满足 process_fc/collector 消费另外处理后的 item from queue
+    # 故这里针对此场景订制了一个 _async_compute
+    @staticmethod
     async def _async_compute(
-        cls,
         queue:asyncio.Queue,
         executor,
         merge_pair_fc:t.Callable,
@@ -1481,8 +1524,6 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         算(_thrd_process_tokens_batch) as 队列1 消费者, 队列2 生产者 ---> 队列2
         写(writer.write_batch to save_dir) as 队列2消费者
         '''
-        NUM_COMPUTERS = 8
-        NUM_WRITERS = 1
         fname = os.path.basename(tokens_pq)
 
         dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
@@ -1496,14 +1537,14 @@ class asyncBBPETokenizer(boostBBPETokenizer):
 
         async def main():
             # 在主线程接收 "读" 的result（tokens_offsets, b_order）到 queue1
-            queue1 = asyncio.Queue(cls.max_queue_size)
+            queue1 = asyncio.Queue(cls._MAX_QUEUE_SIZE)
 
             # 一个 read 任务即可
             read_task = asyncio.create_task(async_queue_get(data_gen, queue1))
 
             # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行fc_merge_pair_batch
             # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
-            queue2 = asyncio.Queue(cls.max_queue_size)
+            queue2 = asyncio.Queue(cls._MAX_QUEUE_SIZE)
             async def compute_collector(result):
                 await queue2.put(result)
             
@@ -1511,7 +1552,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
                 asyncio.create_task(
                     cls._async_compute(queue1, executor, fc_merge, compute_collector, L, R, new_token)
                     )
-                for _ in range(NUM_COMPUTERS)]
+                for _ in range(cls._NUM_COMPUTERS)]
             
             # 计算任务全部执行完之后, 要加一个None作为结束信号到queue2
             async def compute_end_tasks():
@@ -1528,7 +1569,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
                 asyncio.create_task(
                     async_queue_process(queue2, executor, cls._write_merge_batch, write_collector, save_dir, fname)
                     )
-                for _ in range(NUM_WRITERS)]
+                for _ in range(cls._NUM_WRITERS)]
 
             await asyncio.gather(read_task, asyncio.create_task(compute_end_tasks()), *write_tasks)
             return written_parts
