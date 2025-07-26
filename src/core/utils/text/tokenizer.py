@@ -1045,7 +1045,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             process_fn = self.count_pair_batch, # return (pcounts, b_order)
             result_handler = self._write_pcounts_batch, 
             max_pending = 8,
-            process_args = (token_dtype),
+            process_args = (token_dtype,),
             result_handler_args = (pcounts_save_dir, tokens_fname, pcounts_path_collector)
         )
 
