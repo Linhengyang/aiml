@@ -985,9 +985,12 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     @staticmethod
     def count_pair_batch(tokens_offsets_border, token_dtype):
         '''
-        对一个 batch 统计 pair-counts: 返回一个 np.ndarray of L, R, counts
-        tokens_flat: uint16
-        offsets: int64
+        对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
+        3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是由输入 token_dtype 确定. counts dtype uint64
+
+        Args:
+            tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
+            dtype: np.uint16 / np.uint32 等
         '''
         (tokens_flat, offsets), b_order = tokens_offsets_border
 
