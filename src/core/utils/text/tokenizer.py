@@ -1458,7 +1458,6 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             return pcounts_paths
         
         pcounts_paths = asyncio.run(main())
-
         return [path for path in pcounts_paths if path] # collector会收集None作为结束信号
 
 
