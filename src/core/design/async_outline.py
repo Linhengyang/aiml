@@ -1,4 +1,4 @@
-# producer_consumer design pattern
+# customized design pattern for async process
 
 import asyncio
 import typing as t
@@ -33,21 +33,14 @@ async def async_queue_process(
     异步处理 queue 中的导出结果.
     处理函数 process_fc 是同步的, 且可并行. 它的第一个位置参数必须是队列中的 product
     executor 是线程池concurrent.futures.ThreadPoolExecutor/进程池concurrent.futures.ProcessPoolExecutor
-    collector(if not None)是结果收集器, 应该根据executor有不同的设计, 分别保证线程安全/内存可共享
 
-    若executor是线程池, 那么collector的设计如下:
-    shared_container = []
-    lock = asyncio.Lock()
-    async def collector(result):
-        async with lock: // 锁保证线程安全
-            shared_container.append(result)
-
-    若executor是进程池, 那么collector的设计如下:
-    from multiprocessing import Manager, get_context
-    manager = get_context("spawn").Manager() 或者是 Manager()
-    shared_container = manager.list() // 由一个进程管理的跨进程共享
-    async def collector(result):
-        shared_container.append(result)
+    `result = await loop.run_in_executor(executor, process_fc, product, *args)` 
+    对于进程池 executor, 上面代码有两次跨进程通信, 分别是
+        1. product从主线程pickle后拷贝到子进程executor
+        2. result从子进程pickle后拷贝到主线程
+    所以要求 1. process_fc必须是可pickle的; 2. product必须是可pickle的; 3. result必须是可pickle的
+    
+    考虑到collector只在主线程里执行, 而主线程是顺序的, collector可以是普通的容器.
     '''
     loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
     # 事件循环由 asyncio.run自动创建关闭, 不再使用 get_event_loop
@@ -93,3 +86,20 @@ async def pipeline_producer_consumer(
 
     if collector:
         await collector(None)
+
+
+
+# 若在 executor 中执行 collector, 那么需要根据线程池/进程池的区别, 有不同的线程安全/内存贡献设计
+# 若executor是线程池, 那么collector的设计如下:
+# shared_container = []
+# lock = asyncio.Lock()
+# async def collector(result):
+#     async with lock: // 锁保证线程安全
+#         shared_container.append(result)
+
+# 若executor是进程池, 那么collector的设计如下:
+# from multiprocessing import Manager, get_context
+# manager = get_context("spawn").Manager() 或者是 Manager()
+# shared_container = manager.list() // 由一个进程管理的跨进程共享
+# async def collector(result):
+#     shared_container.append(result)
