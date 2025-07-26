@@ -1445,7 +1445,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
                 else:
                     pcounts_paths.append(None)
             
-            pipeline_producer_consumer(
+            await pipeline_producer_consumer(
                 data_gen, # yield (tokens_flat, offsets), b_order
                 self.count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
                 executor,
