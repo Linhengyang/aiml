@@ -4,7 +4,7 @@
 import numpy as pynp
 import sys
 cimport numpy as np
-from libc.stdint cimport int32_t, int64_t
+from libc.stdint cimport uint16_t, int64_t
 import ctypes
 
 np.import_array()
@@ -13,19 +13,19 @@ cdef extern from "merge_pair.h":
 
     # 声明 C++ 中的 return_bundle 结构体
     struct return_bundle:
-        int32_t* output_tokens_flat_ptr
+        uint16_t* output_tokens_flat_ptr
         bint* output_filter_ptr
         int64_t* output_tokens_lens_ptr
     
 
     # 声明 C++ 中的 c_merge_pair_batch 函数
     return_bundle c_merge_pair_batch(
-        const int32_t* tokens_flat,
+        const uint16_t* tokens_flat,
         const int64_t* offsets,
         const size_t num_chunks,
-        const int32_t pair_L,
-        const int32_t pair_R,
-        const int32_t new_token
+        const uint16_t pair_L,
+        const uint16_t pair_R,
+        const uint16_t new_token
     )
 
     # 创建内存池
@@ -59,11 +59,11 @@ def allocate_memory(block_size):
 # 返回np.array of merged_tokens_flat/offsets给python
 cpdef merge_pair_batch(
     object tokens_offsets,
-    np.int32_t pair_L,
-    np.int32_t pair_R,
-    np.int32_t new_token,
+    np.uint16_t pair_L,
+    np.uint16_t pair_R,
+    np.uint16_t new_token,
 ):
-    cdef np.ndarray[np.int32_t, ndim=1, mode="c"] tokens_flat = tokens_offsets[0]
+    cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets[0]
     cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets[1]
     # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
     shrink_memory_pool()
@@ -73,19 +73,19 @@ cpdef merge_pair_batch(
 
     cdef size_t num_chunks = offsets.shape[0] - 1
     if num_chunks <= 0:
-        return pynp.array([], dtype=pynp.int32), pynp.array([0], dtype=pynp.int64)
+        return pynp.array([], dtype=pynp.uint16), pynp.array([0], dtype=pynp.int64)
     
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
         sys.exit(1)
     
-    # const int32_t[::1]保证 memoryview是只读+内存连续的
+    # const uint16_t[::1]保证 memoryview是只读+内存连续的
     # 因为tokens_flat来自 np.array(..., dtype=..., copy=False) 共享了只读数据
-    cdef const int32_t[:] tokens_flat_view = tokens_flat
+    cdef const uint16_t[:] tokens_flat_view = tokens_flat
     cdef const int64_t[:] offsets_view = offsets
 
     # get input ptr from memoryview input(zero-copy)
-    cdef const int32_t* tokens_flat_ptr = &tokens_flat_view[0]
+    cdef const uint16_t* tokens_flat_ptr = &tokens_flat_view[0]
     cdef const int64_t* offsets_ptr = &offsets_view[0]
 
     # deploy cpp function
@@ -100,7 +100,7 @@ cpdef merge_pair_batch(
 
 
     # build output tokens array & filter array
-    tokens_ptr = ctypes.cast(<size_t> result.output_tokens_flat_ptr, ctypes.POINTER(ctypes.c_int32))
+    tokens_ptr = ctypes.cast(<size_t> result.output_tokens_flat_ptr, ctypes.POINTER(ctypes.c_uint16))
     output_tokens_flat_np = pynp.ctypeslib.as_array(tokens_ptr, shape=(_LENGTH,))
 
     filter_ptr = ctypes.cast(<size_t> result.output_filter_ptr, ctypes.POINTER(ctypes.c_bool))

@@ -27,6 +27,13 @@ valid_pq: '../../data/TinyStories/raw/validation.parquet'
 backup_init_dir: '../../data/TinyStories/bytes'
 
 
+# train-params
+num_merges: 8
+buffer_size: 1073741824
+save_tok_name: 'tinyTok'
+
+
+
 
 
 
