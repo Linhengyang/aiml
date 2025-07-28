@@ -633,14 +633,13 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 
 
 
-def count_pair_batch(tokens_offsets_border, token_dtype, *args, **kwargs):
+def count_pair_batch(tokens_offsets_border, *args, **kwargs):
     '''
     对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
-    3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是由输入 token_dtype 确定. counts dtype uint64
+    3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是uint16 确定. counts dtype uint64
 
     Args:
         tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
-        dtype: np.uint16 / np.uint32 等
     '''
     (tokens_flat, offsets), b_order = tokens_offsets_border
 
@@ -661,10 +660,10 @@ def count_pair_batch(tokens_offsets_border, token_dtype, *args, **kwargs):
     R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=uint16, 可以为空
 
     # 构建L_tokens_flat, R_tokens_flat作为列构建的(N, 2)的pairs 2darray
-    pairs = np.stack([L_tokens_flat.astype(token_dtype), R_tokens_flat.astype(token_dtype)], axis=1) # 可以为空
+    pairs = np.stack([L_tokens_flat.astype(np.uint16), R_tokens_flat.astype(np.uint16)], axis=1) # 可以为空
 
     # 构建新的dtype, 使得每一行L_token,R_token作为一个元素
-    pair_dtype = np.dtype([('L', token_dtype), ('R', token_dtype)])
+    pair_dtype = np.dtype([('L', np.uint16), ('R', np.uint16)])
     structured = pairs.view(pair_dtype).squeeze()
 
     # 聚合计算频数
@@ -1049,7 +1048,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             process_fn = self._func_count_pair_batch, # return (pcounts, b_order)
             result_handler = self._write_pcounts_batch, 
             max_pending = 8,
-            process_args = (token_dtype,),
             result_handler_args = (pcounts_save_dir, tokens_fname, pcounts_paths)
         )
 
@@ -1453,7 +1451,6 @@ class asyncBBPETokenizer(boostBBPETokenizer):
                 self._MAX_QUEUE_SIZE,
                 1,
                 collector, # arg: (pcounts, b_order) --> in-place change pcounts_paths
-                token_dtype
                 )
             
             return pcounts_paths
