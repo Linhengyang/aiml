@@ -837,7 +837,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return batch_table
 
 
-    def _set_config(self, buffer_size, fc_merge_pair_batch:t.Callable):
+    def _set_config(self, buffer_size, fc_count_pair_batch:t.Callable, fc_merge_pair_batch:t.Callable):
 
         os.makedirs(self._buffer_dir, exist_ok=True)
         
@@ -852,6 +852,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         self._buffer_size = buffer_size
         self._func_merge_pair_batch = fc_merge_pair_batch
+        self._func_count_pair_batch = fc_count_pair_batch
 
 
     def _init_tokens(self, corpora:str|t.List[str], text_colnames:t.List[None|str], extra_save_dir:str|None):
@@ -1045,7 +1046,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         stream_parallel_process_with_pending(
             executor,
             data_gen, # data_gen: (tokens_flat, offsets), i
-            process_fn = count_pair_batch, # return (pcounts, b_order)
+            process_fn = self._func_count_pair_batch, # return (pcounts, b_order)
             result_handler = self._write_pcounts_batch, 
             max_pending = 8,
             process_args = (token_dtype,),
@@ -1259,6 +1260,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
                   buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
+                  fc_count_pair_batch:t.Callable = count_pair_batch,
                   fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
                   verbose:bool = False
                   ):
@@ -1268,7 +1270,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             corpora = [corpora]
             colnames = [None]
 
-        self._set_config(buffer_size, fc_merge_pair_batch)
+        self._set_config(buffer_size, fc_count_pair_batch, fc_merge_pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
@@ -1362,7 +1364,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
         self._set_config(
             buffer_size = buffer_size,
-            fc_merge_pair_batch= merge_pair_batch)
+            fc_count_pair_batch = count_pair_batch,
+            fc_merge_pair_batch = merge_pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
@@ -1445,7 +1448,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             
             await pipeline_producer_consumer(
                 data_gen, # yield (tokens_flat, offsets), b_order
-                count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
+                self._func_count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
                 executor,
                 self._MAX_QUEUE_SIZE,
                 1,
