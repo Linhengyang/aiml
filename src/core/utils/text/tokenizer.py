@@ -633,6 +633,51 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 
 
 
+def count_pair_batch(tokens_offsets_border, token_dtype, *args, **kwargs):
+    '''
+    对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
+    3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是由输入 token_dtype 确定. counts dtype uint64
+
+    Args:
+        tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
+        dtype: np.uint16 / np.uint32 等
+    '''
+    (tokens_flat, offsets), b_order = tokens_offsets_border
+
+    mask = np.full(shape=(len(tokens_flat),), fill_value=True)
+    chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
+    chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
+    # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
+    # 把这些 id 指向的位置设为 False
+    mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
+    mask_cp = mask.copy()
+
+    # 提取所有非chunk end的tokens
+    mask[chunk_ends_] = False
+    L_tokens_flat = tokens_flat[mask] # 保持dtype=uint16, 可以为空
+    
+    # 提取所有非chunk start的tokens
+    mask_cp[chunk_starts_] = False
+    R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=uint16, 可以为空
+
+    # 构建L_tokens_flat, R_tokens_flat作为列构建的(N, 2)的pairs 2darray
+    pairs = np.stack([L_tokens_flat.astype(token_dtype), R_tokens_flat.astype(token_dtype)], axis=1) # 可以为空
+
+    # 构建新的dtype, 使得每一行L_token,R_token作为一个元素
+    pair_dtype = np.dtype([('L', token_dtype), ('R', token_dtype)])
+    structured = pairs.view(pair_dtype).squeeze()
+
+    # 聚合计算频数
+    uniq_pairs, counts = np.unique(structured, return_counts=True)
+
+    # dtype_counts = cls.p_counts_schema[2].type.to_pandas_dtype()
+    # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
+    pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))).T
+
+    return pcounts, b_order # pcounts 是(N,3)形状, dtype为(uint16, uint16, uint64). 可以为空
+
+
+
 # merge_pair 如果是一个 C/C++ 封装的接口，那么传参 tokens 时, 会遍历整个list并拷贝。
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
@@ -716,7 +761,7 @@ def merge_pair_batch_parallel(
 
 
 
-    
+
 
 
 
@@ -982,51 +1027,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         collector.append(save_path)
     
 
-    @staticmethod
-    def count_pair_batch(tokens_offsets_border, token_dtype):
-        '''
-        对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
-        3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是由输入 token_dtype 确定. counts dtype uint64
-
-        Args:
-            tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
-            dtype: np.uint16 / np.uint32 等
-        '''
-        (tokens_flat, offsets), b_order = tokens_offsets_border
-
-        mask = np.full(shape=(len(tokens_flat),), fill_value=True)
-        chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
-        chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
-        # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
-        # 把这些 id 指向的位置设为 False
-        mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
-        mask_cp = mask.copy()
-
-        # 提取所有非chunk end的tokens
-        mask[chunk_ends_] = False
-        L_tokens_flat = tokens_flat[mask] # 保持dtype=uint16, 可以为空
-        
-        # 提取所有非chunk start的tokens
-        mask_cp[chunk_starts_] = False
-        R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=uint16, 可以为空
-
-        # 构建L_tokens_flat, R_tokens_flat作为列构建的(N, 2)的pairs 2darray
-        pairs = np.stack([L_tokens_flat.astype(token_dtype), R_tokens_flat.astype(token_dtype)], axis=1) # 可以为空
-
-        # 构建新的dtype, 使得每一行L_token,R_token作为一个元素
-        pair_dtype = np.dtype([('L', token_dtype), ('R', token_dtype)])
-        structured = pairs.view(pair_dtype).squeeze()
-
-        # 聚合计算频数
-        uniq_pairs, counts = np.unique(structured, return_counts=True)
-
-        # dtype_counts = cls.p_counts_schema[2].type.to_pandas_dtype()
-        # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
-        pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))).T
-
-        return pcounts, b_order # pcounts 是(N,3)形状, dtype为(uint16, uint16, uint64). 可以为空
-
-
 
     def _write_pcounts(self, tokens_pq, executor) -> list:
         # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
@@ -1045,7 +1045,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         stream_parallel_process_with_pending(
             executor,
             data_gen, # data_gen: (tokens_flat, offsets), i
-            process_fn = self.count_pair_batch, # return (pcounts, b_order)
+            process_fn = count_pair_batch, # return (pcounts, b_order)
             result_handler = self._write_pcounts_batch, 
             max_pending = 8,
             process_args = (token_dtype,),
@@ -1445,7 +1445,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             
             await pipeline_producer_consumer(
                 data_gen, # yield (tokens_flat, offsets), b_order
-                self.count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
+                count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
                 executor,
                 self._MAX_QUEUE_SIZE,
                 1,
