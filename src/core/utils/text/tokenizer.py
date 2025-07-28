@@ -806,15 +806,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
     对于小词表而言, pair-count的 V^2 上限大概是 6W^2 = 36亿行, 每行12字节 ----> 40GB
     '''
+    token_dtype = pa.uint16()
+
     p_counts_schema = pa.schema([
-        pa.field('L', pa.uint16()),
-        pa.field('R', pa.uint16()),
+        pa.field('L', token_dtype),
+        pa.field('R', token_dtype),
         pa.field('counts', pa.uint64()),
         ])
     
     
     tokens_schema = pa.schema([
-        pa.field( 'tokens', pa.large_list(pa.field('token', pa.uint16())) ),
+        pa.field( 'tokens', pa.large_list(pa.field('token', token_dtype)) ),
         ])
 
 
@@ -1040,7 +1042,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
         # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
-        token_dtype = self.tokens_schema[0].type.value_type.to_pandas_dtype()
 
         stream_parallel_process_with_pending(
             executor,
@@ -1126,11 +1127,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         batches(buffer_size确定batch大小)
         '''
         src_fname = os.path.basename(tokens_pq)
-
-        dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
-
-        L, R = map(dtype_tokens, to_merge_pair)
-        new_token = dtype_tokens(new_token)
+        L, R = map(cls.token_dtype.to_pandas_dtype(), to_merge_pair)
+        new_token = cls.token_dtype.to_pandas_dtype()(new_token)
 
         # 遍历读取当前 tokens_pq
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
@@ -1432,8 +1430,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
         # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
-        token_dtype = self.tokens_schema[0].type.value_type.to_pandas_dtype()
-
+        
         async def main():
             # 一个in-place改变状态的收集函数.
             pcounts_paths = []
@@ -1496,11 +1493,8 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         写(writer.write_batch to save_dir) as 队列2消费者
         '''
         fname = os.path.basename(tokens_pq)
-
-        dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
-
-        L, R = map(dtype_tokens, to_merge_pair)
-        new_token = dtype_tokens(new_token)
+        L, R = map(cls.token_dtype.to_pandas_dtype(), to_merge_pair)
+        new_token = cls.token_dtype.to_pandas_dtype()(new_token)
 
         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
         # batch --> (tokens, offsets), order
