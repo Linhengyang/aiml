@@ -637,7 +637,7 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
 def merge_pair_batch_memcontiguous(
-        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
+        tokens_offsets_border: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
         new_token:np.uint16,
@@ -646,7 +646,7 @@ def merge_pair_batch_memcontiguous(
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
-    tokens_flat, offsets = tokens_offsets
+    (tokens_flat, offsets), b_order = tokens_offsets_border
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -670,14 +670,14 @@ def merge_pair_batch_memcontiguous(
     
     output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
-    return output_tokens_flat[:output_offsets[-1]], output_offsets
+    return (output_tokens_flat[:output_offsets[-1]], output_offsets), b_order
 
 
 
 
 
 def merge_pair_batch_parallel(
-        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
+        tokens_offsets_border: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
         new_token:np.uint16,
@@ -686,7 +686,7 @@ def merge_pair_batch_parallel(
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
-    tokens_flat, offsets = tokens_offsets
+    (tokens_flat, offsets), b_order = tokens_offsets_border
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -712,7 +712,7 @@ def merge_pair_batch_parallel(
     
     output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
-    return output_tokens_flat[output_filter], output_offsets
+    return (output_tokens_flat[output_filter], output_offsets), b_order
 
 
 
@@ -1089,10 +1089,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # b_order: 批次batch的序号
         # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
         # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
-        tokens_offsets, b_order = tokens_offsets_border
+
         # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
-        valid_merged_tokens_flat, valid_merged_offsets = merge_func(
-            tokens_offsets,
+        (valid_merged_tokens_flat, valid_merged_offsets), b_order = merge_func(
+            tokens_offsets_border,
             L, R, new_token)
         
         merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
@@ -1150,8 +1150,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             )
         
         concate_parquet_files(merged_save_path_collector, os.path.join(save_dir, src_fname), clean=True)
-
-
 
 
     def _next_tokens_dir(
@@ -1475,32 +1473,6 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         return merged_save_path
 
 
-    # 公版的 async_queue_process 无法满足 process_fc/collector 消费另外处理后的 item from queue
-    # 故这里针对此场景订制了一个 _async_compute
-    @staticmethod
-    async def _async_compute(
-        queue:asyncio.Queue,
-        executor,
-        merge_pair_fc:t.Callable,
-        collector:t.Callable,
-        L, R, new_token
-        ):
-        loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
-
-        while True:
-            item = await queue.get() # item: (tokens, offsets), b_order
-
-            if item is None: # 收到结束信号
-                await queue.put(None) # 把结束信号放回去，以通知多个消费者
-                break
-
-            # 主线程接收 merged_tokens, merged_offsets
-            result = await loop.run_in_executor(executor, merge_pair_fc, item[0], L, R, new_token)
-
-            if collector:
-                await collector( (result, item[1]) ) # 收集 (merged_tokens, merged_offsets), b_order
-
-
     @classmethod
     def _merge_tokens_save(
             cls,
@@ -1549,7 +1521,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             
             compute_tasks = [
                 asyncio.create_task(
-                    cls._async_compute(queue1, executor, fc_merge, compute_collector, L, R, new_token)
+                    async_queue_process(queue1, executor, fc_merge, compute_collector, L, R, new_token)
                     )
                 for _ in range(cls._NUM_COMPUTERS)]
             
