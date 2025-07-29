@@ -24,7 +24,7 @@ private:
     explicit memory_pool(size_t block_size = 4096, size_t alignment = 8); //默认给单个内存block申请 4kb 的内存, 8字节对齐
     // explicit的意思是禁止对 memory_pool 类对象作隐式转换
 
-    ~memory_pool(); //会调用 release() 释放内存池
+    ~memory_pool(); // 会调用 release_no_lock() 释放内存池. 它会在mempool_destroy中加锁后再被调用, 故它自身不需要加锁
 
     const size_t _block_size; //内存池中, 单个内存block的字节量
 

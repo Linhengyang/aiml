@@ -633,11 +633,55 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 
 
 
+def count_pair_batch(tokens_offsets_border, *args, **kwargs):
+    '''
+    对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
+    3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是uint16 确定. counts dtype uint64
+
+    Args:
+        tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
+    '''
+    (tokens_flat, offsets), b_order = tokens_offsets_border
+
+    mask = np.full(shape=(len(tokens_flat),), fill_value=True)
+    chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
+    chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
+    # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
+    # 把这些 id 指向的位置设为 False
+    mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
+    mask_cp = mask.copy()
+
+    # 提取所有非chunk end的tokens
+    mask[chunk_ends_] = False
+    L_tokens_flat = tokens_flat[mask] # 保持dtype=uint16, 可以为空
+    
+    # 提取所有非chunk start的tokens
+    mask_cp[chunk_starts_] = False
+    R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=uint16, 可以为空
+
+    # 构建L_tokens_flat, R_tokens_flat作为列构建的(N, 2)的pairs 2darray
+    pairs = np.stack([L_tokens_flat.astype(np.uint16), R_tokens_flat.astype(np.uint16)], axis=1) # 可以为空
+
+    # 构建新的dtype, 使得每一行L_token,R_token作为一个元素
+    pair_dtype = np.dtype([('L', np.uint16), ('R', np.uint16)])
+    structured = pairs.view(pair_dtype).squeeze()
+
+    # 聚合计算频数
+    uniq_pairs, counts = np.unique(structured, return_counts=True)
+
+    # dtype_counts = cls.p_counts_schema[2].type.to_pandas_dtype()
+    # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
+    pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))).T
+
+    return pcounts, b_order # pcounts 是(N,3)形状, dtype为(uint16, uint16, uint64). 可以为空
+
+
+
 # merge_pair 如果是一个 C/C++ 封装的接口，那么传参 tokens 时, 会遍历整个list并拷贝。
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
 def merge_pair_batch_memcontiguous(
-        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
+        tokens_offsets_border: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
         new_token:np.uint16,
@@ -646,7 +690,7 @@ def merge_pair_batch_memcontiguous(
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
-    tokens_flat, offsets = tokens_offsets
+    (tokens_flat, offsets), b_order = tokens_offsets_border
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -670,14 +714,14 @@ def merge_pair_batch_memcontiguous(
     
     output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
-    return output_tokens_flat[:output_offsets[-1]], output_offsets
+    return (output_tokens_flat[:output_offsets[-1]], output_offsets), b_order
 
 
 
 
 
 def merge_pair_batch_parallel(
-        tokens_offsets:t.Tuple[np.ndarray, np.ndarray],
+        tokens_offsets_border: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
         new_token:np.uint16,
@@ -686,7 +730,7 @@ def merge_pair_batch_parallel(
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
-    tokens_flat, offsets = tokens_offsets
+    (tokens_flat, offsets), b_order = tokens_offsets_border
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -712,11 +756,11 @@ def merge_pair_batch_parallel(
     
     output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
-    return output_tokens_flat[output_filter], output_offsets
+    return (output_tokens_flat[output_filter], output_offsets), b_order
 
 
 
-    
+
 
 
 
@@ -762,15 +806,17 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
     对于小词表而言, pair-count的 V^2 上限大概是 6W^2 = 36亿行, 每行12字节 ----> 40GB
     '''
+    token_dtype = pa.uint16()
+
     p_counts_schema = pa.schema([
-        pa.field('L', pa.uint16()),
-        pa.field('R', pa.uint16()),
+        pa.field('L', token_dtype),
+        pa.field('R', token_dtype),
         pa.field('counts', pa.uint64()),
         ])
     
     
     tokens_schema = pa.schema([
-        pa.field( 'tokens', pa.large_list(pa.field('token', pa.uint16())) ),
+        pa.field( 'tokens', pa.large_list(pa.field('token', token_dtype)) ),
         ])
 
 
@@ -792,7 +838,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         return batch_table
 
 
-    def _set_config(self, buffer_size, fc_merge_pair_batch:t.Callable):
+    def _set_config(self, buffer_size, fc_count_pair_batch:t.Callable, fc_merge_pair_batch:t.Callable):
 
         os.makedirs(self._buffer_dir, exist_ok=True)
         
@@ -807,6 +853,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         self._buffer_size = buffer_size
         self._func_merge_pair_batch = fc_merge_pair_batch
+        self._func_count_pair_batch = fc_count_pair_batch
 
 
     def _init_tokens(self, corpora:str|t.List[str], text_colnames:t.List[None|str], extra_save_dir:str|None):
@@ -982,51 +1029,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         collector.append(save_path)
     
 
-    @staticmethod
-    def count_pair_batch(tokens_offsets_border, token_dtype):
-        '''
-        对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
-        3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是由输入 token_dtype 确定. counts dtype uint64
-
-        Args:
-            tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
-            dtype: np.uint16 / np.uint32 等
-        '''
-        (tokens_flat, offsets), b_order = tokens_offsets_border
-
-        mask = np.full(shape=(len(tokens_flat),), fill_value=True)
-        chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
-        chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
-        # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
-        # 把这些 id 指向的位置设为 False
-        mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
-        mask_cp = mask.copy()
-
-        # 提取所有非chunk end的tokens
-        mask[chunk_ends_] = False
-        L_tokens_flat = tokens_flat[mask] # 保持dtype=uint16, 可以为空
-        
-        # 提取所有非chunk start的tokens
-        mask_cp[chunk_starts_] = False
-        R_tokens_flat = tokens_flat[mask_cp] # 保持dtype=uint16, 可以为空
-
-        # 构建L_tokens_flat, R_tokens_flat作为列构建的(N, 2)的pairs 2darray
-        pairs = np.stack([L_tokens_flat.astype(token_dtype), R_tokens_flat.astype(token_dtype)], axis=1) # 可以为空
-
-        # 构建新的dtype, 使得每一行L_token,R_token作为一个元素
-        pair_dtype = np.dtype([('L', token_dtype), ('R', token_dtype)])
-        structured = pairs.view(pair_dtype).squeeze()
-
-        # 聚合计算频数
-        uniq_pairs, counts = np.unique(structured, return_counts=True)
-
-        # dtype_counts = cls.p_counts_schema[2].type.to_pandas_dtype()
-        # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
-        pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))).T
-
-        return pcounts, b_order # pcounts 是(N,3)形状, dtype为(uint16, uint16, uint64). 可以为空
-
-
 
     def _write_pcounts(self, tokens_pq, executor) -> list:
         # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
@@ -1040,15 +1042,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
         # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
-        token_dtype = self.tokens_schema[0].type.value_type.to_pandas_dtype()
 
         stream_parallel_process_with_pending(
             executor,
             data_gen, # data_gen: (tokens_flat, offsets), i
-            process_fn = self.count_pair_batch, # return (pcounts, b_order)
+            process_fn = self._func_count_pair_batch, # return (pcounts, b_order)
             result_handler = self._write_pcounts_batch, 
             max_pending = 8,
-            process_args = (token_dtype,),
             result_handler_args = (pcounts_save_dir, tokens_fname, pcounts_paths)
         )
 
@@ -1089,10 +1089,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # b_order: 批次batch的序号
         # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
         # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
-        tokens_offsets, b_order = tokens_offsets_border
+
         # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
-        valid_merged_tokens_flat, valid_merged_offsets = merge_func(
-            tokens_offsets,
+        (valid_merged_tokens_flat, valid_merged_offsets), b_order = merge_func(
+            tokens_offsets_border,
             L, R, new_token)
         
         merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
@@ -1127,11 +1127,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         batches(buffer_size确定batch大小)
         '''
         src_fname = os.path.basename(tokens_pq)
-
-        dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
-
-        L, R = map(dtype_tokens, to_merge_pair)
-        new_token = dtype_tokens(new_token)
+        L, R = map(cls.token_dtype.to_pandas_dtype(), to_merge_pair)
+        new_token = cls.token_dtype.to_pandas_dtype()(new_token)
 
         # 遍历读取当前 tokens_pq
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
@@ -1150,8 +1147,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             )
         
         concate_parquet_files(merged_save_path_collector, os.path.join(save_dir, src_fname), clean=True)
-
-
 
 
     def _next_tokens_dir(
@@ -1261,6 +1256,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
                   buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 1GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
+                  fc_count_pair_batch:t.Callable = count_pair_batch,
                   fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
                   verbose:bool = False
                   ):
@@ -1270,7 +1266,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             corpora = [corpora]
             colnames = [None]
 
-        self._set_config(buffer_size, fc_merge_pair_batch)
+        self._set_config(buffer_size, fc_count_pair_batch, fc_merge_pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
@@ -1364,7 +1360,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
         self._set_config(
             buffer_size = buffer_size,
-            fc_merge_pair_batch= merge_pair_batch)
+            fc_count_pair_batch = count_pair_batch,
+            fc_merge_pair_batch = merge_pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
@@ -1433,8 +1430,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
         # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
-        token_dtype = self.tokens_schema[0].type.value_type.to_pandas_dtype()
-
+        
         async def main():
             # 一个in-place改变状态的收集函数.
             pcounts_paths = []
@@ -1447,12 +1443,11 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             
             await pipeline_producer_consumer(
                 data_gen, # yield (tokens_flat, offsets), b_order
-                self.count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
+                self._func_count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
                 executor,
                 self._MAX_QUEUE_SIZE,
                 1,
                 collector, # arg: (pcounts, b_order) --> in-place change pcounts_paths
-                token_dtype
                 )
             
             return pcounts_paths
@@ -1473,32 +1468,6 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         pq.write_table(table, merged_save_path)
 
         return merged_save_path
-
-
-    # 公版的 async_queue_process 无法满足 process_fc/collector 消费另外处理后的 item from queue
-    # 故这里针对此场景订制了一个 _async_compute
-    @staticmethod
-    async def _async_compute(
-        queue:asyncio.Queue,
-        executor,
-        merge_pair_fc:t.Callable,
-        collector:t.Callable,
-        L, R, new_token
-        ):
-        loop = asyncio.get_running_loop() # 在异步协程内部获取事件循环.
-
-        while True:
-            item = await queue.get() # item: (tokens, offsets), b_order
-
-            if item is None: # 收到结束信号
-                await queue.put(None) # 把结束信号放回去，以通知多个消费者
-                break
-
-            # 主线程接收 merged_tokens, merged_offsets
-            result = await loop.run_in_executor(executor, merge_pair_fc, item[0], L, R, new_token)
-
-            if collector:
-                await collector( (result, item[1]) ) # 收集 (merged_tokens, merged_offsets), b_order
 
 
     @classmethod
@@ -1524,11 +1493,8 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         写(writer.write_batch to save_dir) as 队列2消费者
         '''
         fname = os.path.basename(tokens_pq)
-
-        dtype_tokens = cls.tokens_schema[0].type.value_type.to_pandas_dtype()
-
-        L, R = map(dtype_tokens, to_merge_pair)
-        new_token = dtype_tokens(new_token)
+        L, R = map(cls.token_dtype.to_pandas_dtype(), to_merge_pair)
+        new_token = cls.token_dtype.to_pandas_dtype()(new_token)
 
         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
         # batch --> (tokens, offsets), order
@@ -1549,7 +1515,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             
             compute_tasks = [
                 asyncio.create_task(
-                    cls._async_compute(queue1, executor, fc_merge, compute_collector, L, R, new_token)
+                    async_queue_process(queue1, executor, fc_merge, compute_collector, L, R, new_token)
                     )
                 for _ in range(cls._NUM_COMPUTERS)]
             

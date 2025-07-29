@@ -58,13 +58,13 @@ def allocate_memory(block_size):
 
 # 返回np.array of merged_tokens_flat/offsets给python
 cpdef merge_pair_batch(
-    object tokens_offsets,
+    object tokens_offsets_border,
     np.uint16_t pair_L,
     np.uint16_t pair_R,
     np.uint16_t new_token,
 ):
-    cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets[0]
-    cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets[1]
+    cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets_border[0][0]
+    cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets_border[0][1]
     # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
     shrink_memory_pool()
     
@@ -113,9 +113,7 @@ cpdef merge_pair_batch(
     merged_offsets = pynp.cumsum(pynp.insert(output_chunks_lens_np, 0, 0), dtype=pynp.int64)
     merged_tokens_flat = output_tokens_flat_np[output_filter_np]
 
-    # return merged_tokens_flat, merged_offsets
-
-    # filter out chunks whose length = 1
+    # 过滤掉 chunks whose length = 1
     len1_chunks_ = pynp.where(output_chunks_lens_np == 1)[0].astype(pynp.int64) # 保证即使是空, 也能正确slice
     len1_chunks_tokens_ = merged_offsets[len1_chunks_] # invalid tokens 在 flat 中的 inds, 会被filter out
     mask = pynp.full(merged_tokens_flat.shape[0], True, dtype = pynp.bool_) # 用mask筛选出 len>1 的chunks 的tokens
@@ -126,7 +124,8 @@ cpdef merge_pair_batch(
     valid_chunks_lens = output_chunks_lens_np[valid_chunks_]
     valid_merged_offsets = pynp.cumsum(pynp.insert(valid_chunks_lens, 0, 0), dtype=pynp.int64)
 
-    return valid_merged_tokens_flat, valid_merged_offsets
+    # 打包, pack valid merged info with batch order
+    return (valid_merged_tokens_flat, valid_merged_offsets), tokens_offsets_border[1]
 
 
 
