@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <type_traits>
 #include <shared_mutex>
+#include <atomic>
 #include "memory_pool.h"
 
 
@@ -180,7 +181,7 @@ public:
             _table[index] = new_node;
             
             // node数量自加1. 原子线程安全
-            _size++;
+            _size.fetch_add(1, std::memory_order_relaxed);
 
         }
 
