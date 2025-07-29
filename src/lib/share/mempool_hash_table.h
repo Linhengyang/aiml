@@ -33,9 +33,9 @@ private:
 
     size_t _capacity; // 哈希表的容量, bucket数量
 
-    float _max_load_factor = 0.80f; // 默认最大负载因子. 当 node 数量/_capacity 超过时, 触发扩容
+    const float _max_load_factor = 0.80f; // 默认最大负载因子. 当 node 数量/_capacity 超过时, 触发扩容
 
-    size_t _size; // node数量
+    std::atomic<size_t> _size{0}; // node数量, 原子保证自加符++线程安全
 
     // 数组 of buckets, 每个 bucket 是链表头, 每个链表是哈希冲突的 nodes
     std::vector<HashTableNode*> _table;
@@ -54,6 +54,10 @@ private:
     // 锁单个bucket的锁. insert操作时, 独占该锁, 使得其他任何线程不能对bucket进行任何操作
     std::vector<std::shared_mutex> _bucket_mutexs;
 
+    // 原子变量 _rehashing, 当多个线程并发执行insert并都通过了rehash条件检查后,应该只允许第一个线程执行rehash
+    // 此时需要一个原子变量, 执行原子级的翻转操作: 当原子为false时的线程进入rehash, 翻转它为true, 其他线程只会得到true
+    std::atomic<bool> _rehashing{false};
+
     /*
     * 扩容 rehash
     * @param new_capacity
@@ -61,8 +65,7 @@ private:
     * 行为:对每一个node重新计算bucket, 然后将其重新挂载到新的bucket链表的头部
     */
     void rehash(size_t new_capacity) {
-        // 独占 _table_mutex 表锁, rehash 时其他任何线程不能对table作任何操作. 作用到rehash结束
-        std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
+        // rehash 的调用在 insert 里，调用前会加 独占表锁, 故这里不再加独占表锁避免死锁
 
         // 初始化一个新的 table
         std::vector<HashTableNode*> _new_table(new_capacity, nullptr);
@@ -87,6 +90,7 @@ private:
                 current = next; // 遍历下一个node
             }
             // 旧_table会被舍弃
+            _table[i] = nullptr;
         }
         // 所有bucket所有node重新挂载完毕后, 切换 _table/_bucket_mutexs/_capacity
         _table = std::move(_new_table);
@@ -98,7 +102,7 @@ private:
 public:
 
     // 哈希表的构造函数. 传入哈希表的capacity, 和内存池
-    hash_table_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool), _size(0) {
+    hash_table_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool) {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
     }
@@ -110,7 +114,7 @@ public:
 
     // 哈希表关键方法之 get(key&, value&) --> change value, return true if success
     bool get(const TYPE_K& key, TYPE_V& value) {
-        // 读取 key-value 对时, 不允许对整表有 rehash/clear 操作.
+        // 读取 key-value 时, 不允许对整表有 rehash/clear 操作.
         // 但是是允许对多个不同bucket作并发读取的, 所以共享占用表锁. 作用到get结束
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
@@ -143,13 +147,13 @@ public:
     */
     bool insert(const TYPE_K& key, const TYPE_V& value) {
         // 写入 key-value 时, 不允许对整表有 rehash/clear 操作.
-        // 但是是允许对多个不同bucket作并发写入的, 所以共享占用. 作用到rehash操作前(if有)
+        // 但是是允许对多个不同bucket作并发写入的, 所以共享占用. 作用到rehash判断前
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
         // 计算 bucket index
         size_t index = hash(key) % _capacity;
         {
-            // 写入 key-value 时, 不允许其他线程对相应bucket有读写操作. 所以独占桶锁
+            // 写入 key-value 时, 不允许其他线程对相应bucket有读写操作. 所以独占桶锁. 作用到本桶更新完毕
             std::unique_lock<std::shared_mutex> _lock_from_insert_read_(_bucket_mutexs[index]);
             
             // 首先查找 key 是否已经存在. 若 key 存在, 修改原 value 到 新value
@@ -175,12 +179,29 @@ public:
             // 更新确认该 bucket 的链表头
             _table[index] = new_node;
             
-            // node数量自加1. 如果触发负载因子阈值, 那么触发扩容操作(rehash)
+            // node数量自加1. 原子线程安全
             _size++;
+
         }
 
-        if (_size >= _capacity*_max_load_factor) {
-            rehash( _capacity*2 ); // 扩容为两倍
+        // 可能会有 rehash 操作, 需要释放共享的表锁
+        _lock_from_rehash_clear_.unlock();
+        
+        // 扩容检查. 因为在临近扩容时,由于多并发写入, 会有多个进程近乎同时判断出需要rehash. 但只有一个能执行rehash
+        bool expected = false;
+        // 临近状态下, 多个线程都满足第一个条件, 但是第二个条件: 原子变量 _rehashing == expected(false) 只能原子级满足
+        // compare_exchange_strong 保证了一旦原子变量 _rehashing 满足 == false, 马上将转化为true并返回true.
+        // 如此其他线程在这里只会得到一个为 true 的_rehashing, 从而无法进入内部.
+        if (_size >= _capacity*_max_load_factor && _rehashing.compare_exchange_strong(expected, true)) {
+
+            // 独占 _table_mutex 表锁, rehash 时其他任何线程不能对table作任何操作. 作用到rehash结束
+            std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
+
+            // 二次检查. _size只增, 似乎没必要二次检查. 但实际上为未来增加remove(k,v)作准备, 增强健壮性
+            if (_size >= _capacity*_max_load_factor) {
+                rehash( _capacity*2 ); // 扩容为两倍
+            }
+            _rehashing.store(false);
         }
 
         return true;
