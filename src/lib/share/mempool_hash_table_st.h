@@ -23,7 +23,7 @@ private:
         HashTableNode* next; // 下一个节点, 用于解决哈希冲突
 
         // 提供placement new 构造支持
-        HashTableNode(const TYPE_K& k, const TYPE_V&v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
     };
 
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构
@@ -162,7 +162,7 @@ public:
 
         // 对于每个 bucket, 作为哈希冲突的 node 的链表头, 循环以显式析构所有node(如果需要)
         for (size_t i = 0; i < _capacity; i++) {
-            
+
             HashTableNode* curr = _table[i];
             while (curr) {
                 HashTableNode* next = curr->next;
