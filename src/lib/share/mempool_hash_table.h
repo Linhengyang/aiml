@@ -23,6 +23,9 @@ private:
         TYPE_K key; // 键
         TYPE_V value; // 值
         HashTableNode* next; // 下一个节点, 用于解决哈希冲突
+
+        // 提供placement new 构造支持
+        HashTableNode(const TYPE_K& k, const TYPE_V&v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
     };
 
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构
@@ -103,7 +106,7 @@ private:
 public:
 
     // 哈希表的构造函数. 传入哈希表的capacity, 和内存池
-    hash_table_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool) {
+    explicit hash_table_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool) {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
     }
