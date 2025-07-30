@@ -39,7 +39,7 @@ private:
 
     size_t _size = 0; // node数量
 
-    // 数组 of buckets, 每个 bucket 是链表头, 每个链表是哈希冲突的 nodes
+    // 数组 of buckets, 每个 bucket 是链表的头, 每个链表是哈希冲突的 nodes, 由第一个node代表
     std::vector<HashTableNode*> _table;
 
     // 引用传入的内存池
@@ -59,6 +59,8 @@ private:
     void rehash(size_t new_capacity) {
         // 初始化一个新的 table
         std::vector<HashTableNode*> _new_table(new_capacity, nullptr);
+        // 重新计算 _size, 为缩容式 rehash 留下余地
+        size_t actual_node_count = 0;
 
         for (size_t i = 0; i < _capacity; i++) {
             HashTableNode* current = _table[i]; // 从该bucekt的链表头开始
@@ -68,6 +70,7 @@ private:
                 current->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = current; // 更新确认新bucket的链表头
                 current = next; // 遍历下一个node
+                actual_node_count++;
             }
             // 旧_table会被舍弃
             _table[i] = nullptr;
@@ -75,6 +78,7 @@ private:
         // 所有bucket所有node重新挂载完毕后, 切换 _table/_capacity
         _table = std::move(_new_table);
         _capacity = new_capacity;
+        _size = actual_node_count;
     }
 
 
@@ -175,6 +179,117 @@ public:
         // node数量 置0
         _size = 0;
     }
+
+
+    // 输出当前哈希表 k-v 数量
+    size_t size() const {
+        return _size; // 原子读取
+    }
+
+
+
+    // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
+    // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
+    iterator begin() {
+        return iterator(this, 0, nullptr);
+    }
+
+    // hash_table_st_chain 类对象 hashtable 调用 end 方法, 返回一个迭代器
+    // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    iterator end() {
+        return iterator(this, _capacity, nullptr);
+    }
+
+
+
+    /*
+    * 迭代器
+    * 
+    // for(auto it = iterator_begin_status; it != iterator_end_status; ++it)
+    // 上述是迭代器的用法. 迭代器 iterator类 本质是对 "迭代产出对象" it 的引用, it 是 iterator 缩写.
+    // 即一个迭代器类经过 begin 构造为迭代器对象 it 之后, it 就一直是该迭代器的引用, 迭代器内部不同的状态引向不同it结果
+    // 哈希表迭代器, 输出 k-v. 对 it 解引用 *it 即得到想要的输出
+    */
+    class iterator {
+
+    // 哈希表的迭代器应该返回所有 node 的 key-value. 所以要遍历所有 buckets 的所有 nodes
+    public:
+
+        // 迭代器的构造, 应该满足能准确表达构造 begin 状态, 和 end 状态. 中间线性迁移交给 ++ 操作
+        /*
+        * @param hash_table: 本哈希表指针
+        * @param bucket_index: for begin: 0; for end: 本哈希表的_capacity
+        * @param node: for begin: nullptr; for end: nullptr
+        * 
+        * 上述三个属性决定了本迭代器的状态, 然后决定了不同的迭代产出
+        * 行为: begin(this哈希表指针, 0, nullptr)初始化下, 成功自定位到first valid bucket状态
+        *       end(this哈希表指针, _capacity, nullptr)下成功定位到 ++ 操作符的临界退出点
+        */
+        iterator(hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table), _bucket_index(bucket_index), _node(node) {
+                // for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
+                // for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
+                _null_node_advance_to_next_valid_bucket();
+        }
+
+        // 对迭代器的解引用 *it --> 返回 k-v pair
+        std::pair<const TYPE_K&, TYPE_V&> operator*() const {
+            return {_node->key, _node->value}; // 返回 pair(key, value)
+        }
+
+        // 对迭代器的自增 ++it --> 给出下一个状态的迭代器
+        iterator& operator++() {
+            if (_node) {
+                _node = _node->next; // 如果当前 _node 仍然在某链表里, move to next
+            }
+            // 如果 _node 为空, 不论是next为空, 还是本来就空, 说明当前桶已经遍历完了
+            if (!_node) {
+                _bucket_index++; // move to next bucket
+                _null_node_advance_to_next_valid_bucket(); // 
+            }
+            return *this; // this是本对象指针, *this就是返回本对象
+        }
+
+        // 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
+        bool operator==(const iterator& other) const {
+            return _node == other._node;
+        }
+
+        // 给出两个迭代器状态是否不相等的判决方法, 必须是 operator == 操作的反面
+        bool operator!=(const iterator& other) const {
+            return !(*this == other); // this是本对象指针, *this就是返回本对象
+        }
+
+    private:
+
+        // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
+        hash_table_st_chain* _hash_table;
+
+        // 遍历哈希表的所有桶, 0 -> _capacity-1
+        size_t _bucket_index;
+
+        // 遍历所有桶的所有node
+        HashTableNode* _node;
+
+        // 当 _node 沿着 _bucket 链表移动到 nullptr, 亦或是初始化为 nullptr, 需要"跳步"到next valid bucket链表头
+
+        // 此跳步操作, 只在 _node 为空时才会执行
+        // 执行结果1: _node 跳转到 next valid bucket head, _bucket_index 正确为该 valid bucket
+        // 执行结果2: _node 仍然为空, _bucket_index = hashtable capacity
+        void _null_node_advance_to_next_valid_bucket() {
+            // 当前 _node 为 nullptr, 且当前 _bucket_index 尚未穷尽
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                // 哈希表取出_table内部属性, 再取出当前 bucket 链表头作为 potential next node
+                _node = (_hash_table->_table)[_bucket_index];
+
+                if (_node) break; // 如果 _node 不为 nullptr, 说明跳步 bucket 成功了, break
+
+                // 如果 _node 仍然是 null, 说明 _bucket_index 对应桶是空的. 尝试下一个桶
+                _bucket_index++;
+            }
+        }
+
+    };
 
 };
 

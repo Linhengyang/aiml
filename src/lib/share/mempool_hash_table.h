@@ -13,6 +13,25 @@
 #include "memory_pool.h"
 
 
+
+// 不要让多个桶锁落入同一个 cache line. cpu总是会加载一整个cache line, 多个线程的桶锁若落入同一个cache line, 会引发竞争性能下降
+// 对齐桶锁到 cache line size 边界, 并填充一些使得 padded mutex 至少能占满一整个 cache line
+constexpr size_t CACHE_LINE_SIZE = 64;
+
+template <typename TYPE_LOCK>
+struct padded_mutex {
+    
+    // alignas, C++11引入的关键字, 指定变量的内存对齐方式
+    alignas(CACHE_LINE_SIZE) TYPE_LOCK lock; // alignas强制TYPE_LOCK类变量 lock 按64字节内存对齐
+
+    // padding数组, 使得当sizeof(TYPE_LOCK)小于 CACHE_LINE_SIZE 时, lock占据+padding部分正好占满一个完整的cache line.
+    // 当 sizeof(TYPE_LOCK)大于 CACHE_LINE_SIZE 时, 前面alignas 对齐就够了. 此时pad至少1以满足部分编译器的要求
+    char padding[CACHE_LINE_SIZE - sizeof(TYPE_LOCK) > 0 ? CACHE_LINE_SIZE - sizeof(TYPE_LOCK) : 1];
+};
+
+
+
+
 template <typename TYPE_K, typename TYPE_V>
 class hash_table_chain {
 
@@ -56,7 +75,7 @@ private:
     std::shared_mutex _table_mutex;
 
     // 锁单个bucket的锁. insert操作时, 独占该锁, 使得其他任何线程不能对bucket进行任何操作
-    std::vector<std::shared_mutex> _bucket_mutexs;
+    std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs; //实际是pad 之后的桶锁
 
     // 原子变量 _rehashing, 当多个线程并发执行insert并都通过了rehash条件检查后,应该只允许第一个线程执行rehash
     // 此时需要一个原子变量, 执行原子级的翻转操作: 当原子为false时的线程进入rehash, 翻转它为true, 其他线程只会得到true
@@ -73,13 +92,17 @@ private:
 
         // 初始化一个新的 table
         std::vector<HashTableNode*> _new_table(new_capacity, nullptr);
+
         // 初始化 新的 bucket mutexs 桶锁序列
-        std::vector<std::shared_mutex> _new_bucket_mutexs(new_capacity);
+        std::vector<padded_mutex<std::shared_mutex>> _new_bucket_mutexs(new_capacity);
+
+        // 目前 size 是只增的, 且rehash 一定是扩容. 但为了逻辑闭环, 以及支持未来可能有缩容的rehash, 应该重新统计 node 总个数
+        size_t actual_node_count = 0; // 独占表锁下, 此变量线程安全
 
         for (size_t i = 0; i < _capacity; i++) {
 
             // 搬迁当前 bucket 时, 也独占该bucket桶锁. 作用到本i次 for-loop 结束
-            std::unique_lock<std::shared_mutex> _lock_bucket_for_rehash_(_bucket_mutexs[i]);
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_rehash_(_bucket_mutexs[i].lock);
 
             HashTableNode* current = _table[i]; // 从该bucekt的链表头开始
             while (current) { // 当前node非空
@@ -87,19 +110,21 @@ private:
                 size_t new_index = hash(current->key) % new_capacity; // 计算得出新bucket
                 {
                     // 挂载 current node 到新table的新bucket. 也独占新bucket桶锁. 作用到_new_table[new_index]修改完毕
-                    std::unique_lock<std::shared_mutex> _lock_newbucket_for_rehash_(_new_bucket_mutexs[new_index]);
+                    std::unique_lock<std::shared_mutex> _lock_newbucket_for_rehash_(_new_bucket_mutexs[new_index].lock);
                     current->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                     _new_table[new_index] = current; // 更新确认新bucket的链表头
                 }
                 current = next; // 遍历下一个node
+                actual_node_count++; // 每搬迁一个node就计数
             }
             // 旧_table会被舍弃
             _table[i] = nullptr;
         }
-        // 所有bucket所有node重新挂载完毕后, 切换 _table/_bucket_mutexs/_capacity
+        // 所有bucket所有node重新挂载完毕后, 切换 _table/_bucket_mutexs/_capacity/_size
         _table = std::move(_new_table);
         _bucket_mutexs = std::move(_new_bucket_mutexs);
         _capacity = new_capacity;
+        _size.store(actual_node_count, std::memory_order_relaxed); // 独占表锁下, 只要变更值就可以了, 不需要考虑其他线程是否全局一致.
     }
 
 
@@ -126,7 +151,7 @@ public:
         size_t index = hash(key) % _capacity;
 
         // 读取 key-value 时, 允许单个bucket上并发读. 不允许insert操作. 所以共享占用桶锁. 作用到get结束
-        std::shared_lock<std::shared_mutex> _lock_from_insert_(_bucket_mutexs[index]);
+        std::shared_lock<std::shared_mutex> _lock_from_insert_(_bucket_mutexs[index].lock);
 
         // 得到 bucket, 即哈希冲突的链表头
         HashTableNode* current = _table[index];
@@ -158,7 +183,7 @@ public:
         size_t index = hash(key) % _capacity;
         {
             // 写入 key-value 时, 不允许其他线程对相应bucket有读写操作. 所以独占桶锁. 作用到本桶更新完毕
-            std::unique_lock<std::shared_mutex> _lock_from_insert_read_(_bucket_mutexs[index]);
+            std::unique_lock<std::shared_mutex> _lock_from_insert_read_(_bucket_mutexs[index].lock);
             
             // 首先查找 key 是否已经存在. 若 key 存在, 修改原 value 到 新value
             HashTableNode* current = _table[index];
@@ -184,7 +209,9 @@ public:
             _table[index] = new_node;
             
             // node数量自加1. 原子线程安全
-            _size.fetch_add(1, std::memory_order_relaxed);
+            // std::memory_order_relaxed 就可以保证原子安全. 但未来若需要在某些线程里仅靠_size来判断是否有数据写入, 这个模式不安全.
+            // 这个模式下, 其他线程不一定能看到 自增后的 _size. 可以用 _size.fetch_add(1) 默认模式, 最严格, 保证全局一致.
+            _size.fetch_add(1);
 
         }
 
@@ -224,7 +251,7 @@ public:
         for (size_t i = 0; i < _capacity; i++) {
 
             // 析构本bucket上的nodes, 以及要置空本bucket时, 独占 桶锁. 作用到本i次for-loop结束
-            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(_bucket_mutexs[i]);
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(_bucket_mutexs[i].lock);
 
             HashTableNode* curr = _table[i];
             while (curr) {
@@ -235,8 +262,14 @@ public:
             // bucket 自身置空. 此时该bucket无法从 哈希表对象访问. 但内存并未释放, 等待内存池统一释放
             _table[i] = nullptr;
         }
-        // node数量 置0
-        _size = 0;
+        // node数量 置0, 原子线程安全
+        _size.store(0, std::memory_order_relaxed);
+    }
+
+    
+    // 输出当前哈希表 k-v 数量
+    size_t size() const {
+        return _size.load(); // 原子读取
     }
 
 };
