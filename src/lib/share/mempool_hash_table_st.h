@@ -59,6 +59,8 @@ private:
     void rehash(size_t new_capacity) {
         // 初始化一个新的 table
         std::vector<HashTableNode*> _new_table(new_capacity, nullptr);
+        // 重新计算 _size, 为缩容式 rehash 留下余地
+        size_t actual_node_count = 0;
 
         for (size_t i = 0; i < _capacity; i++) {
             HashTableNode* current = _table[i]; // 从该bucekt的链表头开始
@@ -68,6 +70,7 @@ private:
                 current->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = current; // 更新确认新bucket的链表头
                 current = next; // 遍历下一个node
+                actual_node_count++;
             }
             // 旧_table会被舍弃
             _table[i] = nullptr;
@@ -75,6 +78,7 @@ private:
         // 所有bucket所有node重新挂载完毕后, 切换 _table/_capacity
         _table = std::move(_new_table);
         _capacity = new_capacity;
+        _size = actual_node_count;
     }
 
 

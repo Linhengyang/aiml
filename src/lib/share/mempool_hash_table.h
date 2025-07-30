@@ -24,9 +24,9 @@ struct padded_mutex {
     // alignas, C++11引入的关键字, 指定变量的内存对齐方式
     alignas(CACHE_LINE_SIZE) TYPE_LOCK lock; // alignas强制TYPE_LOCK类变量 lock 按64字节内存对齐
 
-    // padding数组, 使得当sizeof(TYPE_LOCK)小于CACHE_LINE_SIZE时, lock占据+padding部分正好占满一个完整的cache line.
-    // 当sizeof(TYPE_LOCK)小于cache line size时, lock占据+padding部分正好是cache line size 的整数倍
-    char padding[CACHE_LINE_SIZE - sizeof(TYPE_LOCK) % CACHE_LINE_SIZE];
+    // padding数组, 使得当sizeof(TYPE_LOCK)小于 CACHE_LINE_SIZE 时, lock占据+padding部分正好占满一个完整的cache line.
+    // 当 sizeof(TYPE_LOCK)大于 CACHE_LINE_SIZE 时, 前面alignas 对齐就够了. 此时pad至少1以满足部分编译器的要求
+    char padding[CACHE_LINE_SIZE - sizeof(TYPE_LOCK) > 0 ? CACHE_LINE_SIZE - sizeof(TYPE_LOCK) : 1];
 };
 
 
@@ -96,6 +96,9 @@ private:
         // 初始化 新的 bucket mutexs 桶锁序列
         std::vector<padded_mutex<std::shared_mutex>> _new_bucket_mutexs(new_capacity);
 
+        // 目前 size 是只增的, 且rehash 一定是扩容. 但为了逻辑闭环, 以及支持未来可能有缩容的rehash, 应该重新统计 node 总个数
+        size_t actual_node_count = 0; // 独占表锁下, 此变量线程安全
+
         for (size_t i = 0; i < _capacity; i++) {
 
             // 搬迁当前 bucket 时, 也独占该bucket桶锁. 作用到本i次 for-loop 结束
@@ -112,14 +115,16 @@ private:
                     _new_table[new_index] = current; // 更新确认新bucket的链表头
                 }
                 current = next; // 遍历下一个node
+                actual_node_count++; // 每搬迁一个node就计数
             }
             // 旧_table会被舍弃
             _table[i] = nullptr;
         }
-        // 所有bucket所有node重新挂载完毕后, 切换 _table/_bucket_mutexs/_capacity
+        // 所有bucket所有node重新挂载完毕后, 切换 _table/_bucket_mutexs/_capacity/_size
         _table = std::move(_new_table);
         _bucket_mutexs = std::move(_new_bucket_mutexs);
         _capacity = new_capacity;
+        _size.store(actual_node_count, std::memory_order_relaxed); // 独占表锁下, 只要变更值就可以了, 不需要考虑其他线程是否全局一致.
     }
 
 
@@ -204,7 +209,9 @@ public:
             _table[index] = new_node;
             
             // node数量自加1. 原子线程安全
-            _size.fetch_add(1, std::memory_order_relaxed);
+            // std::memory_order_relaxed 就可以保证原子安全. 但未来若需要在某些线程里仅靠_size来判断是否有数据写入, 这个模式不安全.
+            // 这个模式下, 其他线程不一定能看到 自增后的 _size. 可以用 _size.fetch_add(1) 默认模式, 最严格, 保证全局一致.
+            _size.fetch_add(1);
 
         }
 
@@ -255,8 +262,8 @@ public:
             // bucket 自身置空. 此时该bucket无法从 哈希表对象访问. 但内存并未释放, 等待内存池统一释放
             _table[i] = nullptr;
         }
-        // node数量 置0
-        _size = 0;
+        // node数量 置0, 原子线程安全
+        _size.store(0, std::memory_order_relaxed);
     }
 
     
