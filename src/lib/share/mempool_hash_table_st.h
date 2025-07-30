@@ -176,6 +176,12 @@ public:
         _size = 0;
     }
 
+
+    // 输出当前哈希表 k-v 数量
+    size_t size() const {
+        return _size; // 原子读取
+    }
+
 };
 
 
