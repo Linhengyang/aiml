@@ -232,12 +232,14 @@ public:
                 _null_node_advance_to_next_valid_bucket();
         }
 
-        // 对迭代器的解引用 *it --> 返回 k-v pair
+        // 对迭代器的解引用 *it --> 返回 k-v pair. 注意在外面不能引用接收, 即 pair& p = *it 是非法的
+        // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用
         std::pair<const TYPE_K&, TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)
+            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
         }
-
-        // 对迭代器的自增 ++it --> 给出下一个状态的迭代器
+        
+        // C++/C 风格: 前置自增: 返回改变后的对象自身(引用)；后置自增：对象改变后，返回原值副本
+        // 对迭代器的前置自增（先自增自身, 再返回自身引用） ++it --> 给出下一个状态的迭代器
         iterator& operator++() {
             if (_node) {
                 _node = _node->next; // 如果当前 _node 仍然在某链表里, move to next
@@ -248,6 +250,13 @@ public:
                 _null_node_advance_to_next_valid_bucket(); // 
             }
             return *this; // this是本对象指针, *this就是返回本对象
+        }
+
+        // 对迭代器的后置自增（返回原值副本, 再自增自身） it++ --> 给出下一个状态的迭代器
+        iterator operator++(int) {
+            iterator tmp = *this;
+            ++(*this);
+            return tmp; // 
         }
 
         // 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
