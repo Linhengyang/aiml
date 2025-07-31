@@ -205,7 +205,7 @@ public:
     /*
     * 迭代器
     * 
-    // for(auto it = iterator_begin_status; it != iterator_end_status; ++it)
+    // for(auto it = iterator.begin(); it != iterator.end(); ++it)
     // 上述是迭代器的用法. 迭代器 iterator类 本质是对 "迭代产出对象" it 的引用, it 是 iterator 缩写.
     // 即一个迭代器类经过 begin 构造为迭代器对象 it 之后, it 就一直是该迭代器的引用, 迭代器内部不同的状态引向不同it结果
     // 哈希表迭代器, 输出 k-v. 对 it 解引用 *it 即得到想要的输出

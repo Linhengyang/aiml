@@ -141,6 +141,15 @@ public:
         clear(); // 自动析构所有节点(如果需要)
     }
 
+    /*
+    * 根据键找值
+    * @param key
+    * @param value, 取值地址
+    * @return 如果取值成功返回true; 如果取值失败返回false
+    * 
+    * 行为: 取 key 对应的 value 存到 input arg value. 若失败返回false, 若成功返回true
+    * 读写要分离: 读的时候不允许写（单桶），允许并发读（单桶）
+    */
     // 哈希表关键方法之 get(key&, value&) --> change value, return true if success
     bool get(const TYPE_K& key, TYPE_V& value) {
         // 读取 key-value 时, 不允许对整表有 rehash/clear 操作.
@@ -173,6 +182,7 @@ public:
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
     * 
     * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
+    * 读写要分离: 写的时候不允许读（单桶），不允许并发写（单桶），允许多桶并发写
     */
     bool insert(const TYPE_K& key, const TYPE_V& value) {
         // 写入 key-value 时, 不允许对整表有 rehash/clear 操作.
@@ -272,6 +282,26 @@ public:
         return _size.load(); // 原子读取
     }
 
+
+
+    /*
+    * 迭代器
+    * 线程安全的迭代器, 到底是指什么? 
+    * 首先, 单线程下, 迭代哈希表时也不应该insert/remove/change key操作, 因为这些都可能导致rehash, 会导致 iterator 失效
+    * 所以在单线程下, 迭代哈希表时最多 只允许change value, 不允许其他任何操作. 单线程下可以不用 只读迭代器. 允许迭代器change value
+    * 
+    * 那么在多线程下, 首先迭代器在运行时，肯定也要禁止任何线程作 change value 之外的操作. 问题是, 是否允许change value(即使它线程安全)?
+    * 答案是: 否. 在缺乏同步机制的前提下, 当某个线程在执行迭代遍历时, 若其他线程在 thread-safe change value, 会导致两个可能的严重后果
+    * 1. 撕裂读取：迭代器在读取 key-value 时，可能读取到value的一部分后，另一部分被另一个线程改变了，导致读到了一个”混合value”
+    * 2. 后续逻辑破坏：迭代读到了一个value, 但实际上这个value在随后就被改了然而迭代器线程并不知情, 可能会导致后续逻辑错误
+    * 所以归纳一下：
+    *   1. 若非const迭代器, 只能单线程迭代, 且加锁不允许其他线程作只读之外的任何操作.
+    *      这样迭代器允许change value, 但若迭代器change value, 其他线程不能作任何操作(读写都不可以)
+    *   2. 若要并发迭代，必须都是const迭代. 且加锁不允许其他线程作只读之外的任何操作.
+    * 归并一下同类项，迭代器应该这样设计:
+    *   1. 非const迭代器, 应该在迭代时上独占表锁, 其他任何线程不能对表有任何操作(读写都不行)
+    *   2. const迭代器, 允许并发迭代, 应该共享表锁(禁止了需要独占表锁的rehash/clear), 共享桶锁(禁止了需要独占桶锁的insert/remove)
+    */
 };
 
 
