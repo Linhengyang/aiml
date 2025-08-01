@@ -190,6 +190,7 @@ public:
 
     // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
     // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
+    // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
     iterator begin() {
         return iterator(this, 0, nullptr);
     }
@@ -239,7 +240,7 @@ public:
         }
         
         // C++/C 风格: 前置自增: 返回改变后的对象自身(引用)；后置自增：对象改变后，返回原值副本
-        // 对迭代器的前置自增（先自增自身, 再返回自身引用） ++it --> 给出下一个状态的迭代器
+        // 对迭代器的前置自增（自增自身, 返回自增后新值引用） ++it --> 下一个状态的迭代器
         iterator& operator++() {
             if (_node) {
                 _node = _node->next; // 如果当前 _node 仍然在某链表里, move to next
@@ -252,11 +253,11 @@ public:
             return *this; // this是本对象指针, *this就是返回本对象
         }
 
-        // 对迭代器的后置自增（返回原值副本, 再自增自身） it++ --> 给出下一个状态的迭代器
+        // 对迭代器的后置自增（自增自身, 返回自增前原值副本） it++ --> 下一个状态的迭代器
         iterator operator++(int) {
             iterator tmp = *this;
             ++(*this);
-            return tmp; // 
+            return tmp; // 返回原值副本
         }
 
         // 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
