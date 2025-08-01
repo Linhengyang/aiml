@@ -373,7 +373,7 @@ public:
 
         // 迭代器对象 == 运算
         bool operator==(const const_iterator& other) const {
-            return _node == other._node;
+            return _node == other._node && _hash_table == other._hash_table;
         }
 
         // 迭代器对象 != 运算
@@ -397,7 +397,7 @@ public:
         std::shared_lock<std::shared_mutex> _table_lock;
         
         // 因为迭代器内部, _bucket_index 是在变化的, 故所有桶锁要一并传进来, 然后在迭代器内部根据_bucket_index加锁
-        // 哈希表的 桶锁 vector 地址
+        // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它，所以加const. C++允许在const的mutex上加锁
         const padded_mutex<std::shared_mutex>* _bucket_mutexs;
 
         void _null_node_advance_to_next_valid_bucket() {
@@ -471,7 +471,7 @@ public:
 
         // 迭代器对象 == 运算
         bool operator==(const iterator& other) const {
-            return _node == other._node;
+            return _node == other._node && _hash_table == other._hash_table;
         }
 
         // 迭代器对象 != 运算
