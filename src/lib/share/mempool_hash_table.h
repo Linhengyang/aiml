@@ -353,7 +353,7 @@ public:
         const_iterator& operator++() {
             if (_node) {
                 /* 桶内链表上移动, 应该锁住这个桶. 持续到 node 移动结束 */
-                std::shared_lock<std::shared_mutex> _bucket_mutexs[_bucket_index].lock;
+                std::shared_lock<std::shared_mutex> _lock_bucket_(_bucket_mutexs[_bucket_index].lock);
                 _node = _node->next;
             }
 
@@ -405,7 +405,7 @@ public:
             // _node 在跳转的时候, 应该有目标桶锁, 以限制该桶有insert/remove操作
             while (!_node && _bucket_index < _hash_table->_capacity) {
                 /* 加 _bucket_index 桶锁, 持续到本循环退出 */
-                std::shared_lock<std::shared_mutex> _bucket_mutexs[_bucket_index].lock;
+                std::shared_lock<std::shared_mutex> _lock_bucket_(_bucket_mutexs[_bucket_index].lock);
                 _node = (_hash_table->_table)[_bucket_index];
                 if (_node) break;
                 _bucket_index++;
