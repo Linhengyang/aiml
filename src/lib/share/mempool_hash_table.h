@@ -89,6 +89,7 @@ private:
     */
     void rehash(size_t new_capacity) {
         // rehash 的调用在 insert 里，调用前会加 独占表锁, 故这里不再加独占表锁避免死锁
+        // 独占表锁之后, 多线程里就只有 一个 rehash 可以运行了, 其他都会被阻塞. 桶锁是多余的
 
         // 初始化一个新的 table
         std::vector<HashTableNode*> _new_table(new_capacity, nullptr);
@@ -141,6 +142,15 @@ public:
         clear(); // 自动析构所有节点(如果需要)
     }
 
+    /*
+    * 根据键找值
+    * @param key
+    * @param value, 取值地址
+    * @return 如果取值成功返回true; 如果取值失败返回false
+    * 
+    * 行为: 取 key 对应的 value 存到 input arg value. 若失败返回false, 若成功返回true
+    * 读写要分离: 读的时候不允许写（单桶），允许并发读（单桶）
+    */
     // 哈希表关键方法之 get(key&, value&) --> change value, return true if success
     bool get(const TYPE_K& key, TYPE_V& value) {
         // 读取 key-value 时, 不允许对整表有 rehash/clear 操作.
@@ -173,6 +183,7 @@ public:
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
     * 
     * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
+    * 读写要分离: 写的时候不允许读（单桶），不允许并发写（单桶），允许多桶并发写
     */
     bool insert(const TYPE_K& key, const TYPE_V& value) {
         // 写入 key-value 时, 不允许对整表有 rehash/clear 操作.
@@ -272,6 +283,225 @@ public:
         return _size.load(); // 原子读取
     }
 
+
+
+    /*
+    * 迭代器
+    * 线程安全的迭代器, 到底是指什么? 
+    * 首先, 单线程下, 迭代哈希表时也不应该insert/remove/change key操作, 因为这些都可能导致rehash, 会导致 iterator 失效
+    * 所以在单线程下, 迭代哈希表时最多 只允许change value, 不允许其他任何操作. 单线程下可以不用 只读迭代器. 允许迭代器change value
+    * 
+    * 那么在多线程下, 首先迭代器在运行时，肯定也要禁止任何线程作 change value 之外的操作. 问题是, 是否允许change value(即使它线程安全)?
+    * 答案是: 否. 在缺乏同步机制的前提下, 当某个线程在执行迭代遍历时, 若其他线程在 thread-safe change value, 会导致两个可能的严重后果
+    * 1. 撕裂读取：迭代器在读取 key-value 时，可能读取到value的一部分后，另一部分被另一个线程改变了，导致读到了一个”混合value”
+    * 2. 后续逻辑破坏：迭代读到了一个value, 但实际上这个value在随后就被改了然而迭代器线程并不知情, 可能会导致后续逻辑错误
+    * 所以归纳一下：
+    *   1. 若非const迭代器, 只能单线程迭代, 且加锁不允许其他线程作只读之外的任何操作.
+    *      这样迭代器允许change value, 但若迭代器change value, 其他线程不能作任何操作(读写都不可以)
+    *   2. 若要并发迭代，必须都是const迭代. 且加锁不允许其他线程作只读之外的任何操作.
+    * 归并一下同类项，迭代器应该这样设计:
+    *   1. 非const迭代器, 应该在迭代时上独占表锁, 其他任何线程不能对表有任何操作(读写都不行). 迭代器自身可change value,
+    *   2. const迭代器, 允许并发迭代, 应该共享表锁(禁止了需要独占表锁的rehash/clear), 共享桶锁(禁止了需要独占桶锁的insert/remove)
+    *      迭代器是只读的. 哈希表不可被任何change, 即线程A迭代bucket_i时, 不该允许线程B在bucket_i作insert和remove
+    *      这里似乎可以允许线程B在bucket_j作insert和remove, 因为线程A在迭代bucket_i时, 对其他桶似乎可以不作要求. 只不过这样的话，
+    *      多线程并发迭代的结果可能会不一样. 如果要求保证并发迭代的结果一致, 那么线程A在迭代bucket_i时, 应该对全部bucket都共享锁.
+    *      可是这种需求有更好的实现方式: 先单线程迭代一遍哈希表并dump成副本, 然后多线程使用该副本. 所以这里不对全部桶上共享锁.
+    * 
+    *      并发迭代有不同的设计模式: 1. 多个线程并发无误遍历一遍哈希表（总共一遍），2. 多个线程各自并发无误遍历一遍哈希表（总共多遍）
+    *      前者多个线程并发遍历一遍哈希表,（迭代器的_node指针是线程local的, 不能多线程共享. 遍历过程中_node指针很多跳转, 共享需要极其精细的
+    *      同步机制, 那就不现实.）即使是为了加速迭代也应该使用分片（sharding）多线程迭代的方式（每个线程负责一部分bucket）. 
+    *      那么这样的迭代器和全迭代肯定是不同设计的（需要输入bucket id以发送给不同线程，以实现sharding并行扫描），是高性能哈希表TBB/folly::F14的做法,
+    *      并不是常规iterator的职责范围. 在这里首先实现的是“多个线程各自并发无误遍历一遍哈希表（总共多遍）”的const只读迭代器。
+    */
+
+    /*
+    * const只读迭代器
+    * 
+    * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
+    */
+    const_iterator cbegin() const {
+        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    }
+
+    const_iterator cend() const {
+        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    }
+
+    class const_iterator {
+
+    public:
+
+        // 迭代器的构造函数
+        const_iterator(const hash_table_chain* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node),
+            // 延迟构造, 在const_iterator构造函数初始化列表里传入 _table_mutex 调用shared_lock的构造函数-->此时完成加表锁
+            _table_lock(_hash_table->_table_mutex),
+            // vector.data() --> 传入 桶锁vector 地址. 构造时不需要上桶锁
+            _bucket_mutexs( _hash_table->_bucket_mutexs.data() )
+        {
+            _null_node_advance_to_next_valid_bucket(); // 在内部, 目标桶加桶锁
+        }
+
+        // *it 迭代器对象解引用 --> 只读返回
+        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {
+            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
+        }
+
+        // 迭代器对象前置++
+        const_iterator& operator++() {
+            if (_node) {
+                /* 桶内链表上移动, 应该锁住这个桶. 持续到 node 移动结束 */
+                std::shared_lock<std::shared_mutex> _lock_bucket_(_bucket_mutexs[_bucket_index].lock);
+                _node = _node->next;
+            }
+
+            if (!_node) {
+                _bucket_index++; // 尝试跳转到next桶. _bucket_index 是线程local, 所以自增是安全的.
+                _null_node_advance_to_next_valid_bucket(); // 在内部, 目标桶加桶锁
+            }
+            return *this;
+        }
+
+        // 迭代器对象后置++
+        const_iterator operator++(int) {
+            const_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        // 迭代器对象 == 运算
+        bool operator==(const const_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+
+        // 迭代器对象 != 运算
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
+
+    private:
+
+        hash_table_chain* _hash_table;
+
+        size_t _bucket_index;
+
+        HashTableNode* _node;
+
+        // 延迟构造
+        // std::shared_lock<std::shared_mutex> _table_lock(_table_mutex);
+        // 这种是 定义一个 _table_lock变量, 类型为shared_lock<shared_mutex>, 并传入 _table_mutex 即刻构造-->完成加锁
+        // std::shared_lock<std::shared_mutex> _table_lock; 只是声明了一个 类型为shared_lock<shared_mutex>的_table_lock变量
+        // 会在const_iterator构造函数初始化列表里传入 _table_mutex 调用shared_lock的构造函数-->届时才加锁, 所以本质是延迟构造加锁
+        std::shared_lock<std::shared_mutex> _table_lock;
+        
+        // 因为迭代器内部, _bucket_index 是在变化的, 故所有桶锁要一并传进来, 然后在迭代器内部根据_bucket_index加锁
+        // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它，所以加const. C++允许在const的mutex上加锁
+        const padded_mutex<std::shared_mutex>* _bucket_mutexs;
+
+        void _null_node_advance_to_next_valid_bucket() {
+            // null node 跳转到下一个 valid bucket head node. _bucket_index 和 _node 都是线程局部的, 所以它们都安全
+            // _node 在跳转的时候, 应该有目标桶锁, 以限制该桶有insert/remove操作
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                /* 加 _bucket_index 桶锁, 持续到本循环退出 */
+                std::shared_lock<std::shared_mutex> _lock_bucket_(_bucket_mutexs[_bucket_index].lock);
+                _node = (_hash_table->_table)[_bucket_index];
+                if (_node) break;
+                _bucket_index++;
+            }
+        }
+
+
+    }; // end of const_iterator definition
+
+
+    /*
+    * 非const迭代器
+    * 
+    * 用法: for(auto it = hash_table.begin(); it != hash_table.end(); ++it) {auto& [k, v] = *it; //code//}
+    */
+    iterator begin() const {
+        return iterator(this, 0, nullptr);
+    }
+
+    iterator end() const {
+        return iterator(this, _capacity, nullptr);
+    }
+
+    class iterator {
+
+    public:
+
+        // 迭代器的构造函数
+        iterator(const hash_table_chain* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node),
+            // 延迟构造, 在iterator构造函数初始化列表里传入 _table_mutex 调用unique_lock的构造函数-->此时完成加锁
+            _table_lock(_hash_table->_table_mutex)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
+
+        // *it 迭代器对象解引用 --> v可变返回
+        std::pair<const TYPE_K&, TYPE_V&> operator*() const {
+            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
+        }
+
+        // 迭代器对象前置++
+        iterator& operator++() {
+            if (_node) {
+                _node = _node->next;
+            }
+
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket(); // 
+            }
+            return *this;
+        }
+
+        // 迭代器对象后置++
+        iterator operator++(int) {
+            iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        // 迭代器对象 == 运算
+        bool operator==(const iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+
+        // 迭代器对象 != 运算
+        bool operator!=(const iterator& other) const {
+            return !(*this == other); // this是本对象指针, *this就是返回本对象
+        }
+
+    private:
+
+        hash_table_chain* _hash_table;
+
+        size_t _bucket_index;
+
+        HashTableNode* _node;
+
+        // 延迟构造
+        // 会在iterator构造函数初始化列表里传入 _table_mutex 调用unique_lock的构造函数-->届时才加锁, 所以本质是延迟构造加锁
+        std::unique_lock<std::shared_mutex> _table_lock;
+
+        void _null_node_advance_to_next_valid_bucket() {
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                _node = (_hash_table->_table)[_bucket_index];
+                if (_node) break;
+                _bucket_index++;
+            }
+        }
+
+
+
+    } // end of const_iterator definition
 };
 
 
