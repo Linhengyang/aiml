@@ -1254,7 +1254,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 1GB
+                  buffer_size:int = 172470436, # max num of token-chunks in memory for each core. 0.16GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
                   fc_count_pair_batch:t.Callable = count_pair_batch,
                   fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
@@ -1344,7 +1344,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 1 << 29, # max num of tokens-chunks in memory. recommend to 1GB
+                  buffer_size:int = 172470436, # max num of token-chunks in memory for each core. 0.16GB
                   keep_window:int = 3, # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
@@ -1374,8 +1374,9 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         else:
             self._build_vocab()
 
-        # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block
-        # 根据本机64GB内存，反推最佳 buffer_size = 1 << 29 = 0.5GB, 这样一个 block size 占用 20GB
+        # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block. 避免多次申请block.
+        # 根据本机64GB内存，8核, 每核内存8GB, 分6.4GB内存给计算, 那么 buffer_size=0.16GB
+        # 反推最佳 buffer_size = 0.16GB, 这样1个进程有1个内存block,占用6.4GB. 8核总共占据51.2GB.
         memblock_size = 40 * self._buffer_size
         with memory_control(switch, memblock_size), ProcessPoolExecutor(os.cpu_count()) as executor:
             # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
