@@ -993,9 +993,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     @classmethod
     def yield_tokens_offsets_order(cls, yield_batch: t.Generator):
         for i, batch in enumerate(yield_batch):
-            # 对于values, to_numpy() 会保留 原parquet 保存时设定的 dtype
+            # batch['tokens'] --> pa.LargeListArray
+            # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
             tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
-            # 对于offsets, to_numpy() 输出 int64
             offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
 
             yield (tokens_flat, offsets), i
