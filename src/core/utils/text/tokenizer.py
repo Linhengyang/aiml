@@ -669,11 +669,10 @@ def count_pair_batch(tokens_offsets_border):
     # 聚合计算频数
     uniq_pairs, counts = np.unique(structured, return_counts=True)
 
-    # dtype_counts = cls.p_counts_schema[2].type.to_pandas_dtype()
     # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
-    pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))).T
+    pcounts = (uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))
 
-    return pcounts, b_order # pcounts 是(N,3)形状, dtype为(uint16, uint16, uint64). 可以为空
+    return pcounts, b_order # pcounts:tuple of 3arrays, (L,R,counts), dtype(uint16, uint16, uint64)
 
 
 
@@ -1009,18 +1008,18 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         '''
         buffer the pair-counts for the batch with 'order'
         '''
-        b_pcounts, b_order = pcounts_order # b_pcounts: (N, 3)shape, (uint16, uint16, uint64)dtypes
+        b_pcounts, b_order = pcounts_order # b_pcounts: tuple of 3arrays(L,R,counts), (uint16, uint16, uint64)dtypes
 
-        if not b_pcounts.shape[0]:
-            return None
-        
         data = {
-            cls.p_counts_schema[0].name: b_pcounts[:, 0], # L: L_tokens
-            cls.p_counts_schema[1].name: b_pcounts[:, 1], # R: R_tokens
-            cls.p_counts_schema[2].name: b_pcounts[:, 2], # counts: counts
+            cls.p_counts_schema[0].name: b_pcounts[0], # L: L_tokens
+            cls.p_counts_schema[1].name: b_pcounts[1], # R: R_tokens
+            cls.p_counts_schema[2].name: b_pcounts[2], # counts: counts
             }
 
         table = pa.Table.from_pydict(data, cls.p_counts_schema)
+
+        if not table: # 如果是空table, 直接返回None不用写入
+            return None
         
         save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
         pq.write_table(table, save_path)
