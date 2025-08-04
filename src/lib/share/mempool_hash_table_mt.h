@@ -259,9 +259,59 @@ public:
     * get+insert复合操作: 贡献表锁以拒绝表结构变化(禁止rehash/clear), 独占桶锁以拒绝单桶的竞态读(get)、竞态写(insert/upsert)
     * 允许不同桶并发读写(其他桶的读/写不受影响)
     */
-   bool atomic_upsert(const TYPE_K& key, std::function<void(TYPE_V&)>& updater, const TYPE_V& default) {}
+    // updater 应该是一个函数指针, 比如 函数指针 std::function<void(TYPE_V&)> 或
+    // 函数指针的左值引用 std::function<void(TYPE_V&)>& 或
+    // 函数指针的const &引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
+    // 这里采用最灵活的模板写法, 用 && 保证右值引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
+    template <typename Func>
+    bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
 
+        // 加表锁, 防止表结构变动
+        std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
+        // 基本照搬 insert 逻辑, 除了修改节点value/插入新节点时, 分别使用updater/default_val来更新/插入
+        size_t index = hash(key) % _capacity;
+
+        {
+            std::unique_lock<std::shared_mutex> _lock_from_insert_read_(_bucket_mutexs[index].lock);
+            
+            HashTableNode* current = _table[index];
+            while (current) {
+                if (current->key == key) {
+                    // 本地修改 node 的value. 独占桶锁下这里是线程安全的, 不需要额外原子设计
+                    std::forward<Func>(updater)(current->value); // 用forward 完美转发 updater
+                    return true;
+                }
+                current = current->next;
+            }
+
+            void* raw_mem = _pool.allocate(sizeof(HashTableNode));
+            if (!raw_mem) return false;
+
+            // 插入新节点 (key, default_val)
+            HashTableNode* new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+
+            _table[index] = new_node;
+
+            _size.fetch_add(1);
+        }
+
+        _lock_from_rehash_clear_.unlock();
+
+        bool expected = false;
+
+        if (_size >= _capacity*_max_load_factor && _rehashing.compare_exchange_strong(expected, true)) {
+
+            std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
+
+            if (_size >= _capacity*_max_load_factor) {
+                rehash( _capacity*2 );
+            }
+            _rehashing.store(false);
+        }
+
+        return true;
+    }
 
 
     // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的销毁
