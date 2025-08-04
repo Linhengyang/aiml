@@ -8,7 +8,7 @@
 
 extern "C" {
 
-return_bundle c_merge_pair_batch(
+token_filter_len_ptrs c_merge_pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks, // num_chunks = len(offsets) - 1
@@ -56,7 +56,7 @@ return_bundle c_merge_pair_batch(
             output_tokens_lens
         );
         
-        return_bundle result = return_bundle{output_tokens_flat, output_filter, output_tokens_lens};
+        token_filter_len_ptrs result = token_filter_len_ptrs{output_tokens_flat, output_filter, output_tokens_lens};
 
         return result;
     }

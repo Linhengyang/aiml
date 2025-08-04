@@ -11,15 +11,15 @@ np.import_array()
 
 cdef extern from "merge_pair.h":
 
-    # 声明 C++ 中的 return_bundle 结构体
-    struct return_bundle:
+    # 声明 C++ 中的 token_filter_len_ptrs 结构体
+    struct token_filter_len_ptrs:
         uint16_t* output_tokens_flat_ptr
         bint* output_filter_ptr
         int64_t* output_tokens_lens_ptr
     
 
     # 声明 C++ 中的 c_merge_pair_batch 函数
-    return_bundle c_merge_pair_batch(
+    token_filter_len_ptrs c_merge_pair_batch(
         const uint16_t* tokens_flat,
         const int64_t* offsets,
         const size_t num_chunks,
@@ -89,7 +89,7 @@ cpdef merge_pair_batch(
     cdef const int64_t* offsets_ptr = &offsets_view[0]
 
     # deploy cpp function
-    cdef return_bundle result = c_merge_pair_batch(
+    cdef token_filter_len_ptrs result = c_merge_pair_batch(
         tokens_flat_ptr,
         offsets_ptr,
         num_chunks,

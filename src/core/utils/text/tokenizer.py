@@ -672,7 +672,7 @@ def count_pair_batch(tokens_offsets_border):
     # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
     pcounts = (uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))
 
-    return pcounts, b_order # pcounts:tuple of 3arrays, (L,R,counts), dtype(uint16, uint16, uint64)
+    return pcounts, b_order # pcounts:tuple of 3 arrays (L,R,counts), dtype(uint16, uint16, uint64)
 
 
 

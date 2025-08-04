@@ -13,14 +13,14 @@
 extern "C" {
 
 // 结构体，用于封装多个函数返回指针
-struct return_bundle {
+struct token_filter_len_ptrs {
     uint16_t* output_tokens_flat_ptr;
     bool* output_filter_ptr;
     int64_t* output_tokens_lens_ptr;
 };
 
 
-return_bundle c_merge_pair_batch(
+token_filter_len_ptrs c_merge_pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
