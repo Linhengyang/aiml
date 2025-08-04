@@ -22,6 +22,7 @@ cdef extern from "pair_count_merge.h":
     L_R_token_counts_ptrs c_count_pair_batch(
         const uint16_t* L_tokens,
         const uint16_t* R_tokens,
+        const int64_t len,
         const int num_threads
     )
 
@@ -83,8 +84,12 @@ cpdef count_pair_batch(
     # 本 batch merge pair之前, 重置内存池
     reset_memory_pool()
  
-    # TODO
-
+    cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
+    if _LENGTH != offsets[-1]:
+        sys.exit(1)
+    
+    
+    
 
 
 
@@ -97,8 +102,11 @@ cpdef merge_pair_batch(
     np.uint16_t pair_R,
     np.uint16_t new_token,
 ):
+    # 得到 tokens
     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets_border[0][0]
+    # 得到 offsets
     cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets_border[0][1]
+
     # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
     shrink_memory_pool()
     
