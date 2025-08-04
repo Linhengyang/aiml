@@ -249,6 +249,21 @@ public:
         return true;
     }
 
+    /*
+    * @param key: const TYPE_K&
+    * @param updater: void lambda_func(TYPE_V* input_arg)
+    * @param initial: const TYPE_V&
+    * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
+    * 
+    * 行为:按key查找, 若找到value, 以updater原子更新updater(value); 若未找到, 以default先初始化value, 再原子更新updater(value)
+    * get+insert复合操作: 贡献表锁以拒绝表结构变化(禁止rehash/clear), 独占桶锁以拒绝单桶的竞态读(get)、竞态写(insert/upsert)
+    * 允许不同桶并发读写(其他桶的读/写不受影响)
+    */
+   bool atomic_upsert(const TYPE_K& key, std::function<void(TYPE_V&)>& updater, const TYPE_V& default) {}
+
+
+
+
     // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的销毁
     // 内存池本身是只可以重用/整体销毁，不可精确销毁单次allocate的内存
     // 故哈希表的"清空"应该是数据不再可访问的意思, 但其分配的内存不会在这里被销毁.

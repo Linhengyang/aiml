@@ -11,11 +11,24 @@ extern "C" {
 L_R_token_counts_ptrs c_count_pair_batch(
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
+    const int64_t len,
     const int num_threads
 ) {
     try
     {
-        /* code */
+        uint16_t* L_tokens = nullptr;
+        uint16_t* R_tokens = nullptr;
+        uint64_t* counts = nullptr;
+
+        if (num_threads == 1) {
+            /*count_pair_core_single_thread*/
+        }
+        else {
+            /**/
+        }
+        L_R_token_counts_ptrs result = L_R_token_counts_ptrs{L_tokens, R_tokens, counts};
+
+        return result;
     }
     catch(const std::exception& e)
     {
