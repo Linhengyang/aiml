@@ -1,4 +1,4 @@
-// mempool_hash_table.h
+// mempool_hash_table_mt.h
 
 #ifndef MEMPOOL_HASH_TABLE_H
 #define MEMPOOL_HASH_TABLE_H
@@ -33,7 +33,7 @@ struct padded_mutex {
 
 
 template <typename TYPE_K, typename TYPE_V>
-class hash_table_chain {
+class hash_table_mt_chain {
 
 private:
 
@@ -132,13 +132,13 @@ private:
 public:
 
     // 哈希表的构造函数. 传入哈希表的capacity, 和内存池
-    explicit hash_table_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool) {
+    explicit hash_table_mt_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool) {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
     }
 
     // 析构函数, 会调用 clear 方法来释放所有 HashTableNode 中需要显式析构的部分, 但不负责内存释放
-    ~hash_table_chain() {
+    ~hash_table_mt_chain() {
         clear(); // 自动析构所有节点(如果需要)
     }
 
@@ -332,7 +332,7 @@ public:
     public:
 
         // 迭代器的构造函数
-        const_iterator(const hash_table_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        const_iterator(const hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node),
@@ -383,7 +383,7 @@ public:
 
     private:
 
-        hash_table_chain* _hash_table;
+        hash_table_mt_chain* _hash_table;
 
         size_t _bucket_index;
 
@@ -434,7 +434,7 @@ public:
     public:
 
         // 迭代器的构造函数
-        iterator(const hash_table_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        iterator(const hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node),
@@ -481,7 +481,7 @@ public:
 
     private:
 
-        hash_table_chain* _hash_table;
+        hash_table_mt_chain* _hash_table;
 
         size_t _bucket_index;
 
