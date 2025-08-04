@@ -4,13 +4,13 @@
 #include <omp.h>
 #include <cstddef>
 #include <cstdint>
-#include <pair_count_merge.h>
-#include <mempool_hash_table_st.h>
-#include <mempool_hash_table_mt.h>
+#include "pair_count_merge.h"
+#include "mempool_counter.h"
 
 extern "C" {
 
 void count_pair_core_multi_thread(
+    counter_mt<std::pair<uint16_t, uint16_t>>& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len,
@@ -28,6 +28,7 @@ void count_pair_core_multi_thread(
 
 
 void count_pair_core_single_thread(
+    counter_st<std::pair<uint16_t, uint16_t>>& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len

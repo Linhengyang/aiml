@@ -4,6 +4,7 @@
 #include <cstdint>
 #include "pair_count_merge.h"
 #include "memory_pool.h"
+#include "mempool_counter.h"
 
 
 extern "C" {
@@ -21,10 +22,18 @@ L_R_token_counts_ptrs c_count_pair_batch(
         uint64_t* counts = nullptr;
 
         if (num_threads == 1) {
-            /*count_pair_core_single_thread*/
+            counter_st counter = counter_st<std::pair<uint16_t, uint16_t>>(1024, memory_pool::get_mempool());
+            count_pair_core_single_thread(counter, L_tokens, R_tokens, len);
+            for(auto& it = counter.begin(); it != counter.end(); ++it) {
+                
+            }
         }
         else {
-            /**/
+            counter_mt counter = counter_mt<std::pair<uint16_t, uint16_t>>(1024, memory_pool::get_mempool());
+            count_pair_core_multi_thread(counter, L_tokens, R_tokens, len, num_threads);
+            for(auto& it = counter.cbegin(); it != counter.cend(); ++it) {
+                std::pair<uint16_t, uint16_t> pair = *it;
+            }
         }
         L_R_token_counts_ptrs result = L_R_token_counts_ptrs{L_tokens, R_tokens, counts};
 

@@ -3,10 +3,10 @@
 
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
-#include "memory_pool.h"  // 引入 memory_pool.h 以便访问 MemoryPool 类
+
 #include <cstddef>
 #include <cstdint>
-
+#include "mempool_counter.h" // 引入 mempool_counter.h 以便访问 counter_mt/counter_st 类
 
 
 
@@ -29,6 +29,7 @@ L_R_token_counts_ptrs c_count_pair_batch(
 
 
 void count_pair_core_multi_thread(
+    counter_mt<std::pair<uint16_t, uint16_t>>& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len,
@@ -37,6 +38,7 @@ void count_pair_core_multi_thread(
 
 
 void count_pair_core_single_thread(
+    counter_st<std::pair<uint16_t, uint16_t>>& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len
