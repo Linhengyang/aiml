@@ -1,5 +1,5 @@
-// tokenizer.H
-// statement for tokenizer.cpp
+// pair_count_merge.H
+// statement for pair_count_merge_api.cpp
 
 #ifndef TOKENIZER_H
 #define TOKENIZER_H

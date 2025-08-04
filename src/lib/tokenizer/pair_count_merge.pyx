@@ -9,7 +9,7 @@ import ctypes
 
 np.import_array()
 
-cdef extern from "merge_pair.h":
+cdef extern from "pair_count_merge.h":
 
     # 声明 C++ 中的 token_filter_len_ptrs 结构体
     struct token_filter_len_ptrs:

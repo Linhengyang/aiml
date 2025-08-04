@@ -1,10 +1,10 @@
-// tokenizer.cpp
-// core functions for utils/text/tokenizer
+// merge_pair_core.cpp
+// core functions for merge pair in tokenizer
 #include <vector>
 #include <omp.h>
 #include <cstddef>
 #include <cstdint>
-
+#include <pair_count_merge.h>
 
 extern "C" {
 
@@ -39,4 +39,4 @@ void merge_pair_core_parallel(
     }
 }
 
-}
+} // end of extern C
