@@ -12,7 +12,28 @@
 
 extern "C" {
 
-// 结构体，用于封装多个函数返回指针
+// 结构体，用于封装count_pair_batch函数返回的多个data指针
+struct L_R_token_counts_ptrs {
+    uint16_t* L_tokens_ptr;
+    uint16_t* R_tokens_ptr;
+    uint64_t* counts_ptr;
+};
+
+
+L_R_token_counts_ptrs c_count_pair_batch(
+    const uint16_t* L_tokens,
+    const uint16_t* R_tokens
+);
+
+
+void count_pair_core_threadsafe(
+    const uint16_t* L_tokens,
+    const uint16_t* R_tokens,
+    const int num_threads
+);
+
+
+// 结构体，用于封装merge_pair_batch函数返回的多个data指针
 struct token_filter_len_ptrs {
     uint16_t* output_tokens_flat_ptr;
     bool* output_filter_ptr;
@@ -28,7 +49,6 @@ token_filter_len_ptrs c_merge_pair_batch(
     const uint16_t pair_R,
     const uint16_t new_token
 );
-
 
 
 void merge_pair_core_parallel(

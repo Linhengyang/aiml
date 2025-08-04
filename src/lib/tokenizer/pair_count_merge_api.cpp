@@ -8,6 +8,22 @@
 
 extern "C" {
 
+L_R_token_counts_ptrs c_count_pair_batch(
+    const uint16_t* L_tokens,
+    const uint16_t* R_tokens
+) {
+    try
+    {
+        /* code */
+    }
+    catch(const std::exception& e)
+    {
+        throw std::runtime_error("Error in c_count_pair_batch");
+    }
+}
+
+
+
 token_filter_len_ptrs c_merge_pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
@@ -62,7 +78,7 @@ token_filter_len_ptrs c_merge_pair_batch(
     }
     catch(const std::exception& e)
     {
-        throw std::runtime_error("Error in merge_pair_core_parallel");
+        throw std::runtime_error("Error in c_merge_pair_batch");
     }
 }
 

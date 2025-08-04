@@ -11,6 +11,20 @@ np.import_array()
 
 cdef extern from "pair_count_merge.h":
 
+    # 声明 C++ 中的 L_R_token_counts_ptrs 结构体
+    struct L_R_token_counts_ptrs:
+        uint16_t* L_tokens_ptr
+        uint16_t* R_tokens_ptr
+        uint64_t* counts_ptr
+
+
+    # 声明 C++ 中的 c_count_pair_batch 函数
+    L_R_token_counts_ptrs c_count_pair_batch(
+        const uint16_t* L_tokens,
+        const uint16_t* R_tokens,
+    )
+
+
     # 声明 C++ 中的 token_filter_len_ptrs 结构体
     struct token_filter_len_ptrs:
         uint16_t* output_tokens_flat_ptr
@@ -51,6 +65,25 @@ cdef extern from "pair_count_merge.h":
 # 为了保证tokens在同一个block而不是large alloc, block_size 至少是 40倍batch_size bytes
 def allocate_memory(block_size):
     init_memory_pool(block_size, 16)
+
+
+
+
+
+# 返回np.array of L_tokens/R_tokens/counts 给python
+cpdef count_pair_batch(
+    object tokens_offsets_border
+):
+    cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets_border[0][0]
+    cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets_border[0][1]
+    # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
+    shrink_memory_pool()
+    
+    # 本 batch merge pair之前, 重置内存池
+    reset_memory_pool()
+ 
+    # TODO
+
 
 
 

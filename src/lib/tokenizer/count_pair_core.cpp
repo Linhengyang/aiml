@@ -8,7 +8,7 @@
 
 extern "C" {
 
-void count_pair_core(
+void count_pair_core_threadsafe(
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     // concurrent_hash_table* table, 这里需要一个支持并发读写的 hash table
@@ -21,4 +21,4 @@ void count_pair_core(
     
 }
 
-}
+} // end of extern C
