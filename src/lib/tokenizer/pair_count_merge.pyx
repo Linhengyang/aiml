@@ -109,7 +109,10 @@ cpdef count_pair_batch(
     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] R_tokens = tokens_flat[mask_cp] # 可以为空
 
     # 检查 L_tokens 和 R_tokens 长度.
-    cdef size_t len = ??
+    cdef size_t len = L_tokens.shape[0]
+    if len != R_tokens.shape[0]:
+        sys.exit(1)
+    
     if len == 0:
         return (pynp.array([], dtype=pynp.uint16),
                 pynp.array([], dtype=pynp.uint16),
