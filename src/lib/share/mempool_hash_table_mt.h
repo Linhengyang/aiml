@@ -495,11 +495,12 @@ public:
     public:
 
         // 迭代器的构造函数
-        iterator(const hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        iterator(hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node),
-            // 延迟构造, 在iterator构造函数初始化列表里传入 _table_mutex 调用unique_lock的构造函数-->此时完成加锁
+            // 延迟构造, 在iterator构造函数初始化列表里传入 _table_mutex 调用unique_lock的构造函数-->此时完成独占表锁加锁
+            // 独占表锁之后, 迭代器禁止其余线程作任何其他操作
             _table_lock(_hash_table->_table_mutex)
         {
             _null_node_advance_to_next_valid_bucket();
@@ -560,10 +561,10 @@ public:
             }
         }
 
+    }; // end of iterator definition
 
 
-    } // end of const_iterator definition
-};
+}; // end of hash_table_mt_chain definition
 
 
 

@@ -240,6 +240,87 @@ public:
     }
 
 
+    /*
+    * 只读迭代器
+    * 
+    * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
+    */
+    const_iterator cbegin() const {
+        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    }
+
+    const_iterator cend() const {
+        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    }
+
+    class const_iterator {
+
+    public:
+
+        const_iterator(const hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
+
+        // *it 迭代器对象解引用 --> 只读返回
+        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {
+            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
+        }
+        
+
+        const_iterator& operator++() {
+            if (_node) {
+                _node = _node->next;
+            }
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket(); // 
+            }
+            return *this;
+        }
+
+
+        const_iterator operator++(int) {
+            const_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+
+        bool operator==(const const_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+
+
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
+
+    private:
+
+        hash_table_st_chain* _hash_table;
+
+        size_t _bucket_index;
+
+        HashTableNode* _node;
+
+        void _null_node_advance_to_next_valid_bucket() {
+
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+
+                _node = (_hash_table->_table)[_bucket_index];
+
+                if (_node) break;
+
+                _bucket_index++;
+            }
+        }
+
+    }; // end of const_iterator definition
+
 
     /*
     * 迭代器
@@ -300,7 +381,7 @@ public:
 
         // 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
         bool operator==(const iterator& other) const {
-            return _node == other._node;
+            return _node == other._node && _hash_table == other._hash_table;
         }
 
         // 给出两个迭代器状态是否不相等的判决方法, 必须是 operator == 操作的反面
@@ -337,9 +418,10 @@ public:
             }
         }
 
-    };
+    };  // end of iterator definition
 
-};
+
+}; // end of hash_table_st_chain definition
 
 
 
