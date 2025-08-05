@@ -1,4 +1,4 @@
-// pair_count_merge.H
+// pair_count_merge.h
 // statement for pair_count_merge_api.cpp
 
 #ifndef TOKENIZER_H
@@ -6,7 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "mempool_counter.h" // 引入 mempool_counter.h 以便访问 counter_mt/counter_st 类
+#include "mempool_counter.h" // 引入 mempool_counter.h 以便访问 counter 模板类
 
 
 
@@ -96,7 +96,7 @@ void reset_memory_pool();
 void release_memory_pool();
 
 
-}
+} // end of extern C
 
 
 

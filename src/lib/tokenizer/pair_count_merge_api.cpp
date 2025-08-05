@@ -4,7 +4,32 @@
 #include <cstdint>
 #include "pair_count_merge.h"
 #include "memory_pool.h"
-#include "mempool_counter.h"
+
+
+// namespace 定义作用域, 在里面声明的变量函数类, 不会污染全局作用域, 要用显式调用 name::func
+// 匿名的命名空间, 意思是里面定义的链接仅限本.cpp文件使用, 不会暴露给其他编译单元. Cython可以正常调用 extern C 内部的 c_count_pair_batch
+namespace {
+    template<typename CounterT>
+    L_R_token_counts_ptrs extract_result_from_counter(CounterT& counter) {
+        size_t size = counter.size();
+        auto& pool = memory_pool::get_mempool();
+
+        uint16_t* L = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
+        uint16_t* R = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
+        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(size*sizeof(uint64_t)));
+
+        size_t i = 0;
+        for(auto it = counter.cbegin(); it != counter.cend(); ++it) {
+            auto [pair, freq] = *it;
+            L[i] = pair.first;
+            R[i] = pair.second;
+            counts[i] = freq;
+            ++i;
+        }
+
+        return L_R_token_counts_ptrs{L, R, counts, size};
+    }
+}
 
 
 extern "C" {
@@ -17,45 +42,18 @@ L_R_token_counts_ptrs c_count_pair_batch(
 ) {
     try
     {
+        // 不同的分支下, counter 是不同的类型, 所以没办法把 extract_result 部分统一到外部使用
         if (num_threads == 1) {
             counter_st counter = counter_st(1024, memory_pool::get_mempool());
             count_pair_core_single_thread(counter, L_tokens, R_tokens, len);
 
-            size_t size = counter.size();
-            uint16_t* L = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
-            uint16_t* R = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
-            uint64_t* counts = static_cast<uint64_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint64_t)));
-
-            size_t i = 0;
-            for(auto it = counter.cbegin(); it != counter.cend(); ++it) {
-                auto [pair, freq] = *it;
-                L[i] = static_cast<uint16_t>(pair.first);
-                R[i] = static_cast<uint16_t>(pair.second);
-                counts[i] = static_cast<uint64_t>(freq);
-            }
-            L_R_token_counts_ptrs result = L_R_token_counts_ptrs{L, R, counts, size};
-
-            return result;
+            return extract_result_from_counter(counter);
         }
         else {
             counter_mt counter = counter_mt(1024, memory_pool::get_mempool());
             count_pair_core_multi_thread(counter, L_tokens, R_tokens, len, num_threads);
 
-            size_t size = counter.size();
-            uint16_t* L = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
-            uint16_t* R = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
-            uint64_t* counts = static_cast<uint64_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint64_t)));
-
-            size_t i = 0;
-            for(auto it = counter.cbegin(); it != counter.cend(); ++it) {
-                auto [pair, freq] = *it;
-                L[i] = static_cast<uint16_t>(pair.first);
-                R[i] = static_cast<uint16_t>(pair.second);
-                counts[i] = static_cast<uint64_t>(freq);
-            }
-            L_R_token_counts_ptrs result = L_R_token_counts_ptrs{L, R, counts, size};
-
-            return result;
+            return extract_result_from_counter(counter);
         }
 
     }
