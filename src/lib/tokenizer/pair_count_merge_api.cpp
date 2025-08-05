@@ -17,27 +17,47 @@ L_R_token_counts_ptrs c_count_pair_batch(
 ) {
     try
     {
-        uint16_t* L_tokens = nullptr;
-        uint16_t* R_tokens = nullptr;
-        uint64_t* counts = nullptr;
-
         if (num_threads == 1) {
             counter_st counter = counter_st<std::pair<uint16_t, uint16_t>>(1024, memory_pool::get_mempool());
             count_pair_core_single_thread(counter, L_tokens, R_tokens, len);
-            for(auto& it = counter.begin(); it != counter.end(); ++it) {
-                
+
+            size_t size = counter.size();
+            uint16_t* L = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
+            uint16_t* R = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
+            uint64_t* counts = static_cast<uint64_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint64_t)));
+
+            size_t i = 0;
+            for(auto it = counter.cbegin(); it != counter.cend(); ++it) {
+                auto [pair, freq] = *it;
+                L[i] = static_cast<uint16_t>(pair.first);
+                R[i] = static_cast<uint16_t>(pair.second);
+                counts[i] = static_cast<uint64_t>(freq);
             }
+            L_R_token_counts_ptrs result = L_R_token_counts_ptrs{L, R, counts, size};
+
+            return result;
         }
         else {
             counter_mt counter = counter_mt<std::pair<uint16_t, uint16_t>>(1024, memory_pool::get_mempool());
             count_pair_core_multi_thread(counter, L_tokens, R_tokens, len, num_threads);
-            for(auto& it = counter.cbegin(); it != counter.cend(); ++it) {
-                std::pair<uint16_t, uint16_t> pair = *it;
-            }
-        }
-        L_R_token_counts_ptrs result = L_R_token_counts_ptrs{L_tokens, R_tokens, counts};
 
-        return result;
+            size_t size = counter.size();
+            uint16_t* L = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
+            uint16_t* R = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint16_t)));
+            uint64_t* counts = static_cast<uint64_t*>(memory_pool::get_mempool().allocate(size*sizeof(uint64_t)));
+
+            size_t i = 0;
+            for(auto it = counter.cbegin(); it != counter.cend(); ++it) {
+                auto [pair, freq] = *it;
+                L[i] = static_cast<uint16_t>(pair.first);
+                R[i] = static_cast<uint16_t>(pair.second);
+                counts[i] = static_cast<uint64_t>(freq);
+            }
+            L_R_token_counts_ptrs result = L_R_token_counts_ptrs{L, R, counts, size};
+
+            return result;
+        }
+
     }
     catch(const std::exception& e)
     {
