@@ -137,9 +137,10 @@ public:
         _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
     }
 
-    // 析构函数, 会调用 clear 方法来释放所有 HashTableNode 中需要显式析构的部分, 但不负责内存释放
+    // 析构函数, 会调用 destroy 方法来释放所有 HashTableNode 中需要显式析构的部分, clear buckets 数组 _table, _size 和 _capacity 置0
+    // 但不负责内存释放. 由内存池在外部统一释放
     ~hash_table_mt_chain() {
-        clear(); // 自动析构所有节点(如果需要)
+        destroy();
     }
 
     /*
@@ -256,7 +257,7 @@ public:
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
     * 
     * 行为:按key查找, 若找到value, 以updater原子更新updater(value); 若未找到, 以default先初始化value, 再原子更新updater(value)
-    * get+insert复合操作: 贡献表锁以拒绝表结构变化(禁止rehash/clear), 独占桶锁以拒绝单桶的竞态读(get)、竞态写(insert/upsert)
+    * get+insert复合操作: 贡献表锁以拒绝表结构变化(禁止rehash/clear/destroy), 独占桶锁以拒绝单桶的竞态读(get)、竞态写(insert/upsert)
     * 允许不同桶并发读写(其他桶的读/写不受影响)
     */
     template <typename Func>
@@ -309,11 +310,10 @@ public:
         return true;
     }
 
-
     // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的销毁
-    // 内存池本身是只可以重用/整体销毁，不可精确销毁单次allocate的内存
-    // 故哈希表的"清空"应该是数据不再可访问的意思, 但其分配的内存不会在这里被销毁.
-    // 同时, 哈希表node中需要显式调用析构的，在这里一并显式析构
+    // 内存池本身是只可以 整体复用/整体销毁，不可精确销毁单次allocate的内存
+    // 哈希表的"清空"：原数据全部析构, 不再可访问, 但其分配的内存不会在这里被销毁. 保持 bucket 结构
+    // 由于保持了 bucket 结构 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
     void clear() {
 
         // 清空 hash table时，独占 表锁
@@ -336,6 +336,41 @@ public:
         }
         // node数量 置0, 原子线程安全
         _size.store(0, std::memory_order_relaxed);
+
+        // 内存池 reset. 显然这个内存池最好是本哈希表专用, 这样避免影响其他对象的内存
+        _pool.reset();
+    }
+
+
+    // clear 不破坏表结构, 即 bucket vector 仍然存在. destroy 在 clear 基础上, 清空bucket vector 数组
+    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待内存池在外部统一释放
+    void destroy() {
+
+        // 独占表锁：destroy 会对表结构发生改动, 故需要独占表锁以排除其余任何操作
+        std::unique_lock<std::shared_mutex> _lock_table_for_clear_(_table_mutex);
+
+        for (size_t i = 0; i < _capacity; i++) {
+
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(_bucket_mutexs[i].lock);
+
+            HashTableNode* curr = _table[i];
+            while (curr) {
+                HashTableNode* next = curr->next;
+                destroy_node(curr);
+                curr = next;
+            }
+
+            _table[i] = nullptr;
+        }
+
+        _size.store(0, std::memory_order_relaxed);
+
+        // 显然这个内存池最好是本哈希表专用, 这样避免影响其他对象的内存
+        _pool.reset(); // 内存池重置, 等待外部统一释放
+
+        _table.clear(); // 清空table向量
+
+        _capacity = 0; // _capacity 置零
     }
 
     
