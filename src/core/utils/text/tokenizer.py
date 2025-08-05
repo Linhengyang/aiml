@@ -648,7 +648,9 @@ def count_pair_batch(tokens_offsets_border):
     chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
     # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
     # 把这些 id 指向的位置设为 False
-    mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
+    _where_equal_ = chunk_ends_ == chunk_starts_
+    mask[ chunk_ends_[_where_equal_] ] = False
+    
     mask_cp = mask.copy()
 
     # 提取所有非chunk end的tokens
