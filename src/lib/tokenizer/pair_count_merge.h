@@ -12,11 +12,12 @@
 
 extern "C" {
 
-// 结构体，用于封装count_pair_batch函数返回的多个data指针
+// 结构体，用于封装count_pair_batch函数返回的多个data指针, 和(L,R) pair-freq 总数
 struct L_R_token_counts_ptrs {
     uint16_t* L_tokens_ptr;
     uint16_t* R_tokens_ptr;
     uint64_t* counts_ptr;
+    size_t size;
 };
 
 

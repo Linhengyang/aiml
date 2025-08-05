@@ -473,7 +473,6 @@ public:
             }
         }
 
-
     }; // end of const_iterator definition
 
 

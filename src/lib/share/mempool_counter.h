@@ -75,7 +75,9 @@ public:
     auto begin() { return _hash_table.begin(); }
     auto end() { return _hash_table.end(); }
 
-    // 单线程哈希表没有设计只读迭代器
+    // 暴露哈希表的只读迭代器以支持迭代输出计数的结果
+    auto cbegin() const { return _hash_table.cbegin(); }
+    auto cend() const { return _hash_table.cend(); }
 
 };
 
