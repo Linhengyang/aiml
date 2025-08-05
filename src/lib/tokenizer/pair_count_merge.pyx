@@ -31,7 +31,7 @@ cdef extern from "pair_count_merge.h":
     # 声明 C++ 中的 token_filter_len_ptrs 结构体
     struct token_filter_len_ptrs:
         uint16_t* output_tokens_flat_ptr
-        bint* output_filter_ptr
+        bool* output_filter_ptr
         int64_t* output_tokens_lens_ptr
     
 
@@ -134,15 +134,21 @@ cpdef count_pair_batch(
 
     cdef size_t size = result.size
 
-    # build output tokens array & counts array
-    output_L_tokens_ptr = ctypes.cast(<size_t> result.L_tokens_ptr, ctypes.POINTER(ctypes.c_uint16))
-    output_L_tokens_np = pynp.ctypeslib.as_array(output_L_tokens_ptr, shape=(size,))
+    # 转换result里的C指针到numpy array, 构建output tokens array & counts array
+    cdef uint16_t* raw_L_ptr = result.L_tokens_ptr # 接受C指针
+    cdef uintptr_t L_addr = <uintptr_t><void*> raw_L_ptr # C pointer->void*转换, 然后是平台安全的指针->地址整数转换
+    py_L_tokens_ptr = ctypes.cast(L_addr, ctypes.POINTER(ctypes.c_uint16)) # 地址整数 -> python地址
+    output_L_tokens_np = pynp.ctypeslib.as_array(py_L_tokens_ptr, shape=(size,))
 
-    output_R_tokens_ptr = ctypes.cast(<size_t> result.R_tokens_ptr, ctypes.POINTER(ctypes.c_uint16))
-    output_R_tokens_np = pynp.ctypeslib.as_array(output_R_tokens_ptr, shape=(size,))
+    cdef uint16_t* raw_R_ptr = result.R_tokens_ptr # 接受C指针
+    cdef uintptr_t R_addr = <uintptr_t><void*> raw_R_ptr # C pointer ->void*转换, 然后是平台安全的指针->地址整数转换
+    py_R_tokens_ptr = ctypes.cast(R_addr, ctypes.POINTER(ctypes.c_uint16))
+    output_R_tokens_np = pynp.ctypeslib.as_array(py_R_tokens_ptr, shape=(size,))
 
-    output_counts_ptr = ctypes.cast(<size_t> result.counts_ptr, ctypes.POINTER(ctypes.c_uint64))
-    output_counts_np = pynp.ctypeslib.as_array(output_counts_ptr, shape=(size,))
+    cdef uint64_t* raw_counts_ptr = result.counts_ptr # 接受C指针
+    cdef uintptr_t counts_addr = <uintptr_t><void*> raw_counts_ptr # C pointer->void*转换, 然后是平台安全的指针->地址整数转换
+    py_counts_ptr = ctypes.cast(counts_addr, ctypes.POINTER(ctypes.c_uint64))
+    output_counts_np = pynp.ctypeslib.as_array(py_counts_ptr, shape=(size,))
 
     # 打包, pack 3 output np arrays with batch order
     return (output_L_tokens_np, output_R_tokens_np, output_counts_np), tokens_offsets_border[1]
@@ -195,19 +201,26 @@ cpdef merge_pair_batch(
     )
 
 
-    # build output tokens array & filter array
-    tokens_ptr = ctypes.cast(<size_t> result.output_tokens_flat_ptr, ctypes.POINTER(ctypes.c_uint16))
-    output_tokens_flat_np = pynp.ctypeslib.as_array(tokens_ptr, shape=(_LENGTH,))
+    # 转换result里的C指针到numpy array, 构建output tokens array & filter array
+    cdef uint16_t* raw_tokens_ptr = result.output_tokens_flat_ptr # 接受C指针
+    cdef uintptr_t tokens_addr = <uintptr_t><void*> raw_tokens_ptr # C pointer ->void* 转换, 然后是平台安全的指针->地址整数转换
+    py_tokens_ptr = ctypes.cast(tokens_addr, ctypes.POINTER(ctypes.c_uint16))
+    output_tokens_flat_np = pynp.ctypeslib.as_array(py_tokens_ptr, shape=(_LENGTH,))
 
-    filter_ptr = ctypes.cast(<size_t> result.output_filter_ptr, ctypes.POINTER(ctypes.c_bool))
-    output_filter_np = pynp.ctypeslib.as_array(filter_ptr, shape=(_LENGTH,))
+    cdef bool* raw_filter_ptr = result.output_filter_ptr # 保持C类型接受C指针
+    cdef uintptr_t filter_addr = <uintptr_t><void*> raw_filter_ptr # C pointer ->void* 转换, 然后是平台安全的指针->地址整数转换
+    py_filter_ptr = ctypes.cast(filter_addr, ctypes.POINTER(ctypes.c_uint8)) # 使用c_uint8来接住原始bool*内存地址
+    output_filter_np = pynp.ctypeslib.as_array(py_filter_ptr, shape=(_LENGTH,)) # uint8类型的array
+    output_filter_np = output_filter_np.astype(bool) # 显式转换为布尔类型
 
-    # build output tokens offsets
-    lens_ptr = ctypes.cast(<size_t> result.output_tokens_lens_ptr, ctypes.POINTER(ctypes.c_int64))
-    output_chunks_lens_np = pynp.ctypeslib.as_array(lens_ptr, shape=(num_chunks,))
+    merged_tokens_flat = output_tokens_flat_np[output_filter_np]
+
+    cdef int64_t* raw_lens_ptr = result.output_tokens_lens_ptr # 接受C指针
+    cdef uintptr_t lens_addr = <uintptr_t><void*> raw_lens_ptr # C pointer ->void* 转换, 然后是平台安全的指针->地址整数转换
+    py_lens_ptr = ctypes.cast(lens_addr, ctypes.POINTER(ctypes.c_int64))
+    output_chunks_lens_np = pynp.ctypeslib.as_array(py_lens_ptr, shape=(num_chunks,))
 
     merged_offsets = pynp.cumsum(pynp.insert(output_chunks_lens_np, 0, 0), dtype=pynp.int64)
-    merged_tokens_flat = output_tokens_flat_np[output_filter_np]
 
     # 过滤掉 chunks whose length = 1
     len1_chunks_ = pynp.where(output_chunks_lens_np == 1)[0].astype(pynp.int64) # 保证即使是空, 也能正确slice
