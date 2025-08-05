@@ -12,6 +12,9 @@
 
 extern "C" {
 
+using counter_st = counter<std::pair<uint16_t, uint16_t>, false>;
+using counter_mt = counter<std::pair<uint16_t, uint16_t>, true>;
+
 // 结构体，用于封装count_pair_batch函数返回的多个data指针, 和(L,R) pair-freq 总数
 struct L_R_token_counts_ptrs {
     uint16_t* L_tokens_ptr;
@@ -30,7 +33,7 @@ L_R_token_counts_ptrs c_count_pair_batch(
 
 
 void count_pair_core_multi_thread(
-    counter_mt<std::pair<uint16_t, uint16_t>>& counter,
+    counter_mt& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len,
@@ -39,7 +42,7 @@ void count_pair_core_multi_thread(
 
 
 void count_pair_core_single_thread(
-    counter_st<std::pair<uint16_t, uint16_t>>& counter,
+    counter_st& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len

@@ -18,7 +18,7 @@ L_R_token_counts_ptrs c_count_pair_batch(
     try
     {
         if (num_threads == 1) {
-            counter_st counter = counter_st<std::pair<uint16_t, uint16_t>>(1024, memory_pool::get_mempool());
+            counter_st counter = counter_st(1024, memory_pool::get_mempool());
             count_pair_core_single_thread(counter, L_tokens, R_tokens, len);
 
             size_t size = counter.size();
@@ -38,7 +38,7 @@ L_R_token_counts_ptrs c_count_pair_batch(
             return result;
         }
         else {
-            counter_mt counter = counter_mt<std::pair<uint16_t, uint16_t>>(1024, memory_pool::get_mempool());
+            counter_mt counter = counter_mt(1024, memory_pool::get_mempool());
             count_pair_core_multi_thread(counter, L_tokens, R_tokens, len, num_threads);
 
             size_t size = counter.size();
