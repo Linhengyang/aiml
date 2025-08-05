@@ -93,6 +93,7 @@ cpdef count_pair_batch(
     mask = pynp.full(shape=(_LENGTH,), fill_value=True)
     chunk_ends_ = (offsets-1)[1:]
     chunk_starts_ = offsets[:-1]
+
     # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. filter out
     _where_equal_ = chunk_ends_ == chunk_starts_
     mask[ chunk_ends_[_where_equal_] ] = False
@@ -102,12 +103,21 @@ cpdef count_pair_batch(
     # 去掉所有 chunk 末尾的 token, 就是所有 L_tokens
     mask[chunk_ends_] = False
     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] L_tokens = tokens_flat[mask] # 可以为空
-    cdef const uint16_t[:] L_tokens_view = L_tokens
-    cdef const uint16_t* L_tokens_ptr = &L_tokens_view[0]
     
     # 去掉所有 chunk 开头的 token, 就是所有 R_tokens
     mask_cp[chunk_starts_] = False
     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] R_tokens = tokens_flat[mask_cp] # 可以为空
+
+    # 检查 L_tokens 和 R_tokens 长度.
+    cdef size_t len = ??
+    if len == 0:
+        return (pynp.array([], dtype=pynp.uint16),
+                pynp.array([], dtype=pynp.uint16),
+                pynp.array([], dtype=pynp.uint64)), tokens_offsets_border[1]
+
+    cdef const uint16_t[:] L_tokens_view = L_tokens
+    cdef const uint16_t* L_tokens_ptr = &L_tokens_view[0]
+
     cdef const uint16_t[:] R_tokens_view = R_tokens
     cdef const uint16_t* R_tokens_ptr = &R_tokens_view[0]
     
@@ -115,7 +125,7 @@ cpdef count_pair_batch(
     cdef L_R_token_counts_ptrs result = c_count_pair_batch(
         L_tokens_ptr,
         R_tokens_ptr,
-        _LENGTH,
+        len,
         1
     )
 
@@ -156,7 +166,7 @@ cpdef merge_pair_batch(
 
     cdef size_t num_chunks = offsets.shape[0] - 1
     if num_chunks <= 0:
-        return pynp.array([], dtype=pynp.uint16), pynp.array([0], dtype=pynp.int64)
+        return (pynp.array([], dtype=pynp.uint16), pynp.array([0], dtype=pynp.int64)), tokens_offsets_border[1]
     
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
