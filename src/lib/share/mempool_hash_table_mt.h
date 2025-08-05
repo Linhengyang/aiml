@@ -44,7 +44,7 @@ private:
         HashTableNode* next; // 下一个节点, 用于解决哈希冲突
 
         // 提供placement new 构造支持
-        HashTableNode(const TYPE_K& k, const TYPE_V&v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
     };
 
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构
@@ -259,10 +259,6 @@ public:
     * get+insert复合操作: 贡献表锁以拒绝表结构变化(禁止rehash/clear), 独占桶锁以拒绝单桶的竞态读(get)、竞态写(insert/upsert)
     * 允许不同桶并发读写(其他桶的读/写不受影响)
     */
-    // updater 应该是一个函数指针, 比如 函数指针 std::function<void(TYPE_V&)> 或
-    // 函数指针的左值引用 std::function<void(TYPE_V&)>& 或
-    // 函数指针的const &引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
-    // 这里采用最灵活的模板写法, 用 && 保证右值引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
     template <typename Func>
     bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
 
