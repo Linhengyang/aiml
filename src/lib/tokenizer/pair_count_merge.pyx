@@ -94,7 +94,9 @@ cpdef count_pair_batch(
     chunk_ends_ = (offsets-1)[1:]
     chunk_starts_ = offsets[:-1]
     # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. filter out
-    mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
+    _where_equal_ = chunk_ends_ == chunk_starts_
+    mask[ chunk_ends_[_where_equal_] ] = False
+
     mask_cp = mask.copy()
 
     # 去掉所有 chunk 末尾的 token, 就是所有 L_tokens
@@ -117,7 +119,7 @@ cpdef count_pair_batch(
         1
     )
 
-    size_t size = result.size
+    cdef size_t size = result.size
 
     # build output tokens array & counts array
     output_L_tokens_ptr = ctypes.cast(<size_t> result.L_tokens_ptr, ctypes.POINTER(ctypes.c_uint16))
