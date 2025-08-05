@@ -158,6 +158,44 @@ public:
         return true;
     }
 
+    // updater 应该是一个函数指针, 比如 函数指针 std::function<void(TYPE_V&)> 或
+    // 函数指针的左值引用 std::function<void(TYPE_V&)>& 或
+    // 函数指针的const &引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
+    // 这里采用最灵活的模板写法, 用 && 保证右值引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
+    template <typename Func>
+    bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
+
+        // 基本照搬 insert 逻辑, 除了修改节点value/插入新节点时, 分别使用updater/default_val来更新/插入
+        size_t index = hash(key) % _capacity;
+
+        HashTableNode* current = _table[index];
+        while (current) {
+            if (current->key == key) {
+                std::forward<Func>(updater)(current->value); // 用forward 完美转发 updater
+                return true;
+            }
+            current = current->next;
+        }
+        
+        void* raw_mem = _pool.allocate(sizeof(HashTableNode));
+        if (!raw_mem) {
+            return false;
+        }
+
+        HashTableNode* new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+
+        _table[index] = new_node;
+
+        _size++;
+
+        if (_size >= _capacity*_max_load_factor) {
+            rehash( _capacity*2 );
+        }
+
+        return true;
+    }
+
+
     // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的销毁
     // 内存池本身是只可以重用/整体销毁，不可精确销毁单次allocate的内存
     // 故哈希表的"清空"应该是数据不再可访问的意思, 但其分配的内存不会在这里被销毁.

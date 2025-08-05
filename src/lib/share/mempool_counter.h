@@ -50,15 +50,15 @@ public:
     * 两次查找: 由于hash缓存的存在, 每个bucket不会太长(冲突不会严重), 两次查找的开销很低.
     */
     void increment(const TYPE_K& key) {
-        uint64_t value;
-        if (_hash_table.get(key, value)) {
-            value += 1; // 自增 1
-            _hash_table.insert(key, value); // 覆盖式 insert
-        }
-        else {
-            _hash_table.insert(key, 1); // 插入新项目
-        }
-
+        // uint64_t value;
+        // if (_hash_table.get(key, value)) {
+        //     value += 1; // 自增 1
+        //     _hash_table.insert(key, value); // 覆盖式 insert
+        // }
+        // else {
+        //     _hash_table.insert(key, 1); // 插入新项目
+        // }
+        _hash_table.atomic_upsert(key, [](auto& value) { value += 1;}, 1);
     }
 
     // 暴露哈希表的clear方法. 重置但不清理哈希表所占的内存池空间
