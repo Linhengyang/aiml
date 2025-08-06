@@ -3,7 +3,7 @@
 #include <iostream>
 #include <cstdint>
 #include "pair_count_merge.h"
-#include "memory_pool.h"
+#include "memory_pool_global.h"
 
 
 // namespace 定义作用域, 在里面声明的变量函数类, 不会污染全局作用域, 要用显式调用 name::func
@@ -77,7 +77,7 @@ token_filter_len_ptrs c_merge_pair_batch(
     {
         // num_chunks = len(offsets) - 1 = len(output_tokens_lens)
         // need size = sizeof(long) * num_chunks
-        int64_t* output_tokens_lens = static_cast<int64_t*>(memory_pool::get_mempool().allocate(num_chunks*sizeof(int64_t)));
+        int64_t* output_tokens_lens = static_cast<int64_t*>(global_mempool::get().allocate(num_chunks*sizeof(int64_t)));
 
         // 初始化数组
         for (size_t i = 0; i < num_chunks; ++i) {
@@ -89,14 +89,14 @@ token_filter_len_ptrs c_merge_pair_batch(
 
         // _LENGTH 长度
         // need size = sizeof(bool) * _LENGTH
-        bool* output_filter = static_cast<bool*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(bool)));
+        bool* output_filter = static_cast<bool*>(global_mempool::get().allocate(_LENGTH*sizeof(bool)));
         for (int64_t i = 0; i < _LENGTH; ++i) {
             output_filter[i] = false; // 全部初始化为 false
         }
 
         // _LENGTH 长度
         // need size = sizeof(int) * _LENGTH
-        uint16_t* output_tokens_flat = static_cast<uint16_t*>(memory_pool::get_mempool().allocate(_LENGTH*sizeof(uint16_t)));
+        uint16_t* output_tokens_flat = static_cast<uint16_t*>(global_mempool::get().allocate(_LENGTH*sizeof(uint16_t)));
         for (int64_t i = 0; i < _LENGTH; ++i) {
             output_tokens_flat[i] = -1; // 全部初始化为 -1
         }
@@ -127,7 +127,7 @@ token_filter_len_ptrs c_merge_pair_batch(
 
 // 创建内存池（全局单例）
 void init_memory_pool(size_t block_size, size_t alignment) {
-    memory_pool::get_mempool(block_size, alignment);
+    global_mempool::get(block_size, alignment);
     const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
     std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
 }
@@ -137,8 +137,8 @@ void init_memory_pool(size_t block_size, size_t alignment) {
 
 // 缩小内存池(如果存在)
 void shrink_memory_pool() {
-    if (memory_pool::mempool_exist()) {
-        memory_pool::get_mempool().shrink();
+    if (global_mempool::exist()) {
+        global_mempool::get().shrink();
     }
 }
 
@@ -146,14 +146,14 @@ void shrink_memory_pool() {
 
 // 重置内存池
 void reset_memory_pool() {
-    memory_pool::get_mempool().reset();
+    global_mempool::get().reset();
 }
 
 
 
 // 销毁内存池
 void release_memory_pool() {
-    memory_pool::mempool_destroy();
+    global_mempool::destroy();
     std::cout << "global memory pool released" << std::endl;
 }
 

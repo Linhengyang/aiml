@@ -25,6 +25,7 @@ struct L_R_token_counts_ptrs {
 
 
 L_R_token_counts_ptrs c_count_pair_batch(
+    CounterT& pair_counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len,
