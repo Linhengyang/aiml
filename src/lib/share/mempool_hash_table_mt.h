@@ -1,7 +1,7 @@
 // mempool_hash_table_mt.h
 
-#ifndef MEMPOOL_HASH_TABLE_H
-#define MEMPOOL_HASH_TABLE_H
+#ifndef MEMPOOL_HASH_TABLE_MULTI_THREAD_H
+#define MEMPOOL_HASH_TABLE_MULTI_THREAD_H
 
 
 #include <vector>
