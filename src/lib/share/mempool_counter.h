@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <type_traits> // std::conditional
 #include <utility> // std::forward
-#include "memory_pool.h"
+#include "interface_memory_pool.h"
 #include "mempool_hash_table_st.h"
 #include "mempool_hash_table_mt.h"
 
@@ -37,7 +37,7 @@ private:
 public:
 
     // counter 的构造函数: 触发内部hashtable的构造函数, 预设bucket数量为capacity
-    explicit counter(size_t capacity, memory_pool& pool): _hash_table(capacity, pool) {}
+    explicit counter(size_t capacity, mempool_interface* pool): _hash_table(capacity, pool) {}
 
     // 函数调用操作符: 支持 counter(key)
     void operator()(const TYPE_K& key) {

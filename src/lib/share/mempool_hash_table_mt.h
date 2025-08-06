@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <shared_mutex>
 #include <atomic>
-#include "memory_pool.h"
+#include "interface_memory_pool.h"
 
 
 
@@ -63,8 +63,8 @@ private:
     // 数组 of buckets, 每个 bucket 是链表头, 每个链表是哈希冲突的 nodes
     std::vector<HashTableNode*> _table;
 
-    // 引用传入的内存池
-    memory_pool& _pool; // void* allocate(size_t size); void release() 接口
+    // 指针传入内存池（用纯虚类接口的方式传入. 实现了该纯虚类的内存池实例都可以传入）
+    mempool_interface* _pool; // void* allocate(size_t size); void release()
 
     // 使用标准库的 hash 函数, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值
     size_t hash(const TYPE_K& key) const {
@@ -132,7 +132,7 @@ private:
 public:
 
     // 哈希表的构造函数. 传入哈希表的capacity, 和内存池
-    explicit hash_table_mt_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool) {
+    explicit hash_table_mt_chain(size_t capacity, mempool_interface* pool): _capacity(capacity), _pool(pool) {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
     }
