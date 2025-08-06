@@ -218,8 +218,6 @@ public:
         // node数量 置0
         _size = 0;
 
-        // 内存池 reset. 显然这个内存池最好是本哈希表专用, 这样避免影响其他对象的内存
-        _pool.reset();
     }
 
     // clear 不破坏表结构, 即 bucket vector 仍然存在. destroy 在 clear 基础上, 清空 bucket vector 数组 _table
@@ -239,9 +237,6 @@ public:
         }
         // node数量 置0
         _size = 0;
-
-        // 内存池 reset. 显然这个内存池最好是本哈希表专用, 这样避免影响其他对象的内存
-        _pool.reset(); // 内存池重置, 等待外部统一释放
 
         _table.clear(); // 清空table向量
 

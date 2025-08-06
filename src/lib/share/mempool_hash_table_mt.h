@@ -337,8 +337,6 @@ public:
         // node数量 置0, 原子线程安全
         _size.store(0, std::memory_order_relaxed);
 
-        // 内存池 reset. 显然这个内存池最好是本哈希表专用, 这样避免影响其他对象的内存
-        _pool.reset();
     }
 
 
@@ -364,9 +362,6 @@ public:
         }
 
         _size.store(0, std::memory_order_relaxed);
-
-        // 显然这个内存池最好是本哈希表专用, 这样避免影响其他对象的内存
-        _pool.reset(); // 内存池重置, 等待外部统一释放
 
         _table.clear(); // 清空table向量
 
