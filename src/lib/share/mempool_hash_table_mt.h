@@ -210,7 +210,7 @@ public:
             // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
 
             // 在 内存池 上分配新内存给新节点, raw_mem 内存
-            void* raw_mem = _pool.allocate(sizeof(HashTableNode));
+            void* raw_mem = _pool->allocate(sizeof(HashTableNode));
             if (!raw_mem) {
                 return false; // 如果内存分配失败
             }
@@ -282,7 +282,7 @@ public:
                 current = current->next;
             }
 
-            void* raw_mem = _pool.allocate(sizeof(HashTableNode));
+            void* raw_mem = _pool->allocate(sizeof(HashTableNode));
             if (!raw_mem) return false;
 
             // 插入新节点 (key, default_val)
