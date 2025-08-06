@@ -70,7 +70,7 @@ public:
         _hash_table.atomic_upsert(key, [](auto& value) { value += 1;}, 1);
     }
 
-    // 暴露哈希表的clear方法. 重置但不清理哈希表所占的内存池空间
+    // 暴露哈希表的clear方法. 析构哈希表, 但不release/reset哈希表所占的内存池空间, 同时表结构也不会变化
     void clear() {
         _hash_table.clear();
     }
