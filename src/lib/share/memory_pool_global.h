@@ -1,7 +1,7 @@
 // global_mempool.h
 
-#ifndef MEMORY_POOL_H
-#define MEMORY_POOL_H
+#ifndef MEMORY_POOL_GLOBAL_H
+#define MEMORY_POOL_GLOBAL_H
 
 #include <vector>
 #include <cstddef>
@@ -122,7 +122,7 @@ public:
     // 带锁释放内存池的公共接口，效果和 destroy 相同，但是是非静态方法
     void release(); // 全部释放(block 和 large alloc都释放), 带锁以线程安全
 
-};
+}; // end of global_mempool
 
 
 

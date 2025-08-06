@@ -41,7 +41,7 @@ global_mempool::global_mempool(size_t block_size, size_t alignment):
 
 // 析构函数. 放到 private 里导致外部不可使用（所以不加锁）. 必须通过公共接口destroy/release调用. 这些方法会加锁
 global_mempool::~global_mempool() {
-    // 析构时调用不加锁的 release_no_lock 方法. 因为析构已经被私有, 而释放内存池的公共接口 mempool_destroy 会带锁
+    // 析构时调用不加锁的 release_no_lock 方法. 因为析构已经被私有, 而释放内存池的公共接口 destroy 会带锁
     // 所以为了避免死锁, 这里无需
     release_no_lock();
 }
