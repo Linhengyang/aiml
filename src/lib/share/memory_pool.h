@@ -24,7 +24,14 @@ private:
     explicit memory_pool(size_t block_size = 4096, size_t alignment = 8); //默认给单个内存block申请 4kb 的内存, 8字节对齐
     // explicit的意思是禁止对 memory_pool 类对象作隐式转换
 
-    ~memory_pool(); // 会调用 release_no_lock() 释放内存池. 它会在mempool_destroy中加锁后再被调用, 故它自身不需要加锁
+    // 析构函数被private, 导致如下后果:
+    // 1. 禁止在栈上创建对象，对象离开作用域时，编译器需要调用析构函数，而它不能访问private
+    // 2. 禁止delete表达式来调用析构
+    // 3. 无法成为其他类的成员变量，因为包含该成员的类在被销毁时，需要调用成员对象的析构函数
+    // 4. 无法作为函数的返回值(按值返回)，因为返回过程中临时对象需要被析构
+    // 5. 禁止std::vector/std::list等标准容器存储, 因为容器需要访问元素的析构函数
+    // 单例模式下的对象，适合把析构函数private：这样可以由 唯一指定的接口来释放销毁对象，以此手动控制单例的生命周期
+    ~memory_pool();
 
     const size_t _block_size; //内存池中, 单个内存block的字节量
 
@@ -36,28 +43,24 @@ private:
 
     block* _current_block = nullptr; //内存池的当前正在使用的内存block起始位置指针
 
-
     void release_no_lock(); //不带锁释放内存池, 全部释放(block 和 large alloc都释放), 私有供析构和智能指针reset使用
 
-
-    // 静态成员是保证该类只能有一个实现，在类层面定义. 静态成员变量必须要在类外定义, 类内只是申明
+    // 单例模式: 静态成员是保证该类只能有一个实现，在类层面定义. 静态成员变量必须要在类外定义, 类内只是申明
 
     // 自定义删除器结构体
     struct Deleter {
         void operator()(memory_pool* ptr) const {
-            delete ptr;  // 这里可以访问 private ~memory_pool()
+            delete ptr;  // 这里可以访问 private 的析构. 删除器内部不加锁, 因为调用删除器前 mempool_destroy 会加锁
         }
     };
 
     // 声明删除器为友元，让它能访问私有析构
     friend struct Deleter;
 
-    // 静态成员变量 单例指针
+    // 声明静态成员变量 单例指针
     static std::unique_ptr<memory_pool, Deleter> _instance;
 
-
-
-    // 静态成员变量 互斥锁
+    // 声明静态成员变量 互斥锁
     static std::mutex _mtx;
     // 互斥锁, 保证多线程安全。比如在allocate方法里加入互斥锁，那么会发生如下：
     // 线程A在函数域内调用对象mempool的allocate方法以获得内存，这个时候lock_guard类就在线程A的作用域里生成了，传入互斥量mtx_，生成对象 lock 
@@ -70,6 +73,7 @@ private:
 
 
 public:
+    // 类的静态方法不依赖实例（故也不能使用非静态成员/方法），适合用来定义单例：用单例类就可以调用，单例类约等于单例实例
 
     // 带参数调用: 创建 memory_pool 单例
     static memory_pool& get_mempool(size_t block_size, size_t alignment) {
@@ -81,7 +85,7 @@ public:
         return *_instance;
     }
 
-    // 不带参数调用: 获得已经实现的单例. 若尚未创建，报错
+    // 不带参数调用: 获得已经实现的单例（加锁以保证线程安全）. 若尚未创建，报错
     static memory_pool& get_mempool() {
         std::lock_guard<std::mutex> lock(_mtx);
         if(!_instance) {
@@ -96,21 +100,24 @@ public:
         return _instance != nullptr;
     }
 
-    // 销毁单例.
+    // 带锁释放内存池的公共接口，效果和release相同，但是是静态方法，可以并推荐用 类名::接口 来使用
     static void mempool_destroy() {
         std::lock_guard<std::mutex> lock(_mtx); // 加锁
-        _instance.reset(); // 智能指针 reset 会以友好身份调用 析构函数. 所以资源会被自动release
+        _instance.reset(); // 智能指针 reset 会调用 删除器, 删除器作为友好类, 可以访问访问 private 的析构
     }
 
-    void* allocate(size_t size); //分配指定大小的内存, 如果当前块不足以容纳, 则申请新块
+    // 分配指定大小的内存, 非静态, 依赖成员变量 _blocks 等
+    void* allocate(size_t size); // 如果当前块不足以容纳, 则申请新块
 
     void dealloc_large(void* ptr); //如果 ptr 记录在 _large_allocs 中，会被释放; 否则不会被释放
 
     void shrink(size_t max_num = 1); //缩小block数量, 释放部分尚未使用的block. 必须要在 reset之前用. 因为reset会重置所有block.used=false
 
-    void reset(); //复用内存池（全部复用，所有已经申请好的内存block都reset成从头可用）
+    // 复用内存池的公共接口
+    void reset(); // 全部复用，所有已经申请好的内存block都reset成从头可用
 
-    void release(); //带锁释放内存池, 全部释放(block 和 large alloc都释放), 带锁以线程安全
+    // 带锁释放内存池的公共接口，效果和 destroy 相同，但是是非静态方法，推荐使用 实例.接口 来使用
+    void release(); // 全部释放(block 和 large alloc都释放), 带锁以线程安全
 
 };
 

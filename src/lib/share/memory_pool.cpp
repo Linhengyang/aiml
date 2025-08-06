@@ -45,15 +45,16 @@ memory_pool::memory_pool(size_t block_size, size_t alignment):
 
 
 memory_pool::~memory_pool() {
-    // 析构时调用不加锁的私有 release 方法, 避免死锁
+    // 析构时调用不加锁的 release_no_lock 方法. 因为析构已经被私有, 而释放内存池的公共接口 mempool_destroy 会带锁
+    // 所以为了避免死锁, 这里无需
     release_no_lock();
 }
 
 
 
 void memory_pool::release_no_lock() {
+    // 不加锁的 release 内存池, 给加锁的release等外部函数使用, 在外部加锁使用
 
-    // 不加锁的 release 内存池, 给加锁的析构函数使用
     for(auto block: _blocks) {
         // 释放 _blocks vector 中每一个内存block. 调用 block 的析构函数
         delete block;
@@ -77,7 +78,7 @@ void memory_pool::release_no_lock() {
 
 void memory_pool::release() {
 
-    // public方法 release 涉及到修改共享变量, 加锁
+    // public方法 release 涉及到修改共享变量, 加锁只能由一个线程执行.
     std::lock_guard<std::mutex> lock(_mtx);
 
     memory_pool::release_no_lock();
