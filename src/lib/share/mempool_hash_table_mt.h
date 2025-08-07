@@ -484,7 +484,7 @@ public:
 
     private:
 
-        hash_table_mt_chain* _hash_table;
+        const hash_table_mt_chain* _hash_table;
 
         size_t _bucket_index;
 

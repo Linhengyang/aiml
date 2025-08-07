@@ -88,7 +88,7 @@ private:
 public:
 
     // 重载的哈希表的构造函数. 传入哈希表的哈希器, capacity, 和内存池.
-    explicit hash_table_st_chain(const HASH_FUNC& hasher, sizei_t capacity, TYPE_MEMPOOL* pool):
+    explicit hash_table_st_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
         _hasher(hasher), // 这里哈希器采用参数传入的实现了 operator()支持函数式调用hasher(key)的结构体
         _capacity(capacity),
         _pool(pool)
@@ -318,7 +318,7 @@ public:
 
     private:
 
-        hash_table_st_chain* _hash_table;
+        const hash_table_st_chain* _hash_table;
 
         size_t _bucket_index;
 
