@@ -32,7 +32,7 @@ private:
 public:
 
     // 构造函数. 默认对齐16字节
-    explicit block(size_t capacity, size_t alignment=16);
+    explicit block(size_t capacity, size_t alignment=64);
 
     // 析构函数
     ~block();

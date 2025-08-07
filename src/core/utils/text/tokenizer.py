@@ -633,7 +633,7 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 
 
 
-def count_pair_batch(tokens_offsets_border, *args, **kwargs):
+def count_pair_batch(tokens_offsets_border):
     '''
     对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
     3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是uint16 确定. counts dtype uint64
@@ -648,7 +648,9 @@ def count_pair_batch(tokens_offsets_border, *args, **kwargs):
     chunk_starts_ = offsets[:-1] # 每个chunk开头token在flat中的index
     # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. 略过
     # 把这些 id 指向的位置设为 False
-    mask[ chunk_ends_[np.where(chunk_ends_ == chunk_starts_)[0]] ] = False
+    _where_equal_ = chunk_ends_ == chunk_starts_
+    mask[ chunk_ends_[_where_equal_] ] = False
+    
     mask_cp = mask.copy()
 
     # 提取所有非chunk end的tokens
@@ -669,11 +671,10 @@ def count_pair_batch(tokens_offsets_border, *args, **kwargs):
     # 聚合计算频数
     uniq_pairs, counts = np.unique(structured, return_counts=True)
 
-    # dtype_counts = cls.p_counts_schema[2].type.to_pandas_dtype()
     # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
-    pcounts = np.vstack((uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))).T
+    pcounts = (uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))
 
-    return pcounts, b_order # pcounts 是(N,3)形状, dtype为(uint16, uint16, uint64). 可以为空
+    return pcounts, b_order # pcounts:tuple of 3 arrays (L,R,counts), dtype(uint16, uint16, uint64)
 
 
 
@@ -994,9 +995,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     @classmethod
     def yield_tokens_offsets_order(cls, yield_batch: t.Generator):
         for i, batch in enumerate(yield_batch):
-            # 对于values, to_numpy() 会保留 原parquet 保存时设定的 dtype
+            # batch['tokens'] --> pa.LargeListArray
+            # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
             tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
-            # 对于offsets, to_numpy() 输出 int64
             offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
 
             yield (tokens_flat, offsets), i
@@ -1009,18 +1010,18 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         '''
         buffer the pair-counts for the batch with 'order'
         '''
-        b_pcounts, b_order = pcounts_order # b_pcounts: (N, 3)shape, (uint16, uint16, uint64)dtypes
+        b_pcounts, b_order = pcounts_order # b_pcounts: tuple of 3arrays(L,R,counts), (uint16, uint16, uint64)dtypes
 
-        if not b_pcounts.shape[0]:
-            return None
-        
         data = {
-            cls.p_counts_schema[0].name: b_pcounts[:, 0], # L: L_tokens
-            cls.p_counts_schema[1].name: b_pcounts[:, 1], # R: R_tokens
-            cls.p_counts_schema[2].name: b_pcounts[:, 2], # counts: counts
+            cls.p_counts_schema[0].name: b_pcounts[0], # L: L_tokens
+            cls.p_counts_schema[1].name: b_pcounts[1], # R: R_tokens
+            cls.p_counts_schema[2].name: b_pcounts[2], # counts: counts
             }
 
         table = pa.Table.from_pydict(data, cls.p_counts_schema)
+
+        if not table: # 如果是空table, 直接返回None不用写入
+            return None
         
         save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
         pq.write_table(table, save_path)

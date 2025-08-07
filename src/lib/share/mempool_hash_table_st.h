@@ -8,10 +8,10 @@
 #include <functional>
 #include <cstddef>
 #include <type_traits>
-#include "memory_pool.h"
 
 
-template <typename TYPE_K, typename TYPE_V>
+
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL>
 class hash_table_st_chain {
 
 private:
@@ -42,8 +42,8 @@ private:
     // 数组 of buckets, 每个 bucket 是链表的头, 每个链表是哈希冲突的 nodes, 由第一个node代表
     std::vector<HashTableNode*> _table;
 
-    // 引用传入的内存池
-    memory_pool& _pool; // void* allocate(size_t size); void release() 接口
+    // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
+    TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
 
     // 使用标准库的 hash 函数, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值
     size_t hash(const TYPE_K& key) const {
@@ -85,13 +85,14 @@ private:
 public:
 
     // 哈希表的构造函数. 传入哈希表的capacity, 和内存池
-    explicit hash_table_st_chain(size_t capacity, memory_pool& pool): _capacity(capacity), _pool(pool) {
+    explicit hash_table_st_chain(size_t capacity, TYPE_MEMPOOL* pool): _capacity(capacity), _pool(pool) {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
     }
 
-    // 析构函数, 会调用 clear 方法来释放所有 HashTableNode 中需要显式析构的部分, 但不负责内存释放
+    // 析构函数, 会调用 destroy 方法来释放所有 HashTableNode 中需要显式析构的部分, clear buckets 数组 _table, _size 和 _capacity 置0
+    // 但不负责内存释放. 由内存池在外部统一释放
     ~hash_table_st_chain() {
-        clear(); // 自动析构所有节点(如果需要)
+        destroy();
     }
 
     // 哈希表关键方法之 get(key&, value&) --> change value, return true if success
@@ -137,7 +138,7 @@ public:
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
 
         // 在 内存池 上分配新内存给新节点, raw_mem 内存
-        void* raw_mem = _pool.allocate(sizeof(HashTableNode));
+        void* raw_mem = _pool->allocate(sizeof(HashTableNode));
         if (!raw_mem) {
             return false; // 如果内存分配失败
         }
@@ -158,10 +159,48 @@ public:
         return true;
     }
 
+    // updater 应该是一个函数指针, 比如 函数指针 std::function<void(TYPE_V&)> 或
+    // 函数指针的左值引用 std::function<void(TYPE_V&)>& 或
+    // 函数指针的const &引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
+    // 这里采用最灵活的模板写法, 用 && 保证右值引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
+    template <typename Func>
+    bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
+
+        // 基本照搬 insert 逻辑, 除了修改节点value/插入新节点时, 分别使用updater/default_val来更新/插入
+        size_t index = hash(key) % _capacity;
+
+        HashTableNode* current = _table[index];
+        while (current) {
+            if (current->key == key) {
+                std::forward<Func>(updater)(current->value); // 用forward 完美转发 updater
+                return true;
+            }
+            current = current->next;
+        }
+        
+        void* raw_mem = _pool->allocate(sizeof(HashTableNode));
+        if (!raw_mem) {
+            return false;
+        }
+
+        HashTableNode* new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+
+        _table[index] = new_node;
+
+        _size++;
+
+        if (_size >= _capacity*_max_load_factor) {
+            rehash( _capacity*2 );
+        }
+
+        return true;
+    }
+
+
     // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的销毁
-    // 内存池本身是只可以重用/整体销毁，不可精确销毁单次allocate的内存
-    // 故哈希表的"清空"应该是数据不再可访问的意思, 但其分配的内存不会在这里被销毁.
-    // 同时, 哈希表node中需要显式调用析构的，在这里一并显式析构
+    // 内存池本身是只可以 整体复用/整体销毁，不可精确销毁单次allocate的内存
+    // 哈希表的"清空"：原数据全部析构, 不再可访问, 但其分配的内存不会在这里被销毁. 保持 bucket 结构
+    // 由于保持了 bucket 结构 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
     void clear() {
 
         // 对于每个 bucket, 作为哈希冲突的 node 的链表头, 循环以显式析构所有node(如果需要)
@@ -178,6 +217,30 @@ public:
         }
         // node数量 置0
         _size = 0;
+
+    }
+
+    // clear 不破坏表结构, 即 bucket vector 仍然存在. destroy 在 clear 基础上, 清空 bucket vector 数组 _table
+    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待内存池在外部统一释放
+    void destroy() {
+
+        for (size_t i = 0; i < _capacity; i++) {
+
+            HashTableNode* curr = _table[i];
+            while (curr) {
+                HashTableNode* next = curr->next;
+                destroy_node(curr);
+                curr = next;
+            }
+
+            _table[i] = nullptr;
+        }
+        // node数量 置0
+        _size = 0;
+
+        _table.clear(); // 清空table向量
+
+        _capacity = 0; // _capacity 置零
     }
 
 
@@ -201,6 +264,87 @@ public:
         return iterator(this, _capacity, nullptr);
     }
 
+
+    /*
+    * 只读迭代器
+    * 
+    * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
+    */
+    const_iterator cbegin() const {
+        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    }
+
+    const_iterator cend() const {
+        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    }
+
+    class const_iterator {
+
+    public:
+
+        const_iterator(const hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
+
+        // *it 迭代器对象解引用 --> 只读返回
+        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {
+            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
+        }
+        
+
+        const_iterator& operator++() {
+            if (_node) {
+                _node = _node->next;
+            }
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket(); // 
+            }
+            return *this;
+        }
+
+
+        const_iterator operator++(int) {
+            const_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+
+        bool operator==(const const_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+
+
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
+
+    private:
+
+        hash_table_st_chain* _hash_table;
+
+        size_t _bucket_index;
+
+        HashTableNode* _node;
+
+        void _null_node_advance_to_next_valid_bucket() {
+
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+
+                _node = (_hash_table->_table)[_bucket_index];
+
+                if (_node) break;
+
+                _bucket_index++;
+            }
+        }
+
+    }; // end of const_iterator definition
 
 
     /*
@@ -262,7 +406,7 @@ public:
 
         // 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
         bool operator==(const iterator& other) const {
-            return _node == other._node;
+            return _node == other._node && _hash_table == other._hash_table;
         }
 
         // 给出两个迭代器状态是否不相等的判决方法, 必须是 operator == 操作的反面
@@ -299,9 +443,10 @@ public:
             }
         }
 
-    };
+    };  // end of iterator definition
 
-};
+
+}; // end of hash_table_st_chain definition
 
 
 

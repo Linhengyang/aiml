@@ -1,10 +1,10 @@
-// tokenizer.cpp
-// core functions for utils/text/tokenizer
+// merge_pair_core.cpp
+// core functions for merge pair in tokenizer
 #include <vector>
 #include <omp.h>
 #include <cstddef>
 #include <cstdint>
-
+#include <pair_count_merge.h>
 
 extern "C" {
 
@@ -24,7 +24,7 @@ void merge_pair_core_parallel(
         int64_t start = offsets[i];
         int64_t end = offsets[i+1];
         int64_t len_tokens = end - start;
-        for(size_t j = 0; j < len_tokens;) {
+        for(int64_t j = 0; j < len_tokens;) {
             if(j < len_tokens-1 && tokens_flat[start+j] == pair_L && tokens_flat[start+j+1] == pair_R) {
                 output_tokens_lens[i] -= 1;
                 output_tokens_flat[start+j] = new_token;
@@ -39,4 +39,4 @@ void merge_pair_core_parallel(
     }
 }
 
-}
+} // end of extern C

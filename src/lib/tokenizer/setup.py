@@ -13,10 +13,10 @@ print("Include dirs:", include_dirs)
 
 ext_modules = [
     Extension(
-        name="merge_pair",  # 输出模块名 (import 时用的名字)
+        name="pair_count_merge",  # 输出模块名 (import 时用的名字)
         sources=[
-            "merge_pair.pyx",
-            "merge_pair_api.cpp",
+            "pair_count_merge.pyx",
+            "pair_count_merge_api.cpp",
             "merge_pair_core.cpp",
             os.path.join(share_dir,"memory_block.cpp"),
             os.path.join(share_dir,"memory_pool.cpp"),
@@ -28,7 +28,7 @@ ext_modules = [
 ]
 
 setup(
-    name="merge_pair",
+    name="pair_count_merge",
     ext_modules=cythonize(
         ext_modules,
         build_dir="build/cython_temp",
