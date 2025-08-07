@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <type_traits>
 #include <shared_mutex>
+#include <mutex>
 #include <atomic>
 
 
@@ -410,14 +411,6 @@ public:
     * 
     * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
     */
-    const_iterator cbegin() const {
-        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
-    }
-
-    const_iterator cend() const {
-        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    }
-
     class const_iterator {
 
     public:
@@ -505,20 +498,19 @@ public:
 
     }; // end of const_iterator definition
 
+    const_iterator cbegin() const {
+        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    }
+
+    const_iterator cend() const {
+        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    }
 
     /*
     * 非const迭代器
     * 
     * 用法: for(auto it = hash_table.begin(); it != hash_table.end(); ++it) {auto& [k, v] = *it; //code//}
     */
-    iterator begin() const {
-        return iterator(this, 0, nullptr);
-    }
-
-    iterator end() const {
-        return iterator(this, _capacity, nullptr);
-    }
-
     class iterator {
 
     public:
@@ -591,7 +583,14 @@ public:
         }
 
     }; // end of iterator definition
+    
+    iterator begin() const {
+        return iterator(this, 0, nullptr);
+    }
 
+    iterator end() const {
+        return iterator(this, _capacity, nullptr);
+    }
 
 }; // end of hash_table_mt_chain definition
 

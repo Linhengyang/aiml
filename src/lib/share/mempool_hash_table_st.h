@@ -249,35 +249,11 @@ public:
         return _size; // 原子读取
     }
 
-
-
-    // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
-    // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
-    // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
-    iterator begin() {
-        return iterator(this, 0, nullptr);
-    }
-
-    // hash_table_st_chain 类对象 hashtable 调用 end 方法, 返回一个迭代器
-    // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    iterator end() {
-        return iterator(this, _capacity, nullptr);
-    }
-
-
     /*
     * 只读迭代器
     * 
     * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
     */
-    const_iterator cbegin() const {
-        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
-    }
-
-    const_iterator cend() const {
-        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    }
-
     class const_iterator {
 
     public:
@@ -346,6 +322,14 @@ public:
 
     }; // end of const_iterator definition
 
+    
+    const_iterator cbegin() const {
+        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    }
+
+    const_iterator cend() const {
+        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    }
 
     /*
     * 迭代器
@@ -445,6 +429,18 @@ public:
 
     };  // end of iterator definition
 
+    // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
+    // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
+    // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
+    iterator begin() {
+        return iterator(this, 0, nullptr);
+    }
+
+    // hash_table_st_chain 类对象 hashtable 调用 end 方法, 返回一个迭代器
+    // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    iterator end() {
+        return iterator(this, _capacity, nullptr);
+    }
 
 }; // end of hash_table_st_chain definition
 
