@@ -512,7 +512,7 @@ public:
         std::shared_lock<std::shared_mutex> _table_lock;
         
         // 因为迭代器内部, _bucket_index 是在变化的, 故所有桶锁要一并传进来, 然后在迭代器内部根据_bucket_index加锁
-        // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它，所以加const. C++允许在const的mutex上加锁, 只是需要mutable修饰
+        // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它. 但是 加const 修饰会导致编译不通过
         padded_mutex<std::shared_mutex>* _bucket_mutexs;
 
         void _null_node_advance_to_next_valid_bucket() {
