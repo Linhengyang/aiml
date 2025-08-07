@@ -1,17 +1,17 @@
 #include <iostream>
 #include <stdexcept>
 #include "memory_pool.h"
-#include "merge_pair.h"
+#include "pair_count_merge.h"
 
 
 int main() {
     try {
         // 创建内存池
-        init_memory_pool(64, 16);
+        init_global_mempool(64, 16);
         std::cout << "memory pool created" << "\n";
 
         // 模拟输入：tokens_flat = [1, 2, 3, 1, 2, 3], 分成2段：[1,2,3], [1,2,3]
-        int tokens_flat[] = {1, 2, 3, 1, 2, 3};
+        uint16_t tokens_flat[] = {1, 2, 3, 1, 2, 3};
         long offsets[] = {0, 3, 6};  // 两个 chunk，长度分别为 3
         size_t num_chunks = 2;
 
@@ -20,7 +20,7 @@ int main() {
         int new_token = 99;
         
         // 调用目标函数
-        return_bundle result = c_merge_pair_batch(
+        token_filter_len_ptrs result = c_merge_pair_batch(
             tokens_flat,
             offsets,
             num_chunks,
@@ -51,7 +51,7 @@ int main() {
         std::cout << "\n";
 
         // 清理内存池
-        release_memory_pool();
+        release_global_mempool();
         std::cout << "memory pool released" << "\n";
 
     } catch (const std::exception& ex) {

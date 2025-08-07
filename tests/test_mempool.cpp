@@ -1,24 +1,24 @@
-#include "memory_pool.h"
+#include "memory_pool_global.h"
 #include <iostream>
 #include <cassert>
 
 int main() {
     // 开始测试前，确保未初始化
-    assert(!memory_pool::mempool_exist());
+    assert(!global_mempool::exist());
     std::cout << "✔ 未初始化状态正确\n";
 
     // 创建单例
-    memory_pool& pool = memory_pool::get_mempool(1024, 16);
-    assert(memory_pool::mempool_exist());
+    global_mempool& pool = global_mempool::get(1024, 16);
+    assert(global_mempool::exist());
     std::cout << "✔ 单例创建成功\n";
 
     // 再次获取，确保是同一个实例
-    memory_pool& pool2 = memory_pool::get_mempool();
+    global_mempool& pool2 = global_mempool::get();
     assert(&pool == &pool2);
     std::cout << "✔ 获取同一个单例实例成功\n";
 
     // 检查已初始化状态
-    assert(memory_pool::mempool_exist());
+    assert(global_mempool::exist());
     std::cout << "✔ 单例已初始化状态检查成功\n";
 
     // 分配内存
@@ -35,8 +35,8 @@ int main() {
     std::cout << "✔ 释放内存成功\n";
 
     // 销毁单例
-    memory_pool::mempool_destroy();
-    assert(!memory_pool::mempool_exist());
+    global_mempool::destroy();
+    assert(!global_mempool::exist());
     std::cout << "✔ 单例销毁成功\n";
 
     std::cout << "\n✅ 所有 memory_pool 单例测试通过\n";
