@@ -4,7 +4,6 @@
 #define MEMPOOL_COUNTER_H
 
 
-#include <vector>
 #include <functional>
 #include <cstddef>
 #include <type_traits> // std::conditional
@@ -37,12 +36,12 @@ private:
 public:
 
     // 重载的 counter 的构造函数: 触发内部hashtable的带哈希器的重载构造函数, 预设bucket数量为capacity
-    explicit counter(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
-        _hash_table(hasher, capacity, pool) {}
+    explicit counter(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL& pool):
+        _hash_table(hasher, capacity, &pool) {}
 
     // 重载的 counter 的构造函数: 触发内部hashtable的不带哈希器的重载构造函数, 预设bucket数量为capacity
-    explicit counter(size_t capacity, TYPE_MEMPOOL* pool):
-        _hash_table(capacity, pool) {}
+    explicit counter(size_t capacity, TYPE_MEMPOOL& pool):
+        _hash_table(capacity, &pool) {}
 
     // counter 的析构函数: 用隐式析构即可：自动调用成员变量_hash_table的析构函数
 
