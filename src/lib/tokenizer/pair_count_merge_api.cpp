@@ -79,13 +79,13 @@ void init_global_counter(size_t capacity, int num_threads) {
         return;
     }
 
-    // 只会创建其中一个 counter, 另一个保持 nullptr
+    // 只会创建其中一个 counter, 另一个保持 nullptr, 运行中不会被分配内存. 跟counter相关的调用都要保持和nullptr的兼容
     if (!global_counter_st && num_threads == 1) {
-        global_counter_st = new counter_st(capacity, &global_mempool::get());
+        global_counter_st = new counter_st(pair_hasher, capacity, &global_mempool::get());
     }
 
     if (!global_counter_mt && num_threads > 1) {
-        global_counter_mt = new counter_mt(capacity, &global_mempool::get());
+        global_counter_mt = new counter_mt(pair_hasher, capacity, &global_mempool::get());
     }
     return;
 }

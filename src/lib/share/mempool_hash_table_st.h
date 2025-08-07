@@ -11,7 +11,7 @@
 
 
 
-template <typename TYPE_K, typename HASH_FUNC = std::hash<TYPE_K>, typename TYPE_V, typename TYPE_MEMPOOL>
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
 class hash_table_st_chain {
 
 private:

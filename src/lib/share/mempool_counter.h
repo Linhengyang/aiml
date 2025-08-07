@@ -16,20 +16,21 @@
 template<typename TYPE_K, typename HASH_FUNC, bool threadsafe, typename TYPE_MEMPOOL>
 using selected_hash_table = typename std::conditional<
     threadsafe,
-    hash_table_mt_chain<TYPE_K, HASH_FUNC, uint64_t, TYPE_MEMPOOL>,
-    hash_table_st_chain<TYPE_K, HASH_FUNC, uint64_t, TYPE_MEMPOOL>
+    hash_table_mt_chain<TYPE_K, uint64_t, TYPE_MEMPOOL, HASH_FUNC>,
+    hash_table_st_chain<TYPE_K, uint64_t, TYPE_MEMPOOL, HASH_FUNC>
 >::type;
 
 
 
-template<typename TYPE_K, typename HASH_FUNC = std::hash<TYPE_K>, bool threadsafe, typename TYPE_MEMPOOL>
+template<typename TYPE_K, bool threadsafe, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
 class counter {
 
 private:
 
     // 计数器 counter 和 哈希表是 has-a 的关系：组合而非继承
     // counter 内部就是一个 hash table, 其中key是待输入的TYPE_K, value 就是 uint64 以统计非负频次
-    using hash_table = selected_hash_table<TYPE_K, HASH_FUNC, threadsafe, TYPE_MEMPOOL>; // 根据 threadsafe 确定使用哪个hashtable
+    // HASH_FUNC 可以用默认 std::hash<TYPE_K>, 这样初始化时不输入额外hasher, 也可以在初始化时输入额外hasher以支持自定义
+    using hash_table = selected_hash_table<TYPE_K, HASH_FUNC, threadsafe, TYPE_MEMPOOL>;
 
     hash_table _hash_table;
 
