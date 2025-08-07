@@ -13,11 +13,20 @@
 #include "mempool_hash_table_st.h"
 
 using counter_key_type = std::pair<uint16_t, uint16_t>;
-using counter_st = counter<counter_key_type, false, global_mempool>;
-using counter_mt = counter<counter_key_type, true, global_mempool>;
+
+// 这里 counter_hasher 是一个函数类
+struct hasher_type {
+    size_t operator()(const counter_key_type& pair) const {
+        return (static_cast<size_t>(pair.first) << 16) | pair.second;
+    }
+};
+
+using counter_st = counter<counter_key_type, false, global_mempool, hasher_type>;
+using counter_mt = counter<counter_key_type, true, global_mempool, hasher_type>;
 
 
 // 声明全局变量
+extern hasher_type pair_hasher; // 全局使用的哈希器
 extern counter_st* global_counter_st;
 extern counter_mt* global_counter_mt;
 

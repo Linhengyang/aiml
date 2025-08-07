@@ -4,10 +4,13 @@
 import numpy as pynp
 import sys
 cimport numpy as np
-from libc.stdint cimport uint16_t, int64_t
+from libc.stdint cimport uint16_t, int64_t, uint64_t, uintptr_t
 import ctypes
 
 np.import_array()
+
+cdef extern from *:
+    ctypedef bint bool
 
 cdef extern from "pair_count_merge.h":
 
@@ -15,7 +18,7 @@ cdef extern from "pair_count_merge.h":
     void init_global_mempool(size_t block_size, size_t alignment)
 
     # 创建计数器
-    void init_global_counter(size_t capacity)
+    void init_global_counter(size_t capacity, int num_threads)
 
     # 声明 C++ 中的 L_R_token_counts_ptrs 结构体
     struct L_R_token_counts_ptrs:
@@ -224,7 +227,7 @@ cpdef merge_pair_batch(
     cdef uintptr_t filter_addr = <uintptr_t><void*> raw_filter_ptr # C pointer ->void* 转换, 然后是平台安全的指针->地址整数转换
     py_filter_ptr = ctypes.cast(filter_addr, ctypes.POINTER(ctypes.c_uint8)) # 使用c_uint8来接住原始bool*内存地址
     output_filter_np = pynp.ctypeslib.as_array(py_filter_ptr, shape=(_LENGTH,)) # uint8类型的array
-    output_filter_np = output_filter_np.astype(bool) # 显式转换为布尔类型
+    output_filter_np = output_filter_np.astype(pynp.bool_) # 显式转换为布尔类型
 
     merged_tokens_flat = output_tokens_flat_np[output_filter_np]
 

@@ -17,8 +17,10 @@ ext_modules = [
         sources=[
             "pair_count_merge.pyx",
             "pair_count_merge_api.cpp",
-            "merge_pair_core.cpp",
+            "core_count_pair.cpp",
+            "core_merge_pair.cpp",
             os.path.join(share_dir,"memory_block.cpp"),
+            os.path.join(share_dir,"memory_pool_global.cpp"),
             os.path.join(share_dir,"memory_pool.cpp"),
             ],  # 包含 .pyx 和所有涉及到的 C++ 源文件
         language="c++",

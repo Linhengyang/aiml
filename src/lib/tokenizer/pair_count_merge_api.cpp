@@ -16,7 +16,7 @@ namespace {
     template<typename CounterT>
     L_R_token_counts_ptrs extract_result_from_counter(CounterT* counter) {
         size_t size = counter->size();
-        auto& pool = memory_pool::get_mempool();
+        auto& pool = global_mempool::get();
 
         uint16_t* L = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
         uint16_t* R = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
@@ -35,6 +35,10 @@ namespace {
     }
 }
 
+
+// 初始化两个 counter 为 nullptr
+counter_st* global_counter_st = nullptr;
+counter_mt* global_counter_mt = nullptr;
 
 extern "C" {
 
@@ -68,24 +72,21 @@ void release_global_mempool() {
 
 
 
-// 初始化两个 counter 为 nullptr
-counter_st* global_counter_st = nullptr;
-counter_mt* global_counter_mt = nullptr;
-
-
 void init_global_counter(size_t capacity, int num_threads) {
     // 如果全局内存池尚未创建, 此创建 counter 函数无效
     if (!global_mempool::exist()) {
         return;
     }
 
-    // 只会创建其中一个 counter, 另一个保持 nullptr
+    global_mempool& pool = global_mempool::get();
+
+    // 只会创建其中一个 counter, 另一个保持 nullptr, 运行中不会被分配内存. 跟counter相关的调用都要保持和nullptr的兼容
     if (!global_counter_st && num_threads == 1) {
-        global_counter_st = new counter_st(capacity, &global_mempool::get());
+        global_counter_st = new counter_st(pair_hasher, capacity, pool);
     }
 
     if (!global_counter_mt && num_threads > 1) {
-        global_counter_mt = new counter_mt(capacity, &global_mempool::get());
+        global_counter_mt = new counter_mt(pair_hasher, capacity, pool);
     }
     return;
 }

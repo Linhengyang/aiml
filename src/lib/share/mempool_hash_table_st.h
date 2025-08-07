@@ -11,7 +11,7 @@
 
 
 
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL>
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
 class hash_table_st_chain {
 
 private:
@@ -45,9 +45,12 @@ private:
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
 
+    // 成员遍历哈希器, 定义了 operator() 即可供函数式调用 _hasher(key)
+    HASH_FUNC _hasher;
+
     // 使用标准库的 hash 函数, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值
     size_t hash(const TYPE_K& key) const {
-        return std::hash<TYPE_K>()(key);
+        return _hasher(key);
     }
 
     /*
@@ -84,8 +87,21 @@ private:
 
 public:
 
-    // 哈希表的构造函数. 传入哈希表的capacity, 和内存池
-    explicit hash_table_st_chain(size_t capacity, TYPE_MEMPOOL* pool): _capacity(capacity), _pool(pool) {
+    // 重载的哈希表的构造函数. 传入哈希表的哈希器, capacity, 和内存池.
+    explicit hash_table_st_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
+        _hasher(hasher), // 这里哈希器采用参数传入的实现了 operator()支持函数式调用hasher(key)的结构体
+        _capacity(capacity),
+        _pool(pool)
+    {
+        _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+    }
+
+    // 重载的哈希表的构造函数. 传入哈希表的capacity, 和内存池.
+    explicit hash_table_st_chain(size_t capacity, TYPE_MEMPOOL* pool):
+        _hasher(), // 这里哈希器采用模板的默认构造 std::hash<TYPE_K>
+        _capacity(capacity),
+        _pool(pool)
+    {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
     }
 
@@ -249,35 +265,11 @@ public:
         return _size; // 原子读取
     }
 
-
-
-    // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
-    // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
-    // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
-    iterator begin() {
-        return iterator(this, 0, nullptr);
-    }
-
-    // hash_table_st_chain 类对象 hashtable 调用 end 方法, 返回一个迭代器
-    // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    iterator end() {
-        return iterator(this, _capacity, nullptr);
-    }
-
-
     /*
     * 只读迭代器
     * 
     * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
     */
-    const_iterator cbegin() const {
-        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
-    }
-
-    const_iterator cend() const {
-        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    }
-
     class const_iterator {
 
     public:
@@ -326,7 +318,7 @@ public:
 
     private:
 
-        hash_table_st_chain* _hash_table;
+        const hash_table_st_chain* _hash_table;
 
         size_t _bucket_index;
 
@@ -346,6 +338,14 @@ public:
 
     }; // end of const_iterator definition
 
+    
+    const_iterator cbegin() const {
+        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    }
+
+    const_iterator cend() const {
+        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    }
 
     /*
     * 迭代器
@@ -445,6 +445,18 @@ public:
 
     };  // end of iterator definition
 
+    // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
+    // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
+    // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
+    iterator begin() {
+        return iterator(this, 0, nullptr);
+    }
+
+    // hash_table_st_chain 类对象 hashtable 调用 end 方法, 返回一个迭代器
+    // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    iterator end() {
+        return iterator(this, _capacity, nullptr);
+    }
 
 }; // end of hash_table_st_chain definition
 
