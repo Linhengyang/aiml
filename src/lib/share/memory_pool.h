@@ -13,12 +13,11 @@
 #include <mutex>
 #include <memory>
 #include "memory_block.h"
-#include "interface_memory_pool.h"
 
 
 
 
-class mempool : public mempool_interface {
+class mempool {
 
 private:
 
@@ -51,17 +50,17 @@ public:
     // 非静态方法，调用方法:  实例.方法名
 
     // 分配指定大小的内存, 非静态, 依赖成员变量 _blocks 等
-    void* allocate(size_t size) override; // 如果当前块不足以容纳, 则申请新块
+    void* allocate(size_t size); // 如果当前块不足以容纳, 则申请新块
 
-    void dealloc_large(void* ptr) override; //如果 ptr 记录在 _large_allocs 中，会被释放; 否则不会被释放
+    void dealloc_large(void* ptr) ; //如果 ptr 记录在 _large_allocs 中，会被释放; 否则不会被释放
 
-    void shrink(size_t max_num = 1) override; //缩小block数量, 释放部分尚未使用的block. 必须要在 reset之前用. 因为reset会重置所有block.used=false
+    void shrink(size_t max_num = 1) ; //缩小block数量, 释放部分尚未使用的block. 必须要在 reset之前用. 因为reset会重置所有block.used=false
 
     // 复用内存池的公共接口
-    void reset() override; // 全部复用，所有已经申请好的内存block都reset成从头可用
+    void reset(); // 全部复用，所有已经申请好的内存block都reset成从头可用
 
     // 带锁释放内存池的公共接口
-    void release() override; // 全部释放(block 和 large alloc都释放), 带锁以线程安全
+    void release(); // 全部释放(block 和 large alloc都释放), 带锁以线程安全
 
 }; // end of mempool
 

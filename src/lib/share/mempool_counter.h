@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <type_traits> // std::conditional
 #include <utility> // std::forward
-#include "interface_memory_pool.h"
 #include "mempool_hash_table_st.h"
 #include "mempool_hash_table_mt.h"
 
