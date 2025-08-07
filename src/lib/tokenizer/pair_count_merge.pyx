@@ -80,7 +80,7 @@ cdef extern from "pair_count_merge.h":
 # 计数器和count_pair_batch使用单线程
 def allocate_memory(block_size):
     init_global_mempool(block_size, 64)
-    init_global_counter(536870912, 1)
+    # init_global_counter(536870912, 1)
 
 
 
@@ -181,7 +181,7 @@ cpdef merge_pair_batch(
     shrink_global_mempool()
 
     # 本 batch merge pair之前, 重置计数器和内存池. 重置计数器是为了保证内存池可重置
-    reset_global_counter()
+    # reset_global_counter()
     reset_globabl_mempool()
 
     # 得到 tokens flattened
@@ -258,5 +258,5 @@ cpdef merge_pair_batch(
 
 # 销毁内存池/计数器接口给python
 def release_memory():
-    delete_global_counter()
+    # delete_global_counter()
     release_global_mempool()
