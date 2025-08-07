@@ -28,6 +28,13 @@ struct padded_mutex {
     // padding数组, 使得当sizeof(TYPE_LOCK)小于 CACHE_LINE_SIZE 时, lock占据+padding部分正好占满一个完整的cache line.
     // 当 sizeof(TYPE_LOCK)大于 CACHE_LINE_SIZE 时, 前面alignas 对齐就够了. 此时pad至少1以满足部分编译器的要求
     char padding[CACHE_LINE_SIZE - sizeof(TYPE_LOCK) > 0 ? CACHE_LINE_SIZE - sizeof(TYPE_LOCK) : 1];
+
+    padded_mutex() = default; // padded_mutex 要用在桶锁vector中，而vector初始化需要元素有默认构造
+
+    padded_mutex(const padded_mutex&) = delete; // 禁止拷贝
+    padded_mutex& operator=(const padded_mutex&) = delete; // 禁止赋值
+    padded_mutex(padded_mutex&&) = default;
+    padded_mutex& operator=(padded_mutex&&) = default;
 };
 
 
@@ -76,10 +83,15 @@ private:
     }
 
     // 锁整张表的锁. rehash/clear等对整张表进行操作时, 独占该锁, 使得其他任何线程不能对table进行任何操作
-    std::shared_mutex _table_mutex;
+    mutable std::shared_mutex _table_mutex;
+    // 用 mutable 修饰: 只读迭代器传入 const hash_table 时, hash_table 传入 _table_mutex 可以上锁
 
     // 锁单个bucket的锁. insert操作时, 独占该锁, 使得其他任何线程不能对bucket进行任何操作
-    std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs; //实际是pad 之后的桶锁
+    mutable std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs;
+    // C++标准库认为 mutex 的加锁是 写操作, 即使是共享锁 shared_lock 也是改变状态. 所以没办法用 const 修饰 mutex. 所以一般来说
+    // std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs 即可.
+    // 但是在 const_iterator 中, 确实不希望只读迭代器修改锁状态, 希望用const修饰mutex. 那么就需要在声明mutex时加 mutable修饰，
+    // 指明在后续该 mutex 
 
     // 原子变量 _rehashing, 当多个线程并发执行insert并都通过了rehash条件检查后,应该只允许第一个线程执行rehash
     // 此时需要一个原子变量, 执行原子级的翻转操作: 当原子为false时的线程进入rehash, 翻转它为true, 其他线程只会得到true
@@ -139,20 +151,22 @@ public:
     explicit hash_table_mt_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
         _hasher(hasher), // 这里哈希器采用参数传入的实现了 operator()支持函数式调用hasher(key)的结构体
         _capacity(capacity),
-        _pool(pool)
+        _pool(pool),
+        _bucket_mutexs(_capacity) // 延迟初始化 桶锁 vector
     {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
-        _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
+        // 桶锁 vector 的 resize 会导致编译不通过. 不要用 _bucket_mutexs.resize(_capacity) 初始化
     }
 
     // 重载的哈希表的构造函数. 传入哈希表的capacity, 和内存池.
     explicit hash_table_mt_chain(size_t capacity, TYPE_MEMPOOL* pool):
         _hasher(), // 这里哈希器采用模板的默认构造 std::hash<TYPE_K>
         _capacity(capacity),
-        _pool(pool)
+        _pool(pool),
+        _bucket_mutexs(_capacity) // 延迟初始化 桶锁 vector
     {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
-        _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
+        // 桶锁 vector 的 resize 会导致编译不通过. 不要用 _bucket_mutexs.resize(_capacity) 初始化
     }
 
     // 析构函数, 会调用 destroy 方法来释放所有 HashTableNode 中需要显式析构的部分, clear buckets 数组 _table, _size 和 _capacity 置0
@@ -498,8 +512,8 @@ public:
         std::shared_lock<std::shared_mutex> _table_lock;
         
         // 因为迭代器内部, _bucket_index 是在变化的, 故所有桶锁要一并传进来, 然后在迭代器内部根据_bucket_index加锁
-        // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它，所以加const. C++允许在const的mutex上加锁
-        const padded_mutex<std::shared_mutex>* _bucket_mutexs;
+        // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它，所以加const. C++允许在const的mutex上加锁, 只是需要mutable修饰
+        padded_mutex<std::shared_mutex>* _bucket_mutexs;
 
         void _null_node_advance_to_next_valid_bucket() {
             // null node 跳转到下一个 valid bucket head node. _bucket_index 和 _node 都是线程局部的, 所以它们都安全
