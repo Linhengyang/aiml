@@ -14,30 +14,30 @@
 #include "mempool_hash_table_mt.h"
 
 
-template<typename TYPE_K, bool threadsafe>
+template<typename TYPE_K, bool threadsafe, typename TYPE_MEMPOOL>
 using selected_hash_table = typename std::conditional<
     threadsafe,
-    hash_table_mt_chain<TYPE_K, uint64_t>,
-    hash_table_st_chain<TYPE_K, uint64_t>
+    hash_table_mt_chain<TYPE_K, uint64_t, TYPE_MEMPOOL>,
+    hash_table_st_chain<TYPE_K, uint64_t, TYPE_MEMPOOL>
 >::type;
 
 
 
-template<typename TYPE_K, bool threadsafe>
+template<typename TYPE_K, bool threadsafe, typename TYPE_MEMPOOL>
 class counter {
 
 private:
 
     // 计数器 counter 和 哈希表是 has-a 的关系：组合而非继承
     // counter 内部就是一个 hash table, 其中key是待输入的TYPE_K, value 就是 uint64 以统计非负频次
-    using hash_table = selected_hash_table<TYPE_K, threadsafe>; // 根据 threadsafe 确定使用哪个hashtable
+    using hash_table = selected_hash_table<TYPE_K, threadsafe, TYPE_MEMPOOL>; // 根据 threadsafe 确定使用哪个hashtable
 
     hash_table _hash_table;
 
 public:
 
     // counter 的构造函数: 触发内部hashtable的构造函数, 预设bucket数量为capacity
-    explicit counter(size_t capacity, mempool_interface* pool): _hash_table(capacity, pool) {}
+    explicit counter(size_t capacity, TYPE_MEMPOOL* pool): _hash_table(capacity, pool) {}
 
     // 函数调用操作符: 支持 counter(key)
     void operator()(const TYPE_K& key) {
