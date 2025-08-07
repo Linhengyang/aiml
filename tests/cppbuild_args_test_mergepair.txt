@@ -1,8 +1,0 @@
--std=c++17
-test_mergepair.cpp
-../src/lib/share/*.cpp
-../src/lib/tokenizer/*.cpp
--I../src/lib/tokenizer
--I../src/lib/share
--o
-.cpptest_cache/testtokenizer.exe
