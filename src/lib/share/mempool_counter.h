@@ -38,6 +38,8 @@ public:
     // counter 的构造函数: 触发内部hashtable的构造函数, 预设bucket数量为capacity
     explicit counter(size_t capacity, TYPE_MEMPOOL* pool): _hash_table(capacity, pool) {}
 
+    // counter 的析构函数: 用隐式析构即可：自动调用成员变量_hash_table的析构函数
+
     // 函数调用操作符: 支持 counter(key)
     void operator()(const TYPE_K& key) {
         increment(key);

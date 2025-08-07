@@ -10,7 +10,7 @@
 extern "C" {
 
 void count_pair_core_multi_thread(
-    counter_mt<std::pair<uint16_t, uint16_t>>& counter,
+    counter_mt& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len,
@@ -28,7 +28,7 @@ void count_pair_core_multi_thread(
 
 
 void count_pair_core_single_thread(
-    counter_st<std::pair<uint16_t, uint16_t>>& counter,
+    counter_st& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
     const int64_t len

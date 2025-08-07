@@ -4,14 +4,18 @@
 #include <cstdint>
 #include "pair_count_merge.h"
 #include "memory_pool_global.h"
+#include "memory_pool.h"
+#include "mempool_counter.h"
+#include "mempool_hash_table_mt.h"
+#include "mempool_hash_table_st.h"
 
 
 // namespace 定义作用域, 在里面声明的变量函数类, 不会污染全局作用域, 要用显式调用 name::func
 // 匿名的命名空间, 意思是里面定义的链接仅限本.cpp文件使用, 不会暴露给其他编译单元. Cython可以正常调用 extern C 内部的 c_count_pair_batch
 namespace {
     template<typename CounterT>
-    L_R_token_counts_ptrs extract_result_from_counter(CounterT& counter) {
-        size_t size = counter.size();
+    L_R_token_counts_ptrs extract_result_from_counter(CounterT* counter) {
+        size_t size = counter->size();
         auto& pool = memory_pool::get_mempool();
 
         uint16_t* L = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
@@ -19,7 +23,7 @@ namespace {
         uint64_t* counts = static_cast<uint64_t*>(pool.allocate(size*sizeof(uint64_t)));
 
         size_t i = 0;
-        for(auto it = counter.cbegin(); it != counter.cend(); ++it) {
+        for(auto it = counter->cbegin(); it != counter->cend(); ++it) {
             auto [pair, freq] = *it;
             L[i] = pair.first;
             R[i] = pair.second;
@@ -34,6 +38,74 @@ namespace {
 
 extern "C" {
 
+// 创建内存池（全局单例）
+void init_global_mempool(size_t block_size, size_t alignment) {
+    global_mempool::get(block_size, alignment);
+    const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
+    std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
+}
+
+
+// 缩小内存池(如果存在)
+void shrink_global_mempool() {
+    if (global_mempool::exist()) {
+        global_mempool::get().shrink();
+    }
+}
+
+
+// 重置内存池
+void reset_globabl_mempool() {
+    global_mempool::get().reset();
+}
+
+
+// 销毁内存池
+void release_global_mempool() {
+    global_mempool::destroy();
+    std::cout << "global memory pool released" << std::endl;
+}
+
+
+
+// 初始化两个 counter 为 nullptr
+counter_st* global_counter_st = nullptr;
+counter_mt* global_counter_mt = nullptr;
+
+
+void init_global_counter(size_t capacity, int num_threads) {
+    // 如果全局内存池尚未创建, 此创建 counter 函数无效
+    if (!global_mempool::exist()) {
+        return;
+    }
+
+    // 只会创建其中一个 counter, 另一个保持 nullptr
+    if (!global_counter_st && num_threads == 1) {
+        global_counter_st = new counter_st(capacity, &global_mempool::get());
+    }
+
+    if (!global_counter_mt && num_threads > 1) {
+        global_counter_mt = new counter_mt(capacity, &global_mempool::get());
+    }
+    return;
+}
+
+
+
+void reset_global_counter() {
+    if (global_counter_st) global_counter_st->clear();
+    if (global_counter_mt) global_counter_mt->clear();
+}
+
+
+
+void delete_global_counter() {
+    delete global_counter_st;
+    delete global_counter_mt;
+}
+
+
+
 L_R_token_counts_ptrs c_count_pair_batch(
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
@@ -44,18 +116,15 @@ L_R_token_counts_ptrs c_count_pair_batch(
     {
         // 不同的分支下, counter 是不同的类型, 所以没办法把 extract_result 部分统一到外部使用
         if (num_threads == 1) {
-            counter_st counter = counter_st(1024, memory_pool::get_mempool());
-            count_pair_core_single_thread(counter, L_tokens, R_tokens, len);
-
-            return extract_result_from_counter(counter);
+            global_counter_st->clear();
+            count_pair_core_single_thread(*global_counter_st, L_tokens, R_tokens, len);
+            return extract_result_from_counter<counter_st>(global_counter_st);
         }
         else {
-            counter_mt counter = counter_mt(1024, memory_pool::get_mempool());
-            count_pair_core_multi_thread(counter, L_tokens, R_tokens, len, num_threads);
-
-            return extract_result_from_counter(counter);
+            global_counter_mt->clear();
+            count_pair_core_multi_thread(*global_counter_mt, L_tokens, R_tokens, len, num_threads);
+            return extract_result_from_counter<counter_mt>(global_counter_mt);
         }
-
     }
     catch(const std::exception& e)
     {
@@ -123,38 +192,5 @@ token_filter_len_ptrs c_merge_pair_batch(
     }
 }
 
-
-
-// 创建内存池（全局单例）
-void init_memory_pool(size_t block_size, size_t alignment) {
-    global_mempool::get(block_size, alignment);
-    const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
-    std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
-}
-
-
-
-
-// 缩小内存池(如果存在)
-void shrink_memory_pool() {
-    if (global_mempool::exist()) {
-        global_mempool::get().shrink();
-    }
-}
-
-
-
-// 重置内存池
-void reset_memory_pool() {
-    global_mempool::get().reset();
-}
-
-
-
-// 销毁内存池
-void release_memory_pool() {
-    global_mempool::destroy();
-    std::cout << "global memory pool released" << std::endl;
-}
 
 } // end extern "C"
