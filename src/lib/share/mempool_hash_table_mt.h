@@ -33,7 +33,7 @@ struct padded_mutex {
 
 
 
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL>
+template <typename TYPE_K, typename HASH_FUNC = std::hash<TYPE_K>, typename TYPE_V, typename TYPE_MEMPOOL>
 class hash_table_mt_chain {
 
 private:
@@ -67,9 +67,12 @@ private:
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
 
+    // 成员遍历哈希器, 定义了 operator() 即可供函数式调用 _hasher(key)
+    HASH_FUNC _hasher;
+
     // 使用标准库的 hash 函数, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值
     size_t hash(const TYPE_K& key) const {
-        return std::hash<TYPE_K>()(key);
+        return _hasher(key);
     }
 
     // 锁整张表的锁. rehash/clear等对整张表进行操作时, 独占该锁, 使得其他任何线程不能对table进行任何操作
@@ -132,8 +135,22 @@ private:
 
 public:
 
-    // 哈希表的构造函数. 传入哈希表的capacity, 和内存池
-    explicit hash_table_mt_chain(size_t capacity, TYPE_MEMPOOL* pool): _capacity(capacity), _pool(pool) {
+    // 重载的哈希表的构造函数. 传入哈希表的哈希器, capacity, 和内存池.
+    explicit hash_table_mt_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
+        _hasher(hasher), // 这里哈希器采用参数传入的实现了 operator()支持函数式调用hasher(key)的结构体
+        _capacity(capacity),
+        _pool(pool)
+    {
+        _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+        _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
+    }
+
+    // 重载的哈希表的构造函数. 传入哈希表的capacity, 和内存池.
+    explicit hash_table_mt_chain(size_t capacity, TYPE_MEMPOOL* pool):
+        _hasher(), // 这里哈希器采用模板的默认构造 std::hash<TYPE_K>
+        _capacity(capacity),
+        _pool(pool)
+    {
         _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         _bucket_mutexs.resize(_capacity); // 初始化桶锁序列
     }
