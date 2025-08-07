@@ -23,7 +23,7 @@ class global_mempool : public mempool_interface {
 private:
 
     // 构造和析构函数写在private里，保证只能由 get_mempool 方法创建内存池实例
-    explicit global_mempool(size_t block_size = 4096, size_t alignment = 8); //默认给单个内存block申请 4kb 的内存, 8字节对齐
+    explicit global_mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请 4kb 的内存, 8字节对齐
     // explicit的意思是禁止对 global_mempool 类对象作隐式转换
 
     // 析构函数被private, 导致如下后果:

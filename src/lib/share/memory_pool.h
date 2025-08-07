@@ -43,7 +43,7 @@ private:
 public:
 
     // 构造函数. 构造 内存池 实例
-    explicit mempool(size_t block_size = 4096, size_t alignment = 8); //默认给单个内存block申请 4kb 的内存, 8字节对齐
+    explicit mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请 1MB 的内存, 8字节对齐
 
     // 析构函数. 调用 release 释放 内存池 实例
     ~mempool();
