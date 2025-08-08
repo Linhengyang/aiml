@@ -39,6 +39,8 @@ namespace {
 // 初始化两个 counter 为 nullptr
 counter_st* global_counter_st = nullptr;
 counter_mt* global_counter_mt = nullptr;
+// 默认构造 pair_hasher
+hasher_type pair_hasher;
 
 extern "C" {
 

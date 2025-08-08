@@ -1355,8 +1355,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
             corpora = [corpora]
             colnames = [None]
 
-        from merge_pair import merge_pair_batch
-        import merge_pair as switch
+        from pair_count_merge import merge_pair_batch
+        import pair_count_merge as switch
 
 
         self._set_config(
