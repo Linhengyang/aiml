@@ -90,7 +90,6 @@ void init_global_counter(size_t capacity, int num_threads) {
     if (!global_counter_mt && num_threads > 1) {
         global_counter_mt = new counter_mt(pair_hasher, capacity, pool);
     }
-    return;
 }
 
 
@@ -104,7 +103,9 @@ void reset_global_counter() {
 
 void delete_global_counter() {
     delete global_counter_st;
+    global_counter_st = nullptr;
     delete global_counter_mt;
+    global_counter_mt = nullptr;
 }
 
 

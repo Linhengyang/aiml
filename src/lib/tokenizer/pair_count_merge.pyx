@@ -181,7 +181,7 @@ cpdef merge_pair_batch(
     shrink_global_mempool()
 
     # 本 batch merge pair之前, 重置计数器和内存池. 重置计数器是为了保证内存池可重置
-    # reset_global_counter()
+    reset_global_counter()
     reset_globabl_mempool()
 
     # 得到 tokens flattened
