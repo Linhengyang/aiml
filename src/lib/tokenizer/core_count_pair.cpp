@@ -36,6 +36,10 @@ void count_pair_core_single_thread(
     for(int64_t j = 0; j < len; ++j) {
         counter( counter_key_type(L_tokens[j], R_tokens[j]) );
     }
+    // 非常慢. (L,R) -> pair(L,R) -hash-> 定位 hash table bucket ->
+    //      若冲突 --> 链表遍历 -->
+    //      若新key --> 分配node -->
+    //      随机内存访问 + 分支, cpu缓存命中率极差, 理论上就很慢 --> 算法缺陷
 }
 
 } // end of extern C
