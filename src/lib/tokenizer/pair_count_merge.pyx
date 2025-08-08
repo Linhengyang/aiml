@@ -14,11 +14,14 @@ cdef extern from *:
 
 cdef extern from "pair_count_merge.h":
 
-    # 创建内存池
-    void init_global_mempool(size_t block_size, size_t alignment)
+    # 初始化进程环境: 单例内存池 / 基于单例内存池的可复用计数器
+    void init_process(size_t block_size, size_t alignment, size_t capacity, int num_threads)
 
-    # 创建计数器
-    void init_global_counter(size_t capacity, int num_threads)
+    # 重置进程环境：重置单例内存池 / 清空可复用计数器
+    void reset_process()
+
+    # 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
+    void release_process()
 
     # 声明 C++ 中的 L_R_token_counts_ptrs 结构体
     struct L_R_token_counts_ptrs:
@@ -34,12 +37,6 @@ cdef extern from "pair_count_merge.h":
         const int64_t len,
         const int num_threads
     )
-
-    # reset 计数器准备下一轮复用
-    void reset_global_counter()
-
-    # reset 内存池准备merge pair
-    void reset_globabl_mempool()
 
     # 声明 C++ 中的 token_filter_len_ptrs 结构体
     struct token_filter_len_ptrs:
@@ -57,15 +54,6 @@ cdef extern from "pair_count_merge.h":
         const uint16_t new_token
     )
 
-    # 销毁内存池
-    void release_global_mempool()
-
-    # 销毁计数器
-    void delete_global_counter()
-
-    # 缩小内存池
-    void shrink_global_mempool()
-
 
 
 
@@ -78,9 +66,24 @@ cdef extern from "pair_count_merge.h":
 # 计数器capacity: 对于 32000 次merge, 最终pair的种类不超过 32256*32256 = 10亿左右. 
 # 初始计数器设在 16384*16384*2 = 2^29 次 = 536870912 就好。这样如果初始分配的capacity不够，一次rehash就差不多就足够了
 # 计数器和count_pair_batch使用单线程
-def allocate_memory(block_size):
-    init_global_mempool(block_size, 64)
-    init_global_counter(536870912, 1)
+cpdef initialize(size_t block_size):
+    init_process(block_size, 64, 536870912, 1)
+
+
+
+
+
+# 只是给python提供了reset进程的接口，但实际上count_pair_batch和merge_pair_batch每一次执行前都reset了
+cpdef reset():
+    reset_process()
+
+
+
+
+
+
+cpdef close():
+    release_process()
 
 
 
@@ -90,12 +93,8 @@ def allocate_memory(block_size):
 cpdef count_pair_batch(
     object tokens_offsets_border
 ):
-    # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
-    shrink_global_mempool()
-    
-    # 本 batch count pair之前, 先后重置计数器和内存池. 重置计数器->析构内存池上的hashtable; 重置内存池->复用内存
-    reset_global_counter()
-    reset_globabl_mempool()
+    # reset 进程单例内存池 / 基于单例内存池的计数器
+    reset_process()
 
     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets_border[0][0]
     cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets_border[0][1]
@@ -177,12 +176,8 @@ cpdef merge_pair_batch(
     np.uint16_t pair_R,
     np.uint16_t new_token,
 ):
-    # 先尝试 shrink 内存池，释放1个上一轮没用到的内存block. 对于刚初始化的内存池，shrink无效
-    shrink_global_mempool()
-
-    # 本 batch merge pair之前, 重置计数器和内存池. 重置计数器是为了保证内存池可重置
-    reset_global_counter()
-    reset_globabl_mempool()
+    # reset 进程单例内存池 / 基于单例内存池的计数器
+    reset_process()
 
     # 得到 tokens flattened
     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets_border[0][0]
@@ -251,12 +246,3 @@ cpdef merge_pair_batch(
 
     # 打包, pack valid merged info with batch order
     return (valid_merged_tokens_flat, valid_merged_offsets), tokens_offsets_border[1]
-
-
-
-
-
-# 销毁内存池/计数器接口给python
-def release_memory():
-    delete_global_counter()
-    release_global_mempool()

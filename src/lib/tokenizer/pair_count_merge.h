@@ -1,14 +1,12 @@
 // pair_count_merge.h
 // statement for pair_count_merge_api.cpp
 
-#ifndef TOKENIZER_H
-#define TOKENIZER_H
 
+#pragma once
 #include <cstddef>
 #include <cstdint>
-#include "mempool_counter.h" // 引入 mempool_counter.h 以便访问 counter 模板类
-#include "memory_pool_global.h"
-#include <vector>
+#include "mempool_counter.h"
+#include "memory_pool_singleton.h"
 #include "mempool_hash_table_mt.h"
 #include "mempool_hash_table_st.h"
 
@@ -21,25 +19,39 @@ struct hasher_type {
     }
 };
 
-using counter_st = counter<counter_key_type, false, global_mempool, hasher_type>;
-using counter_mt = counter<counter_key_type, true, global_mempool, hasher_type>;
+using counter_st = counter<counter_key_type, false, singleton_mempool, hasher_type>;
+using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher_type>;
 
 
-// 声明全局变量
-extern hasher_type pair_hasher; // 全局使用的哈希器
-extern counter_st* global_counter_st;
-extern counter_mt* global_counter_mt;
+// 全局对象在 .SO 被python导入后就存在主进程，python解释器没结束, 全局对象就一直存在且复用
+// 所以全局指针 delete 清空之后必须 置空set to nullptr, 不然就成了悬垂指针.
+// // 声明全局变量
+// extern hasher_type pair_hasher; // 全局使用的哈希器
+// extern counter_st* global_counter_st;
+// extern counter_mt* global_counter_mt;
+
+// 全局对象在多进程里不推荐使用：
+// 在linux下，多进程的启动方式是folk，子进程通过copy-on-write来继承父进程地址空间的一切，包括全局对象。之后进程之间各用各的副本，互相隔离
+// 在windows/macOS下，子进程的启动方式是spawn，子进程会重新import模块，.so重新加载，全局对象会在各子进程里各自初始化，互相隔离
+// 但是folk有坑：一是和spawn存在不同的行为（folk可以在主进程初始化好对象后，靠copy传给子进程；spawn做不到）
+// 二是folk对锁/线程有陷阱：folk后的std::mutex等可能处于不可预期状态，进而导致子进程卡死
+
+// 多进程的推荐办法：在子进程启动后，进程内初始化一切，特别是带锁/线程的结构；进程退出前统一释放
 
 
 extern "C" {
 
 
-// 创建全局内存池
-void init_global_mempool(size_t block_size, size_t alignment);
+// 进程内初始化（只做一次即可，允许重复调用作“已初始化”检查）
+void init_process(size_t block_size, size_t alignment, size_t capacity, int num_threads);
 
 
-// 创建全局counter
-void init_global_counter(size_t capacity, int num_threads);
+// 重置进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
+void reset_process();
+
+
+// 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
+void release_process();
 
 
 void count_pair_core_multi_thread(
@@ -76,14 +88,6 @@ L_R_token_counts_ptrs c_count_pair_batch(
 );
 
 
-// 重置counter准备下一个epoch复用. 要放在 内存池重置前面使用
-void reset_global_counter();
-
-
-// 重置内存池准备merge pair复用
-void reset_globabl_mempool();
-
-
 void merge_pair_core_parallel(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
@@ -115,19 +119,4 @@ token_filter_len_ptrs c_merge_pair_batch(
 );
 
 
-// 缩小内存池
-void shrink_global_mempool();
-
-
-// 销毁计数器
-void delete_global_counter();
-
-
-// 销毁内存池
-void release_global_mempool();
-
-
 } // end of extern C
-
-
-#endif

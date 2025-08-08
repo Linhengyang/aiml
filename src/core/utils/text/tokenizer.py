@@ -1313,22 +1313,20 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
 
+import multiprocessing as mp
+import atexit
+from multiprocessing.util import Finalize
+import pair_count_merge
 
 
+def _worker_init(block_size: int):
+    # 子进程启动时, 执行 cython 包里的 initialize
+    pair_count_merge.initialize(block_size)
 
-from ..common.base_class import MemorySwitch
+    # 注册 进程退出时的清理程序
+    Finalize(None, pair_count_merge.close, exitpriority=10)
+    atexit.register(pair_count_merge.close)
 
-class memory_control:
-    def __init__(self, switch:MemorySwitch, block_size):
-        self.switch = switch
-        self.block_size = block_size
-
-    def __enter__(self):
-        self.switch.allocate_memory(self.block_size)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.switch.release_memory()
 
 
 
@@ -1354,15 +1352,11 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         if isinstance(corpora, str):
             corpora = [corpora]
             colnames = [None]
-
-        from pair_count_merge import merge_pair_batch
-        import pair_count_merge as switch
-
-
+        
         self._set_config(
             buffer_size = buffer_size,
-            fc_count_pair_batch = count_pair_batch,
-            fc_merge_pair_batch = merge_pair_batch)
+            fc_count_pair_batch = pair_count_merge.count_pair_batch,
+            fc_merge_pair_batch = pair_count_merge.merge_pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
@@ -1375,11 +1369,19 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         else:
             self._build_vocab()
 
+        ctx = mp.get_context('spawn') # spawn方法使得 跨平台一致
+
         # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block. 避免多次申请block.
         # 根据本机64GB内存，8核, 每核内存8GB, 分6.4GB内存给计算, 那么 buffer_size=0.16GB
         # 反推最佳 buffer_size = 0.16GB, 这样1个进程有1个内存block,占用6.4GB. 8核总共占据51.2GB.
         memblock_size = 40 * self._buffer_size
-        with memory_control(switch, memblock_size), ProcessPoolExecutor(os.cpu_count()) as executor:
+
+        with ProcessPoolExecutor(
+            max_workers=8,
+            mp_context=ctx,
+            initializer=_worker_init,
+            initargs=(memblock_size,)
+        ) as executor:
             # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
             # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
             tokens_dir_start = self._prepare_train(num_merges, executor)
