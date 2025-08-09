@@ -1,7 +1,7 @@
 import numpy as np
 import typing as t
 
-def allocate_memory(block_size: int) -> None:
+def initialize(block_size: int) -> None:
     ...
 
 def count_pair_batch(
@@ -17,5 +17,5 @@ def merge_pair_batch(
     ):
     ...
 
-def release_memory() -> None:
+def close() -> None:
     ...
