@@ -48,7 +48,7 @@ private:
     // 成员遍历哈希器, 定义了 operator() 即可供函数式调用 _hasher(key)
     HASH_FUNC _hasher;
 
-    // 使用标准库的 hash 函数, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值
+    // 使用哈希器, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值
     size_t hash(const TYPE_K& key) const {
         return _hasher(key);
     }
