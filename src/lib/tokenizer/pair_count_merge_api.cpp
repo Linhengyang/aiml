@@ -22,7 +22,7 @@ namespace {
     std::atomic<bool> g_inited{false};
 
     // 默认构造哈希器 pair_hasher
-    hasher_type pair_hasher;
+    hasher pair_hasher;
 
     template<typename CounterT>
     L_R_token_counts_ptrs extract_result_from_counter(CounterT* counter) {

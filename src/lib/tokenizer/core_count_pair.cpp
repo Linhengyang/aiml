@@ -7,6 +7,12 @@
 #include "pair_count_merge.h"
 #include "mempool_counter.h"
 
+
+namespace {
+    // 从 一般输入 到 counter_key_type 的构造器
+    key_maker get_key;
+}
+
 extern "C" {
 
 void count_pair_core_multi_thread(
@@ -34,12 +40,17 @@ void count_pair_core_single_thread(
 ) {
     // 单线程遍历 L_tokens/R_tokens, 以统计频次
     for(int64_t j = 0; j < len; ++j) {
-        counter( counter_key_type(L_tokens[j], R_tokens[j]) );
+        // current key
+        counter_key_type cur_key = get_key(L_tokens[j], R_tokens[j]);
+        // count current key
+        counter( cur_key );
     }
     // 非常慢. (L,R) -> pair(L,R) -hash-> 定位 hash table bucket ->
     //      若冲突 --> 链表遍历 -->
     //      若新key --> 分配node -->
-    //      随机内存访问 + 分支, cpu缓存命中率极差, 理论上就很慢 --> 算法缺陷
+    //      随机内存访问 + 分支, cpu缓存命中率极差, 内存池是堆内存+调度开销 --> O(n)的算法复杂度, 实际效果很慢
+
+
 }
 
 } // end of extern C
