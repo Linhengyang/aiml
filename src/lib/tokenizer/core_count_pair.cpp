@@ -22,11 +22,13 @@ void count_pair_core_multi_thread(
     const int64_t len,
     const int num_threads
 ) {
-    // 大致逻辑
-    // for L, R in zip(L_tokens, R_tokens):
-    //      key = hash(L, R)
-    //      table[key] ++ 
-    
+    #pragma omp parallel for
+    for(int64_t j = 0; j < len; ++j) {
+        // current key 是 uint32
+        counter_key_type cur_key = get_key(L_tokens[j], R_tokens[j]);
+        // count current key
+        counter( cur_key );
+    }
 }
 
 
@@ -40,7 +42,7 @@ void count_pair_core_single_thread(
 ) {
     // 单线程遍历 L_tokens/R_tokens, 以统计频次
     for(int64_t j = 0; j < len; ++j) {
-        // current key
+        // current key 是 uint32
         counter_key_type cur_key = get_key(L_tokens[j], R_tokens[j]);
         // count current key
         counter( cur_key );

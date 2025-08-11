@@ -36,8 +36,10 @@ namespace {
         size_t i = 0;
         for(auto it = counter->cbegin(); it != counter->cend(); ++it) {
             auto [pair, freq] = *it;
-            L[i] = pair.first;
-            R[i] = pair.second;
+            // L[i] = pair.first;
+            // R[i] = pair.second;
+            L[i] = pair >> 16;
+            R[i] = pair & 0xFFFF;
             counts[i] = freq;
             ++i;
         }

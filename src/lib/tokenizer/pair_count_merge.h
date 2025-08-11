@@ -10,22 +10,22 @@
 #include "mempool_hash_table_mt.h"
 #include "mempool_hash_table_st.h"
 
-// 定义 counter_key_type
-using counter_key_type = std::pair<uint16_t, uint16_t>;
+// // 定义 counter_key_type
+// using counter_key_type = std::pair<uint16_t, uint16_t>;
 
-// 定义从一般输入 到 counter_key_type 的 构造. 这里可以直接使用 counter_key_type
-struct key_maker {
-    counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
-        return counter_key_type(L, R);
-    }
-};
+// // 定义从一般输入 到 counter_key_type 的 构造. 这里可以直接使用 counter_key_type
+// struct key_maker {
+//     counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
+//         return counter_key_type(L, R);
+//     }
+// };
 
-// 定义哈希 counter_key 的哈希器. 这里 counter_hasher 是一个函数类, 通过实例化得到哈希器 hasher hasher;
-struct hasher {
-    size_t operator()(const counter_key_type& pair) const {
-        return (static_cast<size_t>(pair.first << 16) | pair.second);
-    }
-};
+// // 定义哈希 counter_key 的哈希器. 这里 counter_hasher 是一个函数类, 通过实例化得到哈希器 hasher hasher;
+// struct hasher {
+//     size_t operator()(const counter_key_type& pair) const {
+//         return (static_cast<size_t>(pair.first << 16) | pair.second);
+//     }
+// };
 
 
 
@@ -38,22 +38,22 @@ struct hasher {
 
 
 
-// // 定义 counter_key_type
-// using counter_key_type = uint32_t;
+// 定义 counter_key_type
+using counter_key_type = uint32_t;
 
-// // 定义从一般输入 到 counter_key_type 的 构造器
-// struct key_maker {
-//     counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
-//         return L << 16 | R;
-//     }
-// };
+// 定义从一般输入 到 counter_key_type 的 构造器
+struct key_maker {
+    counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
+        return L << 16 | R;
+    }
+};
 
-// // 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
-// struct hasher {
-//     uint32_t operator()(const counter_key_type& key) const {
-//         return key;
-//     }
-// };
+// 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+struct hasher {
+    uint32_t operator()(const counter_key_type& key) const {
+        return key;
+    }
+};
 
 
 
