@@ -30,12 +30,12 @@ cdef extern from "pair_count_merge.h":
         uint64_t* counts_ptr
         size_t size;
 
-    # 声明 C++ 中的 c_count_pair_batch 函数
-    L_R_token_counts_ptrs c_count_pair_batch(
-        const uint16_t* L_tokens,
-        const uint16_t* R_tokens,
-        const int64_t len
-    )
+    # # 声明 C++ 中的 c_count_pair_batch 函数
+    # L_R_token_counts_ptrs c_count_pair_batch(
+    #     const uint16_t* L_tokens,
+    #     const uint16_t* R_tokens,
+    #     const int64_t len
+    # )
 
     # 声明 C++ 中的 token_filter_len_ptrs 结构体
     struct token_filter_len_ptrs:
@@ -88,82 +88,82 @@ cpdef close():
 
 
 
-# 返回np.array of L_tokens/R_tokens/counts 给python
-cpdef count_pair_batch(
-    object tokens_offsets_border
-):
-    # reset 进程单例内存池 / 基于单例内存池的计数器
-    reset_process()
+# # 返回np.array of L_tokens/R_tokens/counts 给python
+# cpdef count_pair_batch(
+#     object tokens_offsets_border
+# ):
+#     # reset 进程单例内存池 / 基于单例内存池的计数器
+#     reset_process()
 
-    cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets_border[0][0]
-    cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets_border[0][1]
+#     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] tokens_flat = tokens_offsets_border[0][0]
+#     cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets_border[0][1]
 
-    cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
-    if _LENGTH != offsets[-1]:
-        sys.exit(1)
+#     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
+#     if _LENGTH != offsets[-1]:
+#         sys.exit(1)
     
-    # 制作 L_tokens: token pair 左边的 tokens 和 R_tokens: token pair 右边的 tokens 
-    mask = pynp.full(shape=(_LENGTH,), fill_value=True)
-    chunk_ends_ = (offsets-1)[1:]
-    chunk_starts_ = offsets[:-1]
+#     # 制作 L_tokens: token pair 左边的 tokens 和 R_tokens: token pair 右边的 tokens 
+#     mask = pynp.full(shape=(_LENGTH,), fill_value=True)
+#     chunk_ends_ = (offsets-1)[1:]
+#     chunk_starts_ = offsets[:-1]
 
-    # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. filter out
-    _where_equal_ = chunk_ends_ == chunk_starts_
-    mask[ chunk_ends_[_where_equal_] ] = False
+#     # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. filter out
+#     _where_equal_ = chunk_ends_ == chunk_starts_
+#     mask[ chunk_ends_[_where_equal_] ] = False
 
-    mask_cp = mask.copy()
+#     mask_cp = mask.copy()
 
-    # 去掉所有 chunk 末尾的 token, 就是所有 L_tokens
-    mask[chunk_ends_] = False
-    cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] L_tokens = tokens_flat[mask] # 可以为空
+#     # 去掉所有 chunk 末尾的 token, 就是所有 L_tokens
+#     mask[chunk_ends_] = False
+#     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] L_tokens = tokens_flat[mask] # 可以为空
     
-    # 去掉所有 chunk 开头的 token, 就是所有 R_tokens
-    mask_cp[chunk_starts_] = False
-    cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] R_tokens = tokens_flat[mask_cp] # 可以为空
+#     # 去掉所有 chunk 开头的 token, 就是所有 R_tokens
+#     mask_cp[chunk_starts_] = False
+#     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] R_tokens = tokens_flat[mask_cp] # 可以为空
 
-    # 检查 L_tokens 和 R_tokens 长度.
-    cdef size_t len = L_tokens.shape[0]
-    if len != R_tokens.shape[0]:
-        sys.exit(1)
+#     # 检查 L_tokens 和 R_tokens 长度.
+#     cdef size_t len = L_tokens.shape[0]
+#     if len != R_tokens.shape[0]:
+#         sys.exit(1)
     
-    if len == 0:
-        return (pynp.array([], dtype=pynp.uint16),
-                pynp.array([], dtype=pynp.uint16),
-                pynp.array([], dtype=pynp.uint64)), tokens_offsets_border[1]
+#     if len == 0:
+#         return (pynp.array([], dtype=pynp.uint16),
+#                 pynp.array([], dtype=pynp.uint16),
+#                 pynp.array([], dtype=pynp.uint64)), tokens_offsets_border[1]
 
-    cdef const uint16_t[:] L_tokens_view = L_tokens
-    cdef const uint16_t* L_tokens_ptr = &L_tokens_view[0]
+#     cdef const uint16_t[:] L_tokens_view = L_tokens
+#     cdef const uint16_t* L_tokens_ptr = &L_tokens_view[0]
 
-    cdef const uint16_t[:] R_tokens_view = R_tokens
-    cdef const uint16_t* R_tokens_ptr = &R_tokens_view[0]
+#     cdef const uint16_t[:] R_tokens_view = R_tokens
+#     cdef const uint16_t* R_tokens_ptr = &R_tokens_view[0]
     
-    # 调用 c_count_pair_batch
-    cdef L_R_token_counts_ptrs result = c_count_pair_batch(
-        L_tokens_ptr,
-        R_tokens_ptr,
-        len
-    )
+#     # 调用 c_count_pair_batch
+#     cdef L_R_token_counts_ptrs result = c_count_pair_batch(
+#         L_tokens_ptr,
+#         R_tokens_ptr,
+#         len
+#     )
 
-    cdef size_t size = result.size
+#     cdef size_t size = result.size
 
-    # 转换result里的C指针到numpy array, 构建output tokens array & counts array
-    cdef uint16_t* raw_L_ptr = result.L_tokens_ptr # 接受C指针
-    cdef uintptr_t L_addr = <uintptr_t><void*> raw_L_ptr # C pointer->void*转换, 然后是平台安全的指针->地址整数转换
-    py_L_tokens_ptr = ctypes.cast(L_addr, ctypes.POINTER(ctypes.c_uint16)) # 地址整数 -> python地址
-    output_L_tokens_np = pynp.ctypeslib.as_array(py_L_tokens_ptr, shape=(size,))
+#     # 转换result里的C指针到numpy array, 构建output tokens array & counts array
+#     cdef uint16_t* raw_L_ptr = result.L_tokens_ptr # 接受C指针
+#     cdef uintptr_t L_addr = <uintptr_t><void*> raw_L_ptr # C pointer->void*转换, 然后是平台安全的指针->地址整数转换
+#     py_L_tokens_ptr = ctypes.cast(L_addr, ctypes.POINTER(ctypes.c_uint16)) # 地址整数 -> python地址
+#     output_L_tokens_np = pynp.ctypeslib.as_array(py_L_tokens_ptr, shape=(size,))
 
-    cdef uint16_t* raw_R_ptr = result.R_tokens_ptr # 接受C指针
-    cdef uintptr_t R_addr = <uintptr_t><void*> raw_R_ptr # C pointer ->void*转换, 然后是平台安全的指针->地址整数转换
-    py_R_tokens_ptr = ctypes.cast(R_addr, ctypes.POINTER(ctypes.c_uint16))
-    output_R_tokens_np = pynp.ctypeslib.as_array(py_R_tokens_ptr, shape=(size,))
+#     cdef uint16_t* raw_R_ptr = result.R_tokens_ptr # 接受C指针
+#     cdef uintptr_t R_addr = <uintptr_t><void*> raw_R_ptr # C pointer ->void*转换, 然后是平台安全的指针->地址整数转换
+#     py_R_tokens_ptr = ctypes.cast(R_addr, ctypes.POINTER(ctypes.c_uint16))
+#     output_R_tokens_np = pynp.ctypeslib.as_array(py_R_tokens_ptr, shape=(size,))
 
-    cdef uint64_t* raw_counts_ptr = result.counts_ptr # 接受C指针
-    cdef uintptr_t counts_addr = <uintptr_t><void*> raw_counts_ptr # C pointer->void*转换, 然后是平台安全的指针->地址整数转换
-    py_counts_ptr = ctypes.cast(counts_addr, ctypes.POINTER(ctypes.c_uint64))
-    output_counts_np = pynp.ctypeslib.as_array(py_counts_ptr, shape=(size,))
+#     cdef uint64_t* raw_counts_ptr = result.counts_ptr # 接受C指针
+#     cdef uintptr_t counts_addr = <uintptr_t><void*> raw_counts_ptr # C pointer->void*转换, 然后是平台安全的指针->地址整数转换
+#     py_counts_ptr = ctypes.cast(counts_addr, ctypes.POINTER(ctypes.c_uint64))
+#     output_counts_np = pynp.ctypeslib.as_array(py_counts_ptr, shape=(size,))
 
-    # 打包, pack 3 output np arrays with batch order
-    return (output_L_tokens_np, output_R_tokens_np, output_counts_np), tokens_offsets_border[1]
+#     # 打包, pack 3 output np arrays with batch order
+#     return (output_L_tokens_np, output_R_tokens_np, output_counts_np), tokens_offsets_border[1]
 
 
 

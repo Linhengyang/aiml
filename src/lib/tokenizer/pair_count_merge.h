@@ -40,28 +40,28 @@
 
 
 
-// 定义 counter_key_type
-using counter_key_type = uint32_t;
+// // 定义 counter_key_type
+// using counter_key_type = uint32_t;
 
-// 定义从一般输入 到 counter_key_type 的 构造器
-struct key_maker {
-    counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
-        return L << 16 | R;
-    }
-};
+// // 定义从一般输入 到 counter_key_type 的 构造器
+// struct key_maker {
+//     counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
+//         return L << 16 | R;
+//     }
+// };
 
-// 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
-struct hasher {
-    uint32_t operator()(const counter_key_type& key) const {
-        return key;
-    }
-};
-
-
+// // 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+// struct hasher {
+//     uint32_t operator()(const counter_key_type& key) const {
+//         return key;
+//     }
+// };
 
 
 
-using counter_st = counter<counter_key_type, false, unsafe_singleton_mempool, hasher>;
+
+
+// using counter_st = counter<counter_key_type, false, unsafe_singleton_mempool, hasher>;
 
 // 实测 多线程并发写同一个全局哈希表，速度非常慢。故去掉 多线程计数器。真正的多线程写法是分数据段+线程独立资源+合并统计。
 // using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher>;
@@ -98,12 +98,12 @@ void reset_process();
 void release_process();
 
 
-void count_pair_core(
-    counter_st& counter,
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len
-);
+// void count_pair_core(
+//     counter_st& counter,
+//     const uint16_t* L_tokens,
+//     const uint16_t* R_tokens,
+//     const int64_t len
+// );
 
 
 // 结构体，用于封装count_pair_batch函数返回的多个data指针, 和(L,R) pair-freq 总数
@@ -115,11 +115,11 @@ struct L_R_token_counts_ptrs {
 };
 
 
-L_R_token_counts_ptrs c_count_pair_batch(
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len
-);
+// L_R_token_counts_ptrs c_count_pair_batch(
+//     const uint16_t* L_tokens,
+//     const uint16_t* R_tokens,
+//     const int64_t len
+// );
 
 
 void merge_pair_core(
