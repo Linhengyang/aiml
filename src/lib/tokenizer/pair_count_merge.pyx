@@ -15,7 +15,7 @@ cdef extern from *:
 cdef extern from "pair_count_merge.h":
 
     # 初始化进程环境: 单例内存池 / 基于单例内存池的可复用计数器
-    void init_process(size_t block_size, size_t alignment, size_t capacity, int num_threads)
+    void init_process(size_t block_size, size_t alignment, size_t capacity)
 
     # 重置进程环境：重置单例内存池 / 清空可复用计数器
     void reset_process()
@@ -34,8 +34,7 @@ cdef extern from "pair_count_merge.h":
     L_R_token_counts_ptrs c_count_pair_batch(
         const uint16_t* L_tokens,
         const uint16_t* R_tokens,
-        const int64_t len,
-        const int num_threads
+        const int64_t len
     )
 
     # 声明 C++ 中的 token_filter_len_ptrs 结构体
@@ -51,8 +50,7 @@ cdef extern from "pair_count_merge.h":
         const size_t num_chunks,
         const uint16_t pair_L,
         const uint16_t pair_R,
-        const uint16_t new_token,
-        const int num_threads
+        const uint16_t new_token
     )
 
 
@@ -68,7 +66,7 @@ cdef extern from "pair_count_merge.h":
 # 初始计数器设在 16384*16384*2 = 2^29 次 = 536870912 就好。这样如果初始分配的capacity不够，一次rehash就差不多就足够了
 # 计数器和count_pair_batch使用单线程
 cpdef initialize(size_t block_size):
-    init_process(block_size, 64, 536870912, 1)
+    init_process(block_size, 64, 536870912)
 
 
 
@@ -143,8 +141,7 @@ cpdef count_pair_batch(
     cdef L_R_token_counts_ptrs result = c_count_pair_batch(
         L_tokens_ptr,
         R_tokens_ptr,
-        len,
-        1
+        len
     )
 
     cdef size_t size = result.size
@@ -209,8 +206,7 @@ cpdef merge_pair_batch(
         num_chunks,
         pair_L,
         pair_R,
-        new_token,
-        1
+        new_token
     )
 
 

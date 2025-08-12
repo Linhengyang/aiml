@@ -62,7 +62,9 @@ struct hasher {
 
 
 using counter_st = counter<counter_key_type, false, unsafe_singleton_mempool, hasher>;
-using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher>;
+
+// 实测 多线程并发写同一个全局哈希表，速度非常慢。故去掉 多线程计数器。真正的多线程写法是分数据段+线程独立资源+合并统计。
+// using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher>;
 
 
 // 全局对象在 .SO 被python导入后就存在主进程，python解释器没结束, 全局对象就一直存在且复用
@@ -85,7 +87,7 @@ extern "C" {
 
 
 // 进程内初始化（只做一次即可，允许重复调用作“已初始化”检查）
-void init_process(size_t block_size, size_t alignment, size_t capacity, int num_threads);
+void init_process(size_t block_size, size_t alignment, size_t capacity);
 
 
 // 重置进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
@@ -96,16 +98,7 @@ void reset_process();
 void release_process();
 
 
-void count_pair_core_multi_thread(
-    counter_mt& counter,
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len,
-    const int num_threads
-);
-
-
-void count_pair_core_single_thread(
+void count_pair_core(
     counter_st& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
@@ -125,12 +118,11 @@ struct L_R_token_counts_ptrs {
 L_R_token_counts_ptrs c_count_pair_batch(
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
-    const int64_t len,
-    const int num_threads
+    const int64_t len
 );
 
 
-void merge_pair_core_parallel(
+void merge_pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
@@ -157,8 +149,7 @@ token_filter_len_ptrs c_merge_pair_batch(
     const size_t num_chunks,
     const uint16_t pair_L,
     const uint16_t pair_R,
-    const uint16_t new_token,
-    const int num_threads
+    const uint16_t new_token
 );
 
 

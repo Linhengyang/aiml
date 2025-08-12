@@ -15,26 +15,7 @@ namespace {
 
 extern "C" {
 
-void count_pair_core_multi_thread(
-    counter_mt& counter,
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len,
-    const int num_threads
-) {
-    #pragma omp parallel for
-    for(int64_t j = 0; j < len; ++j) {
-        // current key 是 uint32
-        counter_key_type cur_key = get_key(L_tokens[j], R_tokens[j]);
-        // count current key
-        counter( cur_key );
-    }
-}
-
-
-
-
-void count_pair_core_single_thread(
+void count_pair_core(
     counter_st& counter,
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
@@ -44,7 +25,7 @@ void count_pair_core_single_thread(
     for(int64_t j = 0; j < len; ++j) {
         // current key 是 uint32
         counter_key_type cur_key = get_key(L_tokens[j], R_tokens[j]);
-        // count current key
+
         counter( cur_key );
     }
     // 非常慢. (L,R) -> pair(L,R) -hash-> 定位 hash table bucket ->
