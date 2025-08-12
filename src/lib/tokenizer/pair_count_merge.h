@@ -59,7 +59,7 @@ struct hasher {
 
 
 
-using counter_st = counter<counter_key_type, false, singleton_mempool, hasher>;
+using counter_st = counter<counter_key_type, false, unsafe_singleton_mempool, hasher>;
 using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher>;
 
 
