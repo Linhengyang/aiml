@@ -1370,7 +1370,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         else:
             self._build_vocab()
 
-        ctx = mp.get_context('spawn') # spawn方法使得 跨平台一致
+        ctx = mp.get_context('fork') # spawn方法使得 跨平台一致
 
         # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block. 避免多次申请block.
         # 根据本机64GB内存，8核, 每核内存8GB, 分6.4GB内存给计算, 那么 buffer_size=0.16GB
