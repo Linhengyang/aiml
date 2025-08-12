@@ -155,7 +155,8 @@ token_filter_len_ptrs c_merge_pair_batch(
     const size_t num_chunks,
     const uint16_t pair_L,
     const uint16_t pair_R,
-    const uint16_t new_token
+    const uint16_t new_token,
+    const int num_threads
 );
 
 
