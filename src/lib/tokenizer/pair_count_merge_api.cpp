@@ -17,13 +17,13 @@
 // 保证进程内有各自所需的静态对象，更不容易被误用
 namespace {
 
-    // counter_st* g_counter_st = nullptr;
-    // counter_mt* g_counter_mt = nullptr; // 线程安全版本的略过
+    counter_st* g_counter_st = nullptr;
+    // // counter_mt* g_counter_mt = nullptr; // 线程安全版本的略过
     
     std::atomic<bool> g_inited{false};
 
-    // 默认构造哈希器 pair_hasher
-    // hasher pair_hasher;
+    /* 默认构造哈希器 pair_hasher */
+    hasher pair_hasher;
 
 }
 
@@ -39,7 +39,7 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
     if (g_inited.compare_exchange_strong(expected, true)) {
         // 初始化 单例内存池（进程内）/ 基于单例内存池的 可复用计数器
         unsafe_singleton_mempool::get(block_size, alignment);
-        // g_counter_st = new counter_st(pair_hasher, capacity, unsafe_singleton_mempool::get());
+        g_counter_st = new counter_st(pair_hasher, capacity, unsafe_singleton_mempool::get());
 
         // 线程安全版本的略过
 
@@ -69,7 +69,7 @@ void reset_process() {
 // 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
 void release_process() {
     // 先销毁 计数器. delete 后必须要置空指针，以防止UAF / 二次delete
-    // if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }
+    if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }
     if (unsafe_singleton_mempool::exist()) { unsafe_singleton_mempool::destroy(); }
 
     // 线程安全版本的略过
