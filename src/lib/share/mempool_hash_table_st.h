@@ -4,7 +4,6 @@
 #define MEMPOOL_HASH_TABLE_SINGLE_THREAD_H
 
 
-#include <vector>
 #include <functional>
 #include <cstddef>
 #include <type_traits>
@@ -40,7 +39,27 @@ private:
     size_t _size = 0; // node数量
 
     // 数组 of buckets, 每个 bucket 是链表的头, 每个链表是哈希冲突的 nodes, 由第一个node代表
-    std::vector<HashTableNode*> _table;
+    // std::vector<HashTableNode*> _table;
+
+    // 节点指针vector太慢了. 若初始化大容量（比如亿级）表时，vector.resize()会非常耗时. 采用原始指针数组
+    HashTableNode** _table = nullptr; // 指向 节点指针 的指针, 以代表 节点指针数组（头）
+
+    // 分配容量为 n 的节点指针数组 到数组头 _table
+    void alloc_table_ptrs(size_t n) {
+        if (n == 0) {
+            _table = nullptr;
+            return;
+        }
+        // calloc: 分配空间为 n 个 节点指针 的空间, 并零初始化, 避免 .resize的逐元素置空
+        _table = static_cast<HashTableNode**>(std::calloc(n, sizeof(HashTableNode*)));
+        if (!_table) throw std::bad_alloc();
+    }
+
+    // 释放节点指针数组，相当于 vector.clear(). 但节点内存并没有释放，由mempool管理
+    void free_table_ptrs() noexcept {
+        std::free(_table);
+        _table = nullptr;
+    }
 
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
@@ -61,7 +80,13 @@ private:
     */
     void rehash(size_t new_capacity) {
         // 初始化一个新的 table
-        std::vector<HashTableNode*> _new_table(new_capacity, nullptr);
+        HashTableNode** _new_table = nullptr;
+        {
+            // 可能抛异常
+            _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
+            if (!_new_table) throw std::bad_alloc();
+        }
+
         // 重新计算 _size, 为缩容式 rehash 留下余地
         size_t actual_node_count = 0;
 
@@ -73,15 +98,17 @@ private:
                 current->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = current; // 更新确认新bucket的链表头
                 current = next; // 遍历下一个node
-                actual_node_count++;
+                ++actual_node_count;
             }
             // 旧_table会被舍弃
             _table[i] = nullptr;
         }
-        // 所有bucket所有node重新挂载完毕后, 切换 _table/_capacity
-        _table = std::move(_new_table);
+        // 所有bucket所有node重新挂载完毕后, 旧指针数组释放置空后，切换 _table/_capacity
+        free_table_ptrs();
+        _table = _new_table;
+
         _capacity = new_capacity;
-        _size = actual_node_count;
+        _size = actual_node_count; // 逻辑闭环：万一未来支持缩容
     }
 
 
@@ -93,7 +120,8 @@ public:
         _capacity(capacity),
         _pool(pool)
     {
-        _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+        // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+        alloc_table_ptrs(_capacity); // calloc 零初始化
     }
 
     // 重载的哈希表的构造函数. 传入哈希表的capacity, 和内存池.
@@ -102,10 +130,11 @@ public:
         _capacity(capacity),
         _pool(pool)
     {
-        _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+        // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+        alloc_table_ptrs(_capacity); // calloc 零初始化
     }
 
-    // 析构函数, 会调用 destroy 方法来释放所有 HashTableNode 中需要显式析构的部分, clear buckets 数组 _table, _size 和 _capacity 置0
+    // 析构函数, 会调用 destroy 方法来释放所有 HashTableNode 中需要显式析构的部分, 释放 buckets数组 _table并置空, _size 和 _capacity 置0
     // 但不负责内存释放. 由内存池在外部统一释放
     ~hash_table_st_chain() {
         destroy();
@@ -113,19 +142,18 @@ public:
 
     // 哈希表关键方法之 get(key&, value&) --> change value, return true if success
     bool get(const TYPE_K& key, TYPE_V& value) {
+        if (_capacity == 0 || !_table) return false;
+
         // 计算 bucket index
         size_t index = hash(key) % _capacity;
 
-        // 得到 bucket, 即哈希冲突的链表头
-        HashTableNode* current = _table[index];
-
-        while (current) {
-            if (current->key == key) {
-                value = current->value; // 改变 value 地址的值
+        for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+            if (cur->key == key) {
+                value = cur->value; // 改变 value 地址的值
                 return true;
             }
-            current = current->next;
         }
+
         return false; // 没找到
     }
 
@@ -138,26 +166,26 @@ public:
     * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
     */
     bool insert(const TYPE_K& key, const TYPE_V& value) {
+        if (_capacity == 0 || !_table) return false;
+
         // 计算 bucket index
         size_t index = hash(key) % _capacity;
 
         // 首先查找 key 是否已经存在. 若 key 存在, 修改原 value 到 新value
-        HashTableNode* current = _table[index];
-        while (current) {
-            if (current->key == key) {
-                current->value = value; // 修改 node 的value
-                return true; // 完成 insert, return true 退出
+        for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+            if (cur->key == key) {
+                cur->value = value;
+                return true;
             }
-            current = current->next;
         }
+
         // 如果执行到这里, 说明要么 currrent 是 nullptr, 要么 _table[index] 链表里没有 key
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
 
         // 在 内存池 上分配新内存给新节点, raw_mem 内存
         void* raw_mem = _pool->allocate(sizeof(HashTableNode));
-        if (!raw_mem) {
-            return false; // 如果内存分配失败
-        }
+        if (!raw_mem) return false; // 如果内存分配失败
+
         // placement new 构造
         HashTableNode* new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
 
@@ -165,7 +193,7 @@ public:
         _table[index] = new_node;
         
         // node数量自加1. 原子线程安全
-        _size++;
+        ++_size;
 
         // 单线程, 只需检查是否满足负载因子，触发扩容
         if (_size >= _capacity*_max_load_factor) {
@@ -181,17 +209,16 @@ public:
     // 这里采用最灵活的模板写法, 用 && 保证右值引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
     template <typename Func>
     bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
+        if (_capacity == 0 || !_table) return false;
 
         // 基本照搬 insert 逻辑, 除了修改节点value/插入新节点时, 分别使用updater/default_val来更新/插入
         size_t index = hash(key) % _capacity;
 
-        HashTableNode* current = _table[index];
-        while (current) {
-            if (current->key == key) {
-                std::forward<Func>(updater)(current->value); // 用forward 完美转发 updater
+        for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+            if (cur->key == key) {
+                std::forward<Func>(updater)(cur->value); // 用forward 完美转发 updater
                 return true;
             }
-            current = current->next;
         }
         
         void* raw_mem = _pool->allocate(sizeof(HashTableNode));
@@ -236,8 +263,8 @@ public:
 
     }
 
-    // clear 不破坏表结构, 即 bucket vector 仍然存在. destroy 在 clear 基础上, 清空 bucket vector 数组 _table
-    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待内存池在外部统一释放
+    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table
+    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
 
         for (size_t i = 0; i < _capacity; i++) {
@@ -254,14 +281,14 @@ public:
         // node数量 置0
         _size = 0;
 
-        _table.clear(); // 清空table向量
+        free_table_ptrs(); // 释放 节点指针数组, 置空 _table
 
         _capacity = 0; // _capacity 置零
     }
 
 
     // 输出当前哈希表 k-v 数量
-    size_t size() const {
+    size_t size() const noexcept {
         return _size; // 原子读取
     }
 

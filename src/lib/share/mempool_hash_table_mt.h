@@ -13,21 +13,29 @@
 #include <atomic>
 
 
+constexpr size_t next_pow2(size_t x) {
+    if (x <= 1) return 1;
+    --x; x |= x >> 1; x |= x >> 2; x |= x >> 4; x |= x >> 8; x |= x >> 16;
+#if SIZE_MAX > 0xFFFFFFFFu
+    x |= x >> 32;
+#endif
+    return x + 1;
+};
 
 
 // 不要让多个桶锁落入同一个 cache line. cpu总是会加载一整个cache line, 多个线程的桶锁若落入同一个cache line, 会引发竞争性能下降
 // 对齐桶锁到 cache line size 边界, 并填充一些使得 padded mutex 至少能占满一整个 cache line
 constexpr size_t CACHE_LINE_SIZE = 64;
 
-template <typename TYPE_LOCK>
+
 struct padded_mutex {
     
     // alignas, C++11引入的关键字, 指定变量的内存对齐方式
-    alignas(CACHE_LINE_SIZE) TYPE_LOCK lock; // alignas强制TYPE_LOCK类变量 lock 按64字节内存对齐
+    alignas(CACHE_LINE_SIZE) std::shared_mutex lock; // alignas强制TYPE_LOCK类变量 lock 按64字节内存对齐
 
     // padding数组, 使得当sizeof(TYPE_LOCK)小于 CACHE_LINE_SIZE 时, lock占据+padding部分正好占满一个完整的cache line.
     // 当 sizeof(TYPE_LOCK)大于 CACHE_LINE_SIZE 时, 前面alignas 对齐就够了. 此时pad至少1以满足部分编译器的要求
-    char padding[CACHE_LINE_SIZE - sizeof(TYPE_LOCK) > 0 ? CACHE_LINE_SIZE - sizeof(TYPE_LOCK) : 1];
+    char padding[CACHE_LINE_SIZE - sizeof(std::shared_mutex) > 0 ? CACHE_LINE_SIZE - sizeof(std::shared_mutex) : 1];
 
     padded_mutex() = default; // padded_mutex 要用在桶锁vector中，而vector初始化需要元素有默认构造
 
@@ -69,7 +77,26 @@ private:
     std::atomic<size_t> _size{0}; // node数量, 原子保证自加符++线程安全
 
     // 数组 of buckets, 每个 bucket 是链表头, 每个链表是哈希冲突的 nodes
-    std::vector<HashTableNode*> _table;
+    // std::vector<HashTableNode*> _table;
+    // 节点指针vector太慢了. 若初始化大容量（比如亿级）表时，vector.resize()会非常耗时. 采用原始指针数组
+    HashTableNode** _table = nullptr; // 指向 节点指针 的指针, 以代表 节点指针数组（头）
+
+    // 分配容量为 n 的节点指针数组 到数组头 _table
+    void alloc_table_ptrs(size_t n) {
+        if (n == 0) {
+            _table = nullptr;
+            return;
+        }
+        // calloc: 分配空间为 n 个 节点指针 的空间, 并零初始化, 避免 .resize的逐元素置空
+        _table = static_cast<HashTableNode**>(std::calloc(n, sizeof(HashTableNode*)));
+        if (!_table) throw std::bad_alloc();
+    }
+
+    // 释放节点指针数组，相当于 vector.clear(). 但节点内存并没有释放，由mempool管理
+    void free_table_ptrs() noexcept {
+        std::free(_table);
+        _table = nullptr;
+    }
 
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
@@ -87,11 +114,21 @@ private:
     // 用 mutable 修饰: 只读迭代器传入 const hash_table 时, hash_table 传入 _table_mutex 可以上锁
 
     // 锁单个bucket的锁. insert操作时, 独占该锁, 使得其他任何线程不能对bucket进行任何操作
-    mutable std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs;
+    // mutable std::vector<padded_mutex> _bucket_mutexs;
     // C++标准库认为 mutex 的加锁是 写操作, 即使是共享锁 shared_lock 也是改变状态. 所以没办法用 const 修饰 mutex. 所以一般来说
     // std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs 即可.
-    // 但是在 const_iterator 中, 确实不希望只读迭代器修改锁状态, 希望用const修饰mutex. 那么就需要在声明mutex时加 mutable修饰，
-    // 指明在后续该 mutex 
+    // 但是在 const_iterator 中, 确实不希望只读迭代器修改锁状态, 希望用const修饰mutex. 那么就需要在声明mutex时加 mutable修饰
+    // 指明在后续该 mutex
+
+    // 当 capacity 非常大时，给每个 bucket 一个桶锁 的桶锁序列是不可接受的. 构建桶锁非常耗时耗资源. 用固定大小的条带锁解耦桶锁数量和capacity
+    // 条带锁 stripe 会增大锁竞争的概率（多个bucket同时等待一个锁的概率存在）
+    mutable std::vector<padded_mutex> _stripes; // 定长的桶锁序列 _stripes, 所有bucket会映射到其中一个锁
+    size_t _stripe_mask;  // 
+
+    // 上锁函数: 根据给定的 桶 index, 定位到唯一的 条带锁 以上锁
+    inline std::shared_mutex& bucket_lock(size_t bucket_index) noexcept {
+        return _stripes[bucket_index & _stripe_mask].lock;
+    }
 
     // 原子变量 _rehashing, 当多个线程并发执行insert并都通过了rehash条件检查后,应该只允许第一个线程执行rehash
     // 此时需要一个原子变量, 执行原子级的翻转操作: 当原子为false时的线程进入rehash, 翻转它为true, 其他线程只会得到true
@@ -102,44 +139,55 @@ private:
     * @param new_capacity
     * 
     * 行为:对每一个node重新计算bucket, 然后将其重新挂载到新的bucket链表的头部
-    */
+    */ 
     void rehash(size_t new_capacity) {
         // rehash 的调用在 insert 里，调用前会加 独占表锁, 故这里不再加独占表锁避免死锁
         // 独占表锁之后, 多线程里就只有 一个 rehash 可以运行了, 其他都会被阻塞. 桶锁是多余的
 
         // 初始化一个新的 table
-        std::vector<HashTableNode*> _new_table(new_capacity, nullptr);
+        HashTableNode** _new_table = nullptr;
+        {
+            // 可能抛异常
+            _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
+            if (!_new_table) throw std::bad_alloc();
+        }
 
-        // 初始化 新的 bucket mutexs 桶锁序列
-        std::vector<padded_mutex<std::shared_mutex>> _new_bucket_mutexs(new_capacity);
+        // 初始化 新的 条带锁序列（粗粒度桶锁），长度不变仍然是 next_pow2(stripe_hint) = _stripe_mask + 1
+        mutable std::vector<padded_mutex> _new_stripes(_stripe_mask+1);
 
         // 目前 size 是只增的, 且rehash 一定是扩容. 但为了逻辑闭环, 以及支持未来可能有缩容的rehash, 应该重新统计 node 总个数
         size_t actual_node_count = 0; // 独占表锁下, 此变量线程安全
 
         for (size_t i = 0; i < _capacity; i++) {
 
-            // 搬迁当前 bucket 时, 也独占该bucket桶锁. 作用到本i次 for-loop 结束
-            std::unique_lock<std::shared_mutex> _lock_bucket_for_rehash_(_bucket_mutexs[i].lock);
+            // 搬迁当前 bucket 时, 也独占该bucket桶锁. 作用到本i次 for-loop 结束. 在加表锁的前提下，桶锁是多余的
+            // std::unique_lock<std::shared_mutex> _lock_bucket_for_rehash_(_bucket_mutexs[i].lock);
+            std::unique_lock<std::shared_mutex> _lock_(bucket_lock(i)); // 在加表锁的前提下，桶锁是多余的. 未来测试去除
 
             HashTableNode* current = _table[i]; // 从该bucekt的链表头开始
             while (current) { // 当前node非空
                 HashTableNode* next = current->next; // 先取出next node
                 size_t new_index = hash(current->key) % new_capacity; // 计算得出新bucket
+                // 挂载 current node 到新table的新bucket.
                 {
-                    // 挂载 current node 到新table的新bucket. 也独占新bucket桶锁. 作用到_new_table[new_index]修改完毕
-                    std::unique_lock<std::shared_mutex> _lock_newbucket_for_rehash_(_new_bucket_mutexs[new_index].lock);
+                    // 新的条带锁 对应 锁：上写锁. 由于 表锁的作用，rehash应该只有一个线程可以执行, 故新表 _new_table 是线程安全的
+                    // 这里可能新桶锁也是不需要的. 未来测试去除
+                    std::unique_lock<std::shared_mutex> _new_lock_(_new_stripes[new_index & _stripe_mask]);
                     current->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                     _new_table[new_index] = current; // 更新确认新bucket的链表头
                 }
                 current = next; // 遍历下一个node
-                actual_node_count++; // 每搬迁一个node就计数
+                ++actual_node_count; // 每搬迁一个node就计数
             }
             // 旧_table会被舍弃
             _table[i] = nullptr;
         }
-        // 所有bucket所有node重新挂载完毕后, 切换 _table/_bucket_mutexs/_capacity/_size
-        _table = std::move(_new_table);
-        _bucket_mutexs = std::move(_new_bucket_mutexs);
+
+        // 所有bucket所有node重新挂载完毕后, 旧指针数组释放置空后，切换 _table/_bucket_mutexs/_capacity/_size
+        free_table_ptrs();
+        _table = _new_table;
+
+        _stripes = std::move(_new_stripes);
         _capacity = new_capacity;
         _size.store(actual_node_count, std::memory_order_relaxed); // 独占表锁下, 只要变更值就可以了, 不需要考虑其他线程是否全局一致.
     }
@@ -148,25 +196,29 @@ private:
 public:
 
     // 重载的哈希表的构造函数. 传入哈希表的哈希器, capacity, 和内存池.
-    explicit hash_table_mt_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
+    explicit hash_table_mt_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
         _hasher(hasher), // 这里哈希器采用参数传入的实现了 operator()支持函数式调用hasher(key)的结构体
         _capacity(capacity),
         _pool(pool),
-        _bucket_mutexs(_capacity) // 延迟初始化 桶锁 vector
-    {
-        _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         // 桶锁 vector 的 resize 会导致编译不通过. 不要用 _bucket_mutexs.resize(_capacity) 初始化
+        _stripe_mask(next_pow2(stripe_hint)-1),
+        _stripes(_stripe_mask+1) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
+    {
+        // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+        alloc_table_ptrs(_capacity); // calloc 零初始化
+
     }
 
     // 重载的哈希表的构造函数. 传入哈希表的capacity, 和内存池.
-    explicit hash_table_mt_chain(size_t capacity, TYPE_MEMPOOL* pool):
+    explicit hash_table_mt_chain(size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
         _hasher(), // 这里哈希器采用模板的默认构造 std::hash<TYPE_K>
         _capacity(capacity),
         _pool(pool),
-        _bucket_mutexs(_capacity) // 延迟初始化 桶锁 vector
+        _stripe_mask(next_pow2(stripe_hint)-1),
+        _stripes(_stripe_mask+1) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
     {
-        _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
-        // 桶锁 vector 的 resize 会导致编译不通过. 不要用 _bucket_mutexs.resize(_capacity) 初始化
+        // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
+        alloc_table_ptrs(_capacity); // calloc 零初始化
     }
 
     // 析构函数, 会调用 destroy 方法来释放所有 HashTableNode 中需要显式析构的部分, clear buckets 数组 _table, _size 和 _capacity 置0
@@ -190,22 +242,21 @@ public:
         // 但是是允许对多个不同bucket作并发读取的, 所以共享占用表锁. 作用到get结束
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
+        if (_capacity == 0 || !_table) return false;
+
         // 计算 bucket index
         size_t index = hash(key) % _capacity;
 
         // 读取 key-value 时, 允许单个bucket上并发读. 不允许insert操作. 所以共享占用桶锁. 作用到get结束
-        std::shared_lock<std::shared_mutex> _lock_from_insert_(_bucket_mutexs[index].lock);
+        std::shared_lock<std::shared_mutex> _lock_from_insert_(bucket_lock(index));
 
-        // 得到 bucket, 即哈希冲突的链表头
-        HashTableNode* current = _table[index];
-
-        while (current) {
-            if (current->key == key) {
-                value = current->value; // 改变 value 地址的值
+        for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+            if (cur->key == key) {
+                value = cur->value; // 改变 value 地址的值
                 return true;
             }
-            current = current->next;
         }
+
         return false; // 没找到
     }
 
@@ -223,29 +274,28 @@ public:
         // 但是是允许对多个不同bucket作并发写入的, 所以共享占用. 作用到rehash判断前
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
+        if (_capacity == 0 || !_table) return false;
+
         // 计算 bucket index
         size_t index = hash(key) % _capacity;
         {
             // 写入 key-value 时, 不允许其他线程对相应bucket有读写操作. 所以独占桶锁. 作用到本桶更新完毕
-            std::unique_lock<std::shared_mutex> _lock_from_insert_read_(_bucket_mutexs[index].lock);
+            std::unique_lock<std::shared_mutex> _lock_from_insert_read_(bucket_lock(index));
             
             // 首先查找 key 是否已经存在. 若 key 存在, 修改原 value 到 新value
-            HashTableNode* current = _table[index];
-            while (current) {
-                if (current->key == key) {
-                    current->value = value; // 修改 node 的value
-                    return true; // 完成 insert, return true 退出
+            for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+                if (cur->key == key) {
+                    cur->value = value;
+                    return true;
                 }
-                current = current->next;
             }
             // 如果执行到这里, 说明要么 currrent 是 nullptr, 要么 _table[index] 链表里没有 key
             // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
 
             // 在 内存池 上分配新内存给新节点, raw_mem 内存
             void* raw_mem = _pool->allocate(sizeof(HashTableNode));
-            if (!raw_mem) {
-                return false; // 如果内存分配失败
-            }
+            if (!raw_mem) return false; // 如果内存分配失败
+
             // placement new 构造
             HashTableNode* new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
 
@@ -298,20 +348,19 @@ public:
         // 加表锁, 防止表结构变动
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
+        if (_capacity == 0 || !_table) return false;
+
         // 基本照搬 insert 逻辑, 除了修改节点value/插入新节点时, 分别使用updater/default_val来更新/插入
         size_t index = hash(key) % _capacity;
 
         {
-            std::unique_lock<std::shared_mutex> _lock_from_insert_read_(_bucket_mutexs[index].lock);
-            
-            HashTableNode* current = _table[index];
-            while (current) {
-                if (current->key == key) {
-                    // 本地修改 node 的value. 独占桶锁下这里是线程安全的, 不需要额外原子设计
-                    std::forward<Func>(updater)(current->value); // 用forward 完美转发 updater
+            std::unique_lock<std::shared_mutex> _lock_from_insert_read_(bucket_lock(index));
+
+            for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+                if (cur->key == key) {
+                    std::forward<Func>(updater)(cur->value); // 用forward 完美转发 updater
                     return true;
                 }
-                current = current->next;
             }
 
             void* raw_mem = _pool->allocate(sizeof(HashTableNode));
@@ -355,7 +404,7 @@ public:
         for (size_t i = 0; i < _capacity; i++) {
 
             // 析构本bucket上的nodes, 以及要置空本bucket时, 独占 桶锁. 作用到本i次for-loop结束
-            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(_bucket_mutexs[i].lock);
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(bucket_lock(i));
 
             HashTableNode* curr = _table[i];
             while (curr) {
@@ -372,8 +421,8 @@ public:
     }
 
 
-    // clear 不破坏表结构, 即 bucket vector 仍然存在. destroy 在 clear 基础上, 清空bucket vector 数组
-    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待内存池在外部统一释放
+    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table
+    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
 
         // 独占表锁：destroy 会对表结构发生改动, 故需要独占表锁以排除其余任何操作
@@ -381,7 +430,7 @@ public:
 
         for (size_t i = 0; i < _capacity; i++) {
 
-            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(_bucket_mutexs[i].lock);
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(bucket_lock(i));
 
             HashTableNode* curr = _table[i];
             while (curr) {
@@ -395,7 +444,7 @@ public:
 
         _size.store(0, std::memory_order_relaxed);
 
-        _table.clear(); // 清空table向量
+        free_table_ptrs(); // 释放 节点指针数组, 置空 _table
 
         _capacity = 0; // _capacity 置零
     }
@@ -454,7 +503,7 @@ public:
             // 延迟构造, 在const_iterator构造函数初始化列表里传入 _table_mutex 调用shared_lock的构造函数-->此时完成加表锁
             _table_lock(_hash_table->_table_mutex),
             // vector.data() --> 传入 桶锁vector 地址. 构造时不需要上桶锁
-            _bucket_mutexs( _hash_table->_bucket_mutexs.data() )
+            _stripes( _hash_table->_stripes.data() )
         {
             _null_node_advance_to_next_valid_bucket(); // 在内部, 目标桶加桶锁
         }
@@ -513,14 +562,14 @@ public:
         
         // 因为迭代器内部, _bucket_index 是在变化的, 故所有桶锁要一并传进来, 然后在迭代器内部根据_bucket_index加锁
         // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它. 但是 加const 修饰会导致编译不通过
-        padded_mutex<std::shared_mutex>* _bucket_mutexs;
+        padded_mutex* _bucket_mutexs;
 
         void _null_node_advance_to_next_valid_bucket() {
             // null node 跳转到下一个 valid bucket head node. _bucket_index 和 _node 都是线程局部的, 所以它们都安全
             // _node 在跳转的时候, 应该有目标桶锁, 以限制该桶有insert/remove操作
             while (!_node && _bucket_index < _hash_table->_capacity) {
                 /* 加 _bucket_index 桶锁, 持续到本循环退出 */
-                std::shared_lock<std::shared_mutex> _lock_bucket_(_bucket_mutexs[_bucket_index].lock);
+                std::shared_lock<std::shared_mutex> _lock_bucket_(bucket_lock(_bucket_index));
                 _node = (_hash_table->_table)[_bucket_index];
                 if (_node) break;
                 _bucket_index++;
