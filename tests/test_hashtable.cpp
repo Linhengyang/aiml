@@ -1,28 +1,42 @@
-#include <vector>
-#include <shared_mutex>
+#include "mempool_hash_table_mt.h"
+#include "mempool_hash_table_st.h"
+#include "memory_pool_singleton.h"
+#include <iostream>
+#include <cassert>
 
-constexpr size_t CACHE_LINE_SIZE = 64;
-
-template <typename TYPE_LOCK>
-struct padded_mutex {
-    
-    // alignas, C++11引入的关键字, 指定变量的内存对齐方式
-    alignas(CACHE_LINE_SIZE) TYPE_LOCK lock; // alignas强制TYPE_LOCK类变量 lock 按64字节内存对齐
-
-    // padding数组, 使得当sizeof(TYPE_LOCK)小于 CACHE_LINE_SIZE 时, lock占据+padding部分正好占满一个完整的cache line.
-    // 当 sizeof(TYPE_LOCK)大于 CACHE_LINE_SIZE 时, 前面alignas 对齐就够了. 此时pad至少1以满足部分编译器的要求
-    char padding[CACHE_LINE_SIZE - sizeof(TYPE_LOCK) > 0 ? CACHE_LINE_SIZE - sizeof(TYPE_LOCK) : 1];
-
-    padded_mutex() = default; // padded_mutex 要用在桶锁vector中，而vector需要元素满足拷贝构造
-    padded_mutex(const padded_mutex&) = delete; // 禁止拷贝
-    padded_mutex& operator=(const padded_mutex&) = delete; // 禁止赋值
+// 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+struct hasher {
+    uint32_t operator()(const uint32_t& key) const {
+        return key;
+    }
 };
 
-int fail() {
-    std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs;
-    _bucket_mutexs.resize(10); // 编译不通过
-}
+// constexpr size_t next_pow2(size_t x) {
+//     if (x <= 1) return 1;
+//     --x; x |= x >> 1; x |= x >> 2; x |= x >> 4; x |= x >> 8; x |= x >> 16;
+// #if SIZE_MAX > 0xFFFFFFFFu
+//     x |= x >> 32;
+// #endif
+//     return x + 1;
+// };
 
 int main() {
-    std::vector<padded_mutex<std::shared_mutex>> _bucket_mutexs(10); // 编译通过
+
+    // 创建 内存池单例
+    size_t block_size = 40LL * 172470436LL;
+    singleton_mempool& pool = singleton_mempool::get(block_size, 64);
+
+    // 创建 哈希器
+    hasher my_hasher;
+
+    // 创建 线程安全的 哈希表
+    hash_table_mt_chain<uint32_t, uint64_t, singleton_mempool, hasher> hashtable(my_hasher, 5e8, &pool);
+
+    // 手动销毁 哈希表
+    hashtable.destroy();
+
+    // 手动销毁内存池
+    pool.destroy();
+
+    return 0;
 }
