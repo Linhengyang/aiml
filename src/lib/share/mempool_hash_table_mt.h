@@ -412,9 +412,9 @@ public:
                 destroy_node(curr);
                 curr = next;
             }
-            // bucket 自身置空. 此时该bucket无法从 哈希表对象访问. 但内存并未释放, 等待内存池统一释放
-            _table[i] = nullptr;
         }
+        // _table 指针数组全部置空
+        std::memset(_table, 0, _capacity * sizeof(HashTableNode*));
         // node数量 置0, 原子线程安全
         _size.store(0, std::memory_order_relaxed);
 
