@@ -14,6 +14,7 @@
 #include <shared_mutex>
 #include <mutex>
 #include <atomic>
+#include <cstring>
 
 
 constexpr size_t next_pow2(size_t x) {

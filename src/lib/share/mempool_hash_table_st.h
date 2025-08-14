@@ -7,7 +7,7 @@
 #include <functional>
 #include <cstddef>
 #include <type_traits>
-
+#include <cstring>
 
 
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
@@ -244,7 +244,7 @@ public:
     // 由于保持了 bucket 结构 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
     void clear() {
         if (_capacity == 0 || !_table) {
-            _size.store(0, std::memory_order_relaxed);
+            _size = 0;
             return;
         }
         if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
