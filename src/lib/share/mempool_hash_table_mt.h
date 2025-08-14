@@ -110,7 +110,7 @@ private:
     }
 
     // 锁整张表的锁. rehash/clear等对整张表进行操作时, 独占该锁, 使得其他任何线程不能对table进行任何操作
-    mutable std::shared_mutex _table_mutex;
+    std::shared_mutex _table_mutex;
     // 用 mutable 修饰: 只读迭代器传入 const hash_table 时, hash_table 传入 _table_mutex 可以上锁
 
     // 锁单个bucket的锁. insert操作时, 独占该锁, 使得其他任何线程不能对bucket进行任何操作
@@ -122,7 +122,7 @@ private:
 
     // 当 capacity 非常大时，给每个 bucket 一个桶锁 的桶锁序列是不可接受的. 构建桶锁非常耗时耗资源. 用固定大小的条带锁解耦桶锁数量和capacity
     // 条带锁 stripe 会增大锁竞争的概率（多个bucket同时等待一个锁的概率存在）
-    mutable std::vector<padded_mutex> _stripes; // 定长的桶锁序列 _stripes, 所有bucket会映射到其中一个锁
+    std::vector<padded_mutex> _stripes; // 定长的桶锁序列 _stripes, 所有bucket会映射到其中一个锁
     size_t _stripe_mask;  // 
 
     // 上锁函数: 根据给定的 桶 index, 定位到唯一的 条带锁 以上锁
