@@ -405,11 +405,9 @@ public:
 
         // 对于每个 bucket, 作为哈希冲突的 node 的链表头, 循环以显式析构所有node(如果需要)
         for (size_t i = 0; i < _capacity; i++) {
-
-            // std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(bucket_lock(i));
-
             HashTableNode* curr = _table[i];
             while (curr) {
+                if (!curr) continue;
                 HashTableNode* next = curr->next;
                 destroy_node(curr);
                 curr = next;
