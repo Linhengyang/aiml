@@ -440,8 +440,7 @@ public:
                 destroy_node(curr);
                 curr = next;
             }
-
-            _table[i] = nullptr;
+            // _table[i] = nullptr;
         }
 
         _size.store(0, std::memory_order_relaxed);

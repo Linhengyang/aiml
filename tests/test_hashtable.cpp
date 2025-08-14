@@ -11,14 +11,6 @@ struct hasher {
     }
 };
 
-// constexpr size_t next_pow2(size_t x) {
-//     if (x <= 1) return 1;
-//     --x; x |= x >> 1; x |= x >> 2; x |= x >> 4; x |= x >> 8; x |= x >> 16;
-// #if SIZE_MAX > 0xFFFFFFFFu
-//     x |= x >> 32;
-// #endif
-//     return x + 1;
-// };
 
 int main() {
 
@@ -31,6 +23,13 @@ int main() {
 
     // 创建 线程安全的 哈希表
     hash_table_mt_chain<uint32_t, uint64_t, singleton_mempool, hasher> hashtable(my_hasher, 5e8, &pool);
+
+    // 插入 node
+    hashtable.insert(1, 4);
+
+    // get node
+    uint64_t v = 0;
+    std::cout << "get key = 1 " << hashtable.get(2, v) << " where val = " << v << std::endl;
 
     // 手动销毁 哈希表
     hashtable.destroy();
