@@ -500,10 +500,6 @@ public:
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node),
-            // 延迟构造, 在const_iterator构造函数初始化列表里传入 _table_mutex 调用shared_lock的构造函数-->此时完成加表锁
-            _table_lock(_hash_table->_table_mutex),
-            // vector.data() --> 传入 桶锁vector 地址. 构造时不需要上桶锁
-            _stripes( _hash_table->_stripes.data() )
         {
             _null_node_advance_to_next_valid_bucket(); // 在内部, 目标桶加桶锁
         }
@@ -516,8 +512,6 @@ public:
         // 迭代器对象前置++
         const_iterator& operator++() {
             if (_node) {
-                /* 桶内链表上移动, 应该锁住这个桶. 持续到 node 移动结束 */
-                std::shared_lock<std::shared_mutex> _lock_bucket_(_bucket_mutexs[_bucket_index].lock);
                 _node = _node->next;
             }
 
@@ -558,20 +552,23 @@ public:
         // 这种是 定义一个 _table_lock变量, 类型为shared_lock<shared_mutex>, 并传入 _table_mutex 即刻构造-->完成加锁
         // std::shared_lock<std::shared_mutex> _table_lock; 只是声明了一个 类型为shared_lock<shared_mutex>的_table_lock变量
         // 会在const_iterator构造函数初始化列表里传入 _table_mutex 调用shared_lock的构造函数-->届时才加锁, 所以本质是延迟构造加锁
-        std::shared_lock<std::shared_mutex> _table_lock;
+        // std::shared_lock<std::shared_mutex> _table_lock;
         
         // 因为迭代器内部, _bucket_index 是在变化的, 故所有桶锁要一并传进来, 然后在迭代器内部根据_bucket_index加锁
         // 哈希表的 桶锁 vector 地址. 不希望迭代器改变它. 但是 加const 修饰会导致编译不通过
-        padded_mutex* _bucket_mutexs;
+        // padded_mutex* _bucket_mutexs;
+
+        // 迭代器内部不加锁逻辑。锁在迭代器外部调用
 
         void _null_node_advance_to_next_valid_bucket() {
             // null node 跳转到下一个 valid bucket head node. _bucket_index 和 _node 都是线程局部的, 所以它们都安全
             // _node 在跳转的时候, 应该有目标桶锁, 以限制该桶有insert/remove操作
             while (!_node && _bucket_index < _hash_table->_capacity) {
-                /* 加 _bucket_index 桶锁, 持续到本循环退出 */
-                std::shared_lock<std::shared_mutex> _lock_bucket_(bucket_lock(_bucket_index));
+
                 _node = (_hash_table->_table)[_bucket_index];
+
                 if (_node) break;
+
                 _bucket_index++;
             }
         }
@@ -600,9 +597,6 @@ public:
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node),
-            // 延迟构造, 在iterator构造函数初始化列表里传入 _table_mutex 调用unique_lock的构造函数-->此时完成独占表锁加锁
-            // 独占表锁之后, 迭代器禁止其余线程作任何其他操作
-            _table_lock(_hash_table->_table_mutex)
         {
             _null_node_advance_to_next_valid_bucket();
         }
@@ -652,7 +646,7 @@ public:
 
         // 延迟构造
         // 会在iterator构造函数初始化列表里传入 _table_mutex 调用unique_lock的构造函数-->届时才加锁, 所以本质是延迟构造加锁
-        std::unique_lock<std::shared_mutex> _table_lock;
+        // std::unique_lock<std::shared_mutex> _table_lock;
 
         void _null_node_advance_to_next_valid_bucket() {
             while (!_node && _bucket_index < _hash_table->_capacity) {

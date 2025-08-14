@@ -397,11 +397,14 @@ public:
         * 行为: begin(this哈希表指针, 0, nullptr)初始化下, 成功自定位到first valid bucket状态
         *       end(this哈希表指针, _capacity, nullptr)下成功定位到 ++ 操作符的临界退出点
         */
+        // for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
+        // for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
         iterator(hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table), _bucket_index(bucket_index), _node(node) {
-                // for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
-                // for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
-                _null_node_advance_to_next_valid_bucket();
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
         }
 
         // 对迭代器的解引用 *it --> 返回 k-v pair. 注意在外面不能引用接收, 即 pair& p = *it 是非法的
