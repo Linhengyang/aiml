@@ -22,14 +22,26 @@ int main() {
     hasher my_hasher;
 
     // 创建 线程安全的 哈希表
-    hash_table_mt_chain<uint32_t, uint64_t, singleton_mempool, hasher> hashtable(my_hasher, 5e8, &pool);
+    hash_table_mt_chain<uint32_t, uint64_t, singleton_mempool, hasher> hashtable(my_hasher, 1, &pool);
 
     // 插入 node
     hashtable.insert(1, 4);
 
     // get node
     uint64_t v = 0;
-    std::cout << "get key = 1 " << hashtable.get(2, v) << " where val = " << v << std::endl;
+    std::cout << "get key = 0 " << hashtable.get(2, v) << " where val = " << v << std::endl;
+
+    // 插入 node, 触发rehash
+    hashtable.insert(2, 5);
+
+    // 输出size
+    std::cout << hashtable.size() << std::endl;
+
+    // clear 哈希表
+    hashtable.clear();
+
+    // 输出size
+    std::cout << hashtable.size() << std::endl;
 
     // 手动销毁 哈希表
     hashtable.destroy();
