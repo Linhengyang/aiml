@@ -243,16 +243,21 @@ public:
     // 哈希表的"清空"：原数据全部析构, 不再可访问, 但其分配的内存不会在这里被销毁. 保持 bucket 结构
     // 由于保持了 bucket 结构 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
     void clear() {
+        if (_capacity == 0 || !_table) {
+            _size.store(0, std::memory_order_relaxed);
+            return;
+        }
+        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+            // 对于每个 bucket, 作为哈希冲突的 node 的链表头, 循环以显式析构所有node(如果需要)
+            for (size_t i = 0; i < _capacity; i++) {
 
-        // 对于每个 bucket, 作为哈希冲突的 node 的链表头, 循环以显式析构所有node(如果需要)
-        for (size_t i = 0; i < _capacity; i++) {
-
-            HashTableNode* curr = _table[i];
-            if (!curr) continue; // 空桶直接跳过
-            while (curr) {
-                HashTableNode* next = curr->next;
-                destroy_node(curr);
-                curr = next;
+                HashTableNode* curr = _table[i];
+                if (!curr) continue; // 空桶直接跳过
+                while (curr) {
+                    HashTableNode* next = curr->next;
+                    destroy_node(curr);
+                    curr = next;
+                }
             }
         }
         // _table 指针数组全部置空
