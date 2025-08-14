@@ -248,6 +248,7 @@ public:
         for (size_t i = 0; i < _capacity; i++) {
 
             HashTableNode* curr = _table[i];
+            if (!curr) continue; // 空桶直接跳过
             while (curr) {
                 HashTableNode* next = curr->next;
                 destroy_node(curr);
