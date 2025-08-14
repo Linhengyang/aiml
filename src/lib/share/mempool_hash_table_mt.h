@@ -183,7 +183,7 @@ private:
                 ++actual_node_count; // 每搬迁一个node就计数
             }
             // 旧_table会被舍弃
-            _table[i] = nullptr;
+            // _table[i] = nullptr;
         }
 
         // 所有bucket所有node重新挂载完毕后, 旧指针数组释放置空后，切换 _table/_bucket_mutexs/_capacity/_size
