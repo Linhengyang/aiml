@@ -153,7 +153,7 @@ private:
         }
 
         // 初始化 新的 条带锁序列（粗粒度桶锁），长度不变仍然是 next_pow2(stripe_hint) = _stripe_mask + 1
-        mutable std::vector<padded_mutex> _new_stripes(_stripe_mask+1);
+        std::vector<padded_mutex> _new_stripes(_stripe_mask+1);
 
         // 目前 size 是只增的, 且rehash 一定是扩容. 但为了逻辑闭环, 以及支持未来可能有缩容的rehash, 应该重新统计 node 总个数
         size_t actual_node_count = 0; // 独占表锁下, 此变量线程安全
@@ -499,7 +499,7 @@ public:
         const_iterator(const hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
-            _node(node),
+            _node(node)
         {
             _null_node_advance_to_next_valid_bucket(); // 在内部, 目标桶加桶锁
         }
@@ -596,7 +596,7 @@ public:
         iterator(hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
-            _node(node),
+            _node(node)
         {
             _null_node_advance_to_next_valid_bucket();
         }
