@@ -7,6 +7,9 @@
 #include <vector>
 #include <functional>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <new>
 #include <type_traits>
 #include <shared_mutex>
 #include <mutex>
@@ -41,8 +44,8 @@ struct padded_mutex {
 
     padded_mutex(const padded_mutex&) = delete; // 禁止拷贝
     padded_mutex& operator=(const padded_mutex&) = delete; // 禁止赋值
-    padded_mutex(padded_mutex&&) = default;
-    padded_mutex& operator=(padded_mutex&&) = default;
+    padded_mutex(padded_mutex&&) = delete; // 禁止移动. shared_mutex 不可移动
+    padded_mutex& operator=(padded_mutex&&) = delete;
 };
 
 
@@ -153,7 +156,7 @@ private:
         }
 
         // 初始化 新的 条带锁序列（粗粒度桶锁），长度不变仍然是 next_pow2(stripe_hint) = _stripe_mask + 1
-        std::vector<padded_mutex> _new_stripes(_stripe_mask+1);
+        // std::vector<padded_mutex> _new_stripes(_stripe_mask+1);
 
         // 目前 size 是只增的, 且rehash 一定是扩容. 但为了逻辑闭环, 以及支持未来可能有缩容的rehash, 应该重新统计 node 总个数
         size_t actual_node_count = 0; // 独占表锁下, 此变量线程安全
@@ -162,7 +165,7 @@ private:
 
             // 搬迁当前 bucket 时, 也独占该bucket桶锁. 作用到本i次 for-loop 结束. 在加表锁的前提下，桶锁是多余的
             // std::unique_lock<std::shared_mutex> _lock_bucket_for_rehash_(_bucket_mutexs[i].lock);
-            std::unique_lock<std::shared_mutex> _lock_(bucket_lock(i)); // 在加表锁的前提下，桶锁是多余的. 未来测试去除
+            // std::unique_lock<std::shared_mutex> _lock_(bucket_lock(i)); // 在加表锁的前提下，桶锁是多余的. 未来测试去除
 
             HashTableNode* current = _table[i]; // 从该bucekt的链表头开始
             while (current) { // 当前node非空
@@ -172,7 +175,7 @@ private:
                 {
                     // 新的条带锁 对应 锁：上写锁. 由于 表锁的作用，rehash应该只有一个线程可以执行, 故新表 _new_table 是线程安全的
                     // 这里可能新桶锁也是不需要的. 未来测试去除
-                    std::unique_lock<std::shared_mutex> _new_lock_(_new_stripes[new_index & _stripe_mask]);
+                    // std::unique_lock<std::shared_mutex> _new_lock_(_new_stripes[new_index & _stripe_mask].lock);
                     current->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                     _new_table[new_index] = current; // 更新确认新bucket的链表头
                 }
@@ -187,7 +190,7 @@ private:
         free_table_ptrs();
         _table = _new_table;
 
-        _stripes = std::move(_new_stripes);
+        // _stripes = std::move(_new_stripes);
         _capacity = new_capacity;
         _size.store(actual_node_count, std::memory_order_relaxed); // 独占表锁下, 只要变更值就可以了, 不需要考虑其他线程是否全局一致.
     }
