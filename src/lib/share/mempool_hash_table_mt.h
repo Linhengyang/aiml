@@ -150,48 +150,30 @@ private:
 
         // 初始化一个新的 table
         HashTableNode** _new_table = nullptr;
-        {
-            // 可能抛异常
-            _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
-            if (!_new_table) throw std::bad_alloc();
-        }
-
-        // 初始化 新的 条带锁序列（粗粒度桶锁），长度不变仍然是 next_pow2(stripe_hint) = _stripe_mask + 1
-        // std::vector<padded_mutex> _new_stripes(_stripe_mask+1);
+        // 可能抛异常
+        _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
+        if (!_new_table) throw std::bad_alloc();
 
         // 目前 size 是只增的, 且rehash 一定是扩容. 但为了逻辑闭环, 以及支持未来可能有缩容的rehash, 应该重新统计 node 总个数
         size_t actual_node_count = 0; // 独占表锁下, 此变量线程安全
 
         for (size_t i = 0; i < _capacity; i++) {
 
-            // 搬迁当前 bucket 时, 也独占该bucket桶锁. 作用到本i次 for-loop 结束. 在加表锁的前提下，桶锁是多余的
-            // std::unique_lock<std::shared_mutex> _lock_bucket_for_rehash_(_bucket_mutexs[i].lock);
-            // std::unique_lock<std::shared_mutex> _lock_(bucket_lock(i)); // 在加表锁的前提下，桶锁是多余的. 未来测试去除
-
-            HashTableNode* current = _table[i]; // 从该bucekt的链表头开始
-            while (current) { // 当前node非空
-                HashTableNode* next = current->next; // 先取出next node
-                size_t new_index = hash(current->key) % new_capacity; // 计算得出新bucket
-                // 挂载 current node 到新table的新bucket.
-                {
-                    // 新的条带锁 对应 锁：上写锁. 由于 表锁的作用，rehash应该只有一个线程可以执行, 故新表 _new_table 是线程安全的
-                    // 这里可能新桶锁也是不需要的. 未来测试去除
-                    // std::unique_lock<std::shared_mutex> _new_lock_(_new_stripes[new_index & _stripe_mask].lock);
-                    current->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
-                    _new_table[new_index] = current; // 更新确认新bucket的链表头
-                }
-                current = next; // 遍历下一个node
-                ++actual_node_count; // 每搬迁一个node就计数
+            HashTableNode* current = _table[i];
+            while (current) {
+                HashTableNode* next = current->next;
+                size_t new_index = hash(current->key) % new_capacity;
+                current->next = _new_table[new_index];
+                _new_table[new_index] = current;
+                current = next;
+                ++actual_node_count;
             }
-            // 旧_table会被舍弃
-            // _table[i] = nullptr;
         }
 
         // 所有bucket所有node重新挂载完毕后, 旧指针数组释放置空后，切换 _table/_bucket_mutexs/_capacity/_size
         free_table_ptrs();
         _table = _new_table;
 
-        // _stripes = std::move(_new_stripes);
         _capacity = new_capacity;
         _size.store(actual_node_count, std::memory_order_relaxed); // 独占表锁下, 只要变更值就可以了, 不需要考虑其他线程是否全局一致.
     }
@@ -208,7 +190,6 @@ public:
         _stripe_mask(next_pow2(stripe_hint)-1),
         _stripes(next_pow2(stripe_hint)) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
     {
-        // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         alloc_table_ptrs(_capacity); // calloc 零初始化
 
     }
@@ -221,7 +202,6 @@ public:
         _stripe_mask(next_pow2(stripe_hint)-1),
         _stripes(next_pow2(stripe_hint)) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
     {
-        // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         alloc_table_ptrs(_capacity); // calloc 零初始化
     }
 
