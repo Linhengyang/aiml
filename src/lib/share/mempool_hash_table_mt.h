@@ -205,7 +205,7 @@ public:
         _pool(pool),
         // 桶锁 vector 的 resize 会导致编译不通过. 不要用 _bucket_mutexs.resize(_capacity) 初始化
         _stripe_mask(next_pow2(stripe_hint)-1),
-        _stripes(_stripe_mask+1) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
+        _stripes(next_pow2(stripe_hint)) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
     {
         // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         alloc_table_ptrs(_capacity); // calloc 零初始化
@@ -218,7 +218,7 @@ public:
         _capacity(capacity),
         _pool(pool),
         _stripe_mask(next_pow2(stripe_hint)-1),
-        _stripes(_stripe_mask+1) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
+        _stripes(next_pow2(stripe_hint)) // 延迟初始化 桶锁 vector, 构建少量(少于_capacity)
     {
         // _table.resize(_capacity, nullptr); // 长度为 _capacity 的 HashTableNode* vector, 全部初始化为nullptr
         alloc_table_ptrs(_capacity); // calloc 零初始化
@@ -406,8 +406,7 @@ public:
         // 对于每个 bucket, 作为哈希冲突的 node 的链表头, 循环以显式析构所有node(如果需要)
         for (size_t i = 0; i < _capacity; i++) {
 
-            // 析构本bucket上的nodes, 以及要置空本bucket时, 独占 桶锁. 作用到本i次for-loop结束
-            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(bucket_lock(i));
+            // std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(bucket_lock(i));
 
             HashTableNode* curr = _table[i];
             while (curr) {
@@ -433,7 +432,7 @@ public:
 
         for (size_t i = 0; i < _capacity; i++) {
 
-            std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(bucket_lock(i));
+            // std::unique_lock<std::shared_mutex> _lock_bucket_for_clear_(bucket_lock(i));
 
             HashTableNode* curr = _table[i];
             while (curr) {
