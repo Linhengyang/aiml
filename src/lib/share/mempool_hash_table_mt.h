@@ -51,6 +51,11 @@ struct padded_mutex {
 
 
 
+// 哈希表的本质就是管理 _capacity 个 链表，其中链表的node是 hashtablenode
+// 低效做法：初始化时，就初始化好 _capacity 个空链表, 插入node时是一个一个插入
+// clear表时 遍历_capacity个链表，并对每个链表逐node析构，置空所有链表头; destroy表就是clear的基础上再释放链表数组
+// 高效做法：初始化时，就初始化一个 _occupied_bucket_indices 空数组，用以存储 0至_capacity 的index以指明哪些链表被插入node非空。
+// node除了插入bucket链表，还插入一个gc链，clear时直接沿着这条gc链析构就行，然后根据_occupied置空相应链表头
 
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
 class hash_table_mt_chain {
@@ -61,6 +66,7 @@ private:
         TYPE_K key;
         TYPE_V value;
         HashTableNode* next;
+        HashTableNode* gc_next = nullptr;
         HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
     };
 
@@ -78,6 +84,7 @@ private:
 
     HashTableNode** _table = nullptr;
 
+    // 分配容量为 n 的节点指针数组 到数组头 _table
     void alloc_table_ptrs(size_t n) {
         if (n == 0) {
             _table = nullptr;
@@ -87,10 +94,17 @@ private:
         if (!_table) throw std::bad_alloc();
     }
 
+    // 释放节点指针数组，相当于 vector.clear(). 但节点内存并没有释放，由mempool管理
     void free_table_ptrs() noexcept {
         std::free(_table);
         _table = nullptr;
     }
+
+    // gc 链表: 链起所有node
+    std::atomic<HashTableNode*> _all_nodes_head{nullptr};
+
+    // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index用uint32_t就够了，因为它可代表42亿大的hashtable
+    std::vector<uint32_t> _occupied_indices;
 
     TYPE_MEMPOOL* _pool;
 
@@ -114,31 +128,48 @@ private:
     void rehash(size_t new_capacity) {
         // rehash 的调用在 insert 里，调用前会加 独占表锁, 故这里不再加独占表锁避免死锁
 
-        HashTableNode** _new_table = nullptr;
-        _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
+        HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
         if (!_new_table) throw std::bad_alloc();
+        
+        // 新的非空桶列表
+        std::vector<uint32_t> _new_occupied_indices;
+        _new_occupied_indices.reserve(_occupied_indices.size());
 
-        // 目前 size 是只增的, 且rehash 一定是扩容. 但为了逻辑闭环, 以及支持未来可能有缩容的rehash, 应该重新统计 node 总个数
+        // 新的gc链表
+        HashTableNode* _new_all_nodes_head = nullptr;
+
         size_t actual_node_count = 0;
 
-        for (size_t i = 0; i < _capacity; i++) {
+        // 遍历非空桶
+        for (uint32_t old_index: _occupied_indices) {
 
-            HashTableNode* current = _table[i];
-            while (current) {
-                HashTableNode* next = current->next;
-                size_t new_index = hash(current->key) % new_capacity;
-                current->next = _new_table[new_index];
-                _new_table[new_index] = current;
-                current = next;
+            HashTableNode* curr = _table[old_index];
+            while (curr) {
+                HashTableNode* next = curr->next;
+                size_t new_index = hash(curr->key) % new_capacity;
+                const bool was_empty = (_new_table[new_index] == nullptr);
+                // 头插到新桶
+                curr->next = _new_table[new_index];
+                _new_table[new_index] = curr;
+                // 若空桶->非空, 记录
+                if (was_empty) _new_occupied_indices.push_back(static_cast<uint32_t>(new_index));
+                // 头插到新的gc链表
+                curr->gc_next = _new_all_nodes_head;
+                _new_all_nodes_head = curr;
+                // 更新计数
                 ++actual_node_count;
+
+                curr = next;
             }
         }
 
-        free_table_ptrs();
+        // 切换
+        std::free(_table);
         _table = _new_table;
-
         _capacity = new_capacity;
         _size.store(actual_node_count, std::memory_order_relaxed);
+        _occupied_indices.swap(_new_occupied_indices);
+        _all_nodes_head.store(_new_all_nodes_head, std::memory_order_relaxed);
     }
 
 
@@ -184,17 +215,16 @@ public:
                 return true;
             }
         }
-
         return false;
     }
 
     bool insert(const TYPE_K& key, const TYPE_V& value) {
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
-
         if (_capacity == 0 || !_table) return false;
 
         size_t index = hash(key) % _capacity;
         {
+            // 桶操作：上条带桶锁
             std::unique_lock<std::shared_mutex> _lock_from_insert_read_(bucket_lock(index));
             for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
                 if (cur->key == key) {
@@ -202,13 +232,21 @@ public:
                     return true;
                 }
             }
-
+            const bool was_empty = (_table[index] == nullptr);
             void* raw_mem = _pool->allocate(sizeof(HashTableNode));
             if (!raw_mem) return false;
 
             HashTableNode* new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
             _table[index] = new_node;
-            
+            // 新的 node 要线程安全地插入gc链
+            HashTableNode* old = _all_nodes_head.load(std::memory_order_relaxed);
+            do {
+                new_node->gc_next = old; // 头插 gc 链
+            } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
+
+            // 如果 空 -> 非空, 那么记录桶号(桶锁下天然防重)
+            if (was_empty) _occupied_indices.push_back(static_cast<uint32_t>(index));
+
             // node数量自加1. 原子线程安全
             // std::memory_order_relaxed 就可以保证原子安全. 但未来若需要在某些线程里仅靠_size来判断是否有数据写入, 这个模式不安全.
             // 这个模式下, 其他线程不一定能看到 自增后的 _size. 可以用 _size.fetch_add(1) 默认模式, 最严格, 保证全局一致.
@@ -240,47 +278,44 @@ public:
 
     template <typename Func>
     bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
-
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
-
         if (_capacity == 0 || !_table) return false;
 
         size_t index = hash(key) % _capacity;
-
         {
             std::unique_lock<std::shared_mutex> _lock_from_insert_read_(bucket_lock(index));
-
             for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
                 if (cur->key == key) {
                     std::forward<Func>(updater)(cur->value);
                     return true;
                 }
             }
-
+            const bool was_empty = (_table[index] == nullptr);
             void* raw_mem = _pool->allocate(sizeof(HashTableNode));
             if (!raw_mem) return false;
 
             HashTableNode* new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
-
             _table[index] = new_node;
 
+            // 新的 node 要线程安全地插入gc链
+            HashTableNode* old = _all_nodes_head.load(std::memory_order_relaxed);
+            do {
+                new_node->gc_next = old; // 头插 gc 链
+            } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
+            // 如果 空 -> 非空, 那么记录桶号(桶锁下天然防重)
+            if (was_empty) _occupied_indices.push_back(static_cast<uint32_t>(index));
             _size.fetch_add(1);
         }
-
         _lock_from_rehash_clear_.unlock();
-
         bool expected = false;
 
         if (_size >= _capacity*_max_load_factor && _rehashing.compare_exchange_strong(expected, true)) {
-
             std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
-
             if (_size >= _capacity*_max_load_factor) {
                 rehash( _capacity*2 );
             }
             _rehashing.store(false);
         }
-
         return true;
     }
 
@@ -288,41 +323,54 @@ public:
         std::unique_lock<std::shared_mutex> _lock_table_for_clear_(_table_mutex);
         if (_capacity == 0 || !_table) {
             _size.store(0, std::memory_order_relaxed);
+            _occupied_indices.clear();
+            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
             return;
         }
 
         if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
-            for (size_t i = 0; i < _capacity; i++) {
-                HashTableNode* curr = _table[i];
-                while (curr) {
-                    if (!curr) continue;
-                    HashTableNode* next = curr->next;
-                    destroy_node(curr);
-                    curr = next;
-                }
+            HashTableNode* curr = _all_nodes_head.exchange(nullptr, std::memory_order_acquire);
+            while (curr) {
+                HashTableNode* next = curr->gc_next;
+                destroy_node(curr);
+                curr = next;
             }
+        } else {
+            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
         }
-        std::memset(_table, 0, _capacity * sizeof(HashTableNode*));
+
+        for (uint32_t index: _occupied_indices) {
+            _table[index] = nullptr;
+        }
+
+        _occupied_indices.clear();
         _size.store(0, std::memory_order_relaxed);
 
     }
 
     void destroy() {
         std::unique_lock<std::shared_mutex> _lock_table_for_clear_(_table_mutex);
+        if (_capacity == 0 || !_table) {
+            _size.store(0, std::memory_order_relaxed);
+            _occupied_indices.clear();
+            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
+            return;
+        }
 
-        for (size_t i = 0; i < _capacity; i++) {
-            HashTableNode* curr = _table[i];
+        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+            HashTableNode* curr = _all_nodes_head.exchange(nullptr, std::memory_order_acquire);
             while (curr) {
-                HashTableNode* next = curr->next;
+                HashTableNode* next = curr->gc_next;
                 destroy_node(curr);
                 curr = next;
             }
+        } else {
+            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
         }
-
-        _size.store(0, std::memory_order_relaxed);
-
         free_table_ptrs();
 
+        _occupied_indices.clear();
+        _size.store(0, std::memory_order_relaxed);
         _capacity = 0;
     }
 
