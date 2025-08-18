@@ -127,4 +127,83 @@ public:
 
 
 
+
+// unsafe_singleton_mempool 线程不安全、不带锁的 单例模式内存池：单线程使用
+
+
+
+
+class unsafe_singleton_mempool {
+
+private:
+
+    explicit unsafe_singleton_mempool(size_t block_size = 1048576, size_t alignment = 64);
+
+    ~unsafe_singleton_mempool();
+
+    const size_t _block_size;
+
+    const size_t _alignment;
+
+    std::vector<block*> _blocks;
+
+    std::vector<void*> _large_allocs;
+
+    block* _current_block = nullptr;
+
+    // 单例模式: 静态成员是保证该类只能有一个实现，在类层面定义. 静态成员变量必须要在类外定义, 类内只是申明
+
+    struct Deleter {
+        void operator()(unsafe_singleton_mempool* ptr) const {
+            delete ptr;
+        }
+    };
+
+    friend struct Deleter;
+
+    static std::unique_ptr<unsafe_singleton_mempool, Deleter> _instance;
+
+    unsafe_singleton_mempool(const unsafe_singleton_mempool&) = delete;
+    unsafe_singleton_mempool& operator=(const unsafe_singleton_mempool&) = delete;
+
+
+public:
+
+    static unsafe_singleton_mempool& get(size_t block_size, size_t alignment) {
+        if (!_instance) {
+            _instance.reset(new unsafe_singleton_mempool(block_size, alignment));
+        }
+        return *_instance;
+    }
+
+    static unsafe_singleton_mempool& get() {
+        if(!_instance) {
+            throw std::runtime_error("unsafe_singleton_mempool not created");
+        }
+        return *_instance;
+    }
+
+    static bool exist() {
+        return _instance != nullptr;
+    }
+
+    static void destroy() {
+        _instance.reset();
+    }
+
+    void* allocate(size_t size);
+
+    void dealloc_large(void* ptr);
+
+    void shrink(size_t max_num = 1);
+
+    void reset();
+
+    void release() ;
+
+}; // end of unsafe_singleton_mempool
+
+
+
+
 #endif

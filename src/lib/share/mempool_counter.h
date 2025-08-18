@@ -73,7 +73,8 @@ public:
         // atomic_upsert 内部: 
         //      std::forward<Func>(updater)(node->value); // 用forward 完美转发 updater
         // 内部 node->value 被 lambda 函数引用, 并修改值.
-        _hash_table.atomic_upsert(key, [](auto& value) { value += 1;}, 1);
+        // 这里 编译器可以从实参自动推导 Func 类型（隐式实例化），所以不需要手动模板化 atomic_upsert<...>
+        _hash_table.atomic_upsert(key, [](uint64_t& value) { value += 1;}, 1);
     }
 
     // 暴露哈希表的clear方法. 析构哈希表, 但不release/reset哈希表所占的内存池空间, 同时表结构也不会变化

@@ -8,7 +8,7 @@
 
 extern "C" {
 
-void merge_pair_core_parallel(
+void merge_pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,

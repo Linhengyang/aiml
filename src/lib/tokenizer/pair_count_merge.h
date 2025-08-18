@@ -10,23 +10,67 @@
 #include "mempool_hash_table_mt.h"
 #include "mempool_hash_table_st.h"
 
-using counter_key_type = std::pair<uint16_t, uint16_t>;
+// // 定义 counter_key_type
+// using counter_key_type = std::pair<uint16_t, uint16_t>;
 
-// 这里 counter_hasher 是一个函数类
-struct hasher_type {
-    size_t operator()(const counter_key_type& pair) const {
-        return (static_cast<size_t>(pair.first) << 16) | pair.second;
+// // 定义从一般输入 到 counter_key_type 的 构造. 这里可以直接使用 counter_key_type
+// struct key_maker {
+//     counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
+//         return counter_key_type(L, R);
+//     }
+// };
+
+// // 定义哈希 counter_key 的哈希器. 这里 counter_hasher 是一个函数类, 通过实例化得到哈希器 hasher hasher;
+// struct hasher {
+//     size_t operator()(const counter_key_type& pair) const {
+//         return (static_cast<size_t>(pair.first << 16) | pair.second);
+//     }
+// };
+
+
+
+
+
+// 实际上 first<<16|second 与 (first,second)是双射:
+// uint32_t combo = pair.first << 16 | pair.second; // 这个赋值计算合法
+// 在后续 size_t index = combo % _capacity; 也是合法的, 会自动作类型提升
+// 逆反射：uint16_t a = combo >> 16; uint16_t b = combo & 0xFFFF; // 这个赋值计算合法
+
+// 不用pair of uint16_t，用 uint32_t，是因为 uint32_t 作为 key，可以满足排序计数。性能方面差别不大。 
+
+
+
+// 定义 counter_key_type
+using counter_key_type = uint32_t;
+
+// 定义从一般输入 到 counter_key_type 的 构造器
+struct key_maker {
+    counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
+        return L << 16 | R;
     }
 };
 
-using counter_st = counter<counter_key_type, false, singleton_mempool, hasher_type>;
-using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher_type>;
+// 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+struct hasher {
+    uint32_t operator()(const counter_key_type& key) const {
+        return key;
+    }
+};
+
+
+
+
+
+using counter_st = counter<counter_key_type, false, unsafe_singleton_mempool, hasher>;
+
+// 实测 多线程并发写同一个全局哈希表，速度非常慢。故去掉 多线程计数器。真正的多线程写法是分数据段+线程独立资源+合并统计。
+using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher>;
 
 
 // 全局对象在 .SO 被python导入后就存在主进程，python解释器没结束, 全局对象就一直存在且复用
 // 所以全局指针 delete 清空之后必须 置空set to nullptr, 不然就成了悬垂指针.
 // // 声明全局变量
-// extern hasher_type pair_hasher; // 全局使用的哈希器
+// extern hasher pair_hasher; // 全局使用的哈希器
 // extern counter_st* global_counter_st;
 // extern counter_mt* global_counter_mt;
 
@@ -43,7 +87,7 @@ extern "C" {
 
 
 // 进程内初始化（只做一次即可，允许重复调用作“已初始化”检查）
-void init_process(size_t block_size, size_t alignment, size_t capacity, int num_threads);
+void init_process(size_t block_size, size_t alignment, size_t capacity);
 
 
 // 重置进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
@@ -54,21 +98,12 @@ void reset_process();
 void release_process();
 
 
-void count_pair_core_multi_thread(
-    counter_mt& counter,
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len,
-    const int num_threads
-);
-
-
-void count_pair_core_single_thread(
-    counter_st& counter,
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len
-);
+// void count_pair_core(
+//     counter_st& counter,
+//     const uint16_t* L_tokens,
+//     const uint16_t* R_tokens,
+//     const int64_t len
+// );
 
 
 // 结构体，用于封装count_pair_batch函数返回的多个data指针, 和(L,R) pair-freq 总数
@@ -80,15 +115,14 @@ struct L_R_token_counts_ptrs {
 };
 
 
-L_R_token_counts_ptrs c_count_pair_batch(
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len,
-    const int num_threads
-);
+// L_R_token_counts_ptrs c_count_pair_batch(
+//     const uint16_t* L_tokens,
+//     const uint16_t* R_tokens,
+//     const int64_t len
+// );
 
 
-void merge_pair_core_parallel(
+void merge_pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,

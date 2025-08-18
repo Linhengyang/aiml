@@ -1,7 +1,7 @@
 -std=c++17
-test_mempool.cpp
+test_hashtable.cpp
 ../src/lib/share/memory_pool_singleton.cpp
 ../src/lib/share/memory_block.cpp
 -I../src/lib/share
 -o
-.cpptest_cache/testmempool.exe
+.cpptest_cache/testhashtable.exe

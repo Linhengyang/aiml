@@ -225,3 +225,164 @@ void singleton_mempool::shrink(size_t max_num) {
         }
     }
 }
+
+
+
+
+// unsafe_singleton_mempool 线程不安全、不带锁的 单例模式内存池：单线程使用
+
+
+
+std::unique_ptr<unsafe_singleton_mempool, unsafe_singleton_mempool::Deleter> unsafe_singleton_mempool::_instance = nullptr;
+
+
+unsafe_singleton_mempool::unsafe_singleton_mempool(size_t block_size, size_t alignment):
+    _block_size(block_size),
+    _blocks(std::vector<block*>()),
+    _large_allocs(std::vector<void*>()),
+    _alignment(alignment)
+{
+
+    if ((alignment & (alignment - 1)) != 0 || alignment == 0) {
+        throw std::invalid_argument("alignment must be a power of 2.");
+    }
+
+    if (block_size == 0) {
+        throw std::invalid_argument("block_size must be > 0");
+    }
+
+}
+
+
+unsafe_singleton_mempool::~unsafe_singleton_mempool() {
+    release();
+}
+
+
+void unsafe_singleton_mempool::release() {
+
+    for(auto block: _blocks) {
+        delete block;
+    }
+
+    _blocks.clear();
+
+    for(auto ptr: _large_allocs) {
+        std::free(ptr);
+    }
+
+    _large_allocs.clear();
+
+    _current_block = nullptr;
+
+}
+
+
+void* unsafe_singleton_mempool::allocate(size_t size) {
+
+    if(size == 0) {return nullptr;}
+
+    size = (size + _alignment) & ~(_alignment-1);
+
+    if(size > _block_size) {
+        void* ptr = std::malloc(size);
+        if(!ptr) {
+            throw std::bad_alloc();
+        }
+        _large_allocs.push_back(ptr);
+
+        return ptr;
+    }
+
+
+    if (!_current_block || _current_block->get_remaining() < size) {
+
+        bool found = false;
+
+        for (auto block : _blocks) {
+            if (block->get_remaining() >= size) {
+                _current_block = block;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+
+            block* new_block = new block(_block_size, _alignment);
+
+            if(!new_block) {
+                throw std::bad_alloc();
+            }
+
+            _blocks.push_back(new_block);
+            _current_block = new_block;
+        }
+
+    }
+
+    return _current_block->allocate(size);
+}
+
+
+void unsafe_singleton_mempool::dealloc_large(void* ptr) {
+
+    auto it = std::find(_large_allocs.begin(), _large_allocs.end(), ptr);
+    if(it != _large_allocs.end()) {
+        std::free(ptr);
+        _large_allocs.erase(it);
+    }
+}
+
+
+void unsafe_singleton_mempool::reset() {
+
+    for(auto block: _blocks) {
+        block->reset();
+    }
+
+    if (!_blocks.empty()) {
+        _current_block = _blocks[0];
+    }
+    else {
+        _current_block = nullptr;
+    }
+
+    for(auto ptr: _large_allocs) {
+        std::free(ptr);
+    }
+
+    _large_allocs.clear();
+
+}
+
+
+void unsafe_singleton_mempool::shrink(size_t max_num) {
+
+    if(!_current_block) {
+        return;
+    }
+
+    std::vector<block*> _released_block = {};
+
+    for (auto block: _blocks) {
+
+        if (block != _current_block && block->get_offset() == 0) {
+
+            _released_block.push_back(block);
+
+            delete block;
+
+            if(_released_block.size() == max_num) {
+                break;
+            }
+        }
+    }
+
+    for (auto block: _released_block) {
+        auto it = std::find(_blocks.begin(), _blocks.end(), block);
+        if(it != _blocks.end()) {
+            _blocks.erase(it);
+        }
+    }
+}
