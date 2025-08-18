@@ -366,8 +366,8 @@ public:
         } else {
             _all_nodes_head.store(nullptr, std::memory_order_relaxed);
         }
+        
         free_table_ptrs();
-
         _occupied_indices.clear();
         _size.store(0, std::memory_order_relaxed);
         _capacity = 0;

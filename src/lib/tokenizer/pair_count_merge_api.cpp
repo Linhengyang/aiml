@@ -18,7 +18,7 @@
 namespace {
 
     counter_st* g_counter_st = nullptr;
-    counter_mt* g_counter_mt = nullptr; // 线程安全版本的略过
+    counter_mt* g_counter_mt = nullptr;
     
     std::atomic<bool> g_inited{false};
 
@@ -38,10 +38,9 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
     bool expected = false;
     if (g_inited.compare_exchange_strong(expected, true)) {
         // 初始化 单例内存池（进程内）/ 基于单例内存池的 可复用计数器
-        // unsafe_singleton_mempool::get(block_size, alignment);
-        // g_counter_st = new counter_st(pair_hasher, capacity, unsafe_singleton_mempool::get());
+        unsafe_singleton_mempool::get(block_size, alignment);
+        g_counter_st = new counter_st(pair_hasher, capacity, unsafe_singleton_mempool::get());
 
-        // 线程安全版本的略过
         singleton_mempool::get(block_size, alignment);
         g_counter_mt = new counter_mt(pair_hasher, capacity, singleton_mempool::get());
 
@@ -55,8 +54,8 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
 // 重置进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
 void reset_process() {
 
-    // if (g_counter_st) g_counter_st->clear();
-    if (g_counter_mt) g_counter_mt->clear(); // 线程安全版本的略过
+    if (g_counter_st) g_counter_st->clear();
+    if (g_counter_mt) g_counter_mt->clear();
     
     if (unsafe_singleton_mempool::exist()) {
         unsafe_singleton_mempool::get().shrink();
@@ -67,8 +66,6 @@ void reset_process() {
         singleton_mempool::get().shrink();
         singleton_mempool::get().reset();
     }
-
-    // if (g_counter_mt) g_counter_mt->clear(); // 线程安全版本的略过
 }
 
 
@@ -78,7 +75,6 @@ void release_process() {
     if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }
     if (unsafe_singleton_mempool::exist()) { unsafe_singleton_mempool::destroy(); }
 
-    // 线程安全版本的略过
     if (g_counter_mt) { delete g_counter_mt; g_counter_mt = nullptr; }
     if (singleton_mempool::exist()) { singleton_mempool::destroy(); } 
 
@@ -90,44 +86,44 @@ void release_process() {
 
 
 
-L_R_token_counts_ptrs c_count_pair_batch(
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len
-) {
-    try
-    {
-        // 不同的分支下, counter 是不同的类型, 所以没办法把 extract_result 部分统一到外部使用
-        count_pair_core(*g_counter_st, L_tokens, R_tokens, len);
+// L_R_token_counts_ptrs c_count_pair_batch(
+//     const uint16_t* L_tokens,
+//     const uint16_t* R_tokens,
+//     const int64_t len
+// ) {
+//     try
+//     {
+//         // 不同的分支下, counter 是不同的类型, 所以没办法把 extract_result 部分统一到外部使用
+//         count_pair_core(*g_counter_st, L_tokens, R_tokens, len);
 
-        // FOR MULTI-THREAD {
-        //     count_pair_core_multi_thread(*g_counter_mt, L_tokens, R_tokens, len, num_threads);
-        // }
+//         // FOR MULTI-THREAD {
+//         //     count_pair_core_multi_thread(*g_counter_mt, L_tokens, R_tokens, len, num_threads);
+//         // }
 
-        size_t size = g_counter_st->size();
+//         size_t size = g_counter_st->size();
 
-        uint16_t* L = static_cast<uint16_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint16_t)));
-        uint16_t* R = static_cast<uint16_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint16_t)));
-        uint64_t* counts = static_cast<uint64_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint64_t)));
+//         uint16_t* L = static_cast<uint16_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint16_t)));
+//         uint16_t* R = static_cast<uint16_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint16_t)));
+//         uint64_t* counts = static_cast<uint64_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint64_t)));
 
-        size_t i = 0;
-        for(auto it = g_counter_st->cbegin(); it != g_counter_st->cend(); ++it) {
-            auto [pair, freq] = *it;
-            // L[i] = pair.first;
-            // R[i] = pair.second;
-            L[i] = pair >> 16;
-            R[i] = pair & 0xFFFF;
-            counts[i] = freq;
-            ++i;
-        }
+//         size_t i = 0;
+//         for(auto it = g_counter_st->cbegin(); it != g_counter_st->cend(); ++it) {
+//             auto [pair, freq] = *it;
+//             // L[i] = pair.first;
+//             // R[i] = pair.second;
+//             L[i] = pair >> 16;
+//             R[i] = pair & 0xFFFF;
+//             counts[i] = freq;
+//             ++i;
+//         }
 
-        return L_R_token_counts_ptrs{L, R, counts, size};
-    }
-    catch(const std::exception& e)
-    {
-        throw std::runtime_error("Error in c_count_pair_batch");
-    }
-}
+//         return L_R_token_counts_ptrs{L, R, counts, size};
+//     }
+//     catch(const std::exception& e)
+//     {
+//         throw std::runtime_error("Error in c_count_pair_batch");
+//     }
+// }
 
 
 
