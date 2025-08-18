@@ -16,13 +16,13 @@ int main() {
 
     // 创建 内存池单例
     size_t block_size = 40LL * 172470436LL;
-    singleton_mempool& pool = singleton_mempool::get(block_size, 64);
+    unsafe_singleton_mempool& pool = unsafe_singleton_mempool::get(block_size, 64);
 
     // 创建 哈希器
     hasher my_hasher;
 
     // 创建 线程安全的 哈希表
-    hash_table_mt_chain<uint32_t, uint64_t, singleton_mempool, hasher> hashtable(my_hasher, 1, &pool);
+    hash_table_st_chain<uint32_t, uint64_t, unsafe_singleton_mempool, hasher> hashtable(my_hasher, 1, &pool);
 
     // 插入 node
     hashtable.insert(1, 4);
