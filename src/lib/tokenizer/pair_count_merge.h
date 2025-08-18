@@ -98,12 +98,12 @@ void reset_process();
 void release_process();
 
 
-void count_pair_core(
-    counter_st& counter,
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len
-);
+// void count_pair_core(
+//     counter_st& counter,
+//     const uint16_t* L_tokens,
+//     const uint16_t* R_tokens,
+//     const int64_t len
+// );
 
 
 // 结构体，用于封装count_pair_batch函数返回的多个data指针, 和(L,R) pair-freq 总数
@@ -115,11 +115,11 @@ struct L_R_token_counts_ptrs {
 };
 
 
-L_R_token_counts_ptrs c_count_pair_batch(
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len
-);
+// L_R_token_counts_ptrs c_count_pair_batch(
+//     const uint16_t* L_tokens,
+//     const uint16_t* R_tokens,
+//     const int64_t len
+// );
 
 
 void merge_pair_core(
