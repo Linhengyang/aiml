@@ -86,44 +86,46 @@ void release_process() {
 
 
 
-// L_R_token_counts_ptrs c_count_pair_batch(
-//     const uint16_t* L_tokens,
-//     const uint16_t* R_tokens,
-//     const int64_t len
-// ) {
-//     try
-//     {
-//         // 不同的分支下, counter 是不同的类型, 所以没办法把 extract_result 部分统一到外部使用
-//         count_pair_core(*g_counter_st, L_tokens, R_tokens, len);
+L_R_token_counts_ptrs c_count_pair_batch(
+    const uint16_t* L_tokens,
+    const uint16_t* R_tokens,
+    const int64_t len
+) {
+    try
+    {
+        auto& pool = unsafe_singleton_mempool::get();
+        // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
+        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(len*sizeof(uint32_t)));
+        for (int64_t i = 0; i < len; ++i) {
+            keys[i] == uint32_t(L_tokens[i] << 16 | R_tokens[i]);
+        }
 
-//         // FOR MULTI-THREAD {
-//         //     count_pair_core_multi_thread(*g_counter_mt, L_tokens, R_tokens, len, num_threads);
-//         // }
+        count_pair_core(
+            g_counter_st,
+            keys,
+            len
+        );
+        size_t size = g_counter_st->size();
+        uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
+        uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
+        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(size*sizeof(uint64_t)));
+        
+        size_t i = 0;
+        for (auto it = g_counter_st->cbegin(); it != g_counter_st->cend(); ++it) {
+            auto [pair, freq] = *it;
+            L_uniq[i] = pair >> 16;
+            R_uniq[i] = pair & 0xFFFF;
+            counts[i] = freq;
+            ++i;
+        }
 
-//         size_t size = g_counter_st->size();
-
-//         uint16_t* L = static_cast<uint16_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint16_t)));
-//         uint16_t* R = static_cast<uint16_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint16_t)));
-//         uint64_t* counts = static_cast<uint64_t*>(unsafe_singleton_mempool::get().allocate(size*sizeof(uint64_t)));
-
-//         size_t i = 0;
-//         for(auto it = g_counter_st->cbegin(); it != g_counter_st->cend(); ++it) {
-//             auto [pair, freq] = *it;
-//             // L[i] = pair.first;
-//             // R[i] = pair.second;
-//             L[i] = pair >> 16;
-//             R[i] = pair & 0xFFFF;
-//             counts[i] = freq;
-//             ++i;
-//         }
-
-//         return L_R_token_counts_ptrs{L, R, counts, size};
-//     }
-//     catch(const std::exception& e)
-//     {
-//         throw std::runtime_error("Error in c_count_pair_batch");
-//     }
-// }
+        return L_R_token_counts_ptrs{L_uniq, R_uniq, counts, size};
+    }
+    catch(const std::exception& e)
+    {
+        throw std::runtime_error("Error in c_count_pair_batch");
+    }
+}
 
 
 
