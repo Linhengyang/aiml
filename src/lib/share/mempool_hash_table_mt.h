@@ -183,7 +183,6 @@ public:
         _stripes(next_pow2(stripe_hint))
     {
         alloc_table_ptrs(_capacity);
-
     }
 
     explicit hash_table_mt_chain(size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
