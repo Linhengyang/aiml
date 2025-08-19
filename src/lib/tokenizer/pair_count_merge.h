@@ -101,11 +101,11 @@ void reset_process();
 void release_process();
 
 
-void count_pair_core(
-    counter_st* counter,
-    uint32_t* keys,
-    const int64_t len
-);
+// void count_pair_core(
+//     counter_st* counter,
+//     uint32_t* keys,
+//     const int64_t len
+// );
 
 
 // 结构体，用于封装count_pair_batch函数返回的多个data指针, 和(L,R) pair-freq 总数

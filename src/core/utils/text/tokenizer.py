@@ -1356,7 +1356,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         
         self._set_config(
             buffer_size = buffer_size,
-            fc_count_pair_batch = count_pair_batch,
+            fc_count_pair_batch = pair_count_merge.count_pair_batch,
             fc_merge_pair_batch = pair_count_merge.merge_pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train

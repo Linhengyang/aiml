@@ -37,12 +37,13 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
     // 只在子进程内调用: 允许多次调用，但只有第一次真正执行初始化，根据原子变量 g_inited 执行
     bool expected = false;
     if (g_inited.compare_exchange_strong(expected, true)) {
-        // 初始化 单例内存池（进程内）/ 基于单例内存池的 可复用计数器
+        /* 初始化 单例内存池（进程内）/ 基于单例内存池的 可复用计数器 */
+        
         unsafe_singleton_mempool::get(block_size, alignment);
-        g_counter_st = new counter_st(pair_hasher, capacity, unsafe_singleton_mempool::get());
+        // g_counter_st = new counter_st(pair_hasher, capacity, unsafe_singleton_mempool::get());
 
-        singleton_mempool::get(block_size, alignment);
-        g_counter_mt = new counter_mt(pair_hasher, capacity, singleton_mempool::get());
+        // singleton_mempool::get(block_size, alignment);
+        // g_counter_mt = new counter_mt(pair_hasher, capacity, singleton_mempool::get());
 
         const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
         std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
@@ -93,31 +94,43 @@ L_R_token_counts_ptrs c_count_pair_batch(
 ) {
     try
     {
-        auto& pool = unsafe_singleton_mempool::get();
-        // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
-        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(len*sizeof(uint32_t)));
-        for (int64_t i = 0; i < len; ++i) {
-            keys[i] == uint32_t(L_tokens[i] << 16 | R_tokens[i]);
+        if (len <= 0) {
+            return L_R_token_counts_ptrs{nullptr, nullptr, nullptr, 0};
         }
 
-        count_pair_core(
-            g_counter_st,
-            keys,
-            len
-        );
-        size_t size = g_counter_st->size();
-        uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
-        uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(size*sizeof(uint16_t)));
-        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(size*sizeof(uint64_t)));
-        
-        size_t i = 0;
-        for (auto it = g_counter_st->cbegin(); it != g_counter_st->cend(); ++it) {
-            auto [pair, freq] = *it;
-            L_uniq[i] = pair >> 16;
-            R_uniq[i] = pair & 0xFFFF;
-            counts[i] = freq;
-            ++i;
+        auto& pool = unsafe_singleton_mempool::get();
+        const size_t n = static_cast<size_t>(len);
+        // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
+        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(n*sizeof(uint32_t)));
+        uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(n*sizeof(uint16_t)));
+        uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(n*sizeof(uint16_t)));
+        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(n*sizeof(uint64_t)));
+
+        for (int64_t i = 0; i < len; ++i) {
+            const uint32_t l = static_cast<uint32_t>(L_tokens[i]) & 0xFFFFu;
+            const uint32_t r = static_cast<uint32_t>(R_tokens[i]) & 0xFFFFu;
+            keys[i] = ( l<<16 ) | r;
         }
+
+        // 排序, 可并行
+        std::sort(keys, keys+len);
+        
+        // 线性遍历计数
+        uint32_t prev = keys[0]; uint64_t cnt = 1; size_t size = 0;
+        for (size_t i = 1; i < n; ++i) {
+            if (keys[i] == prev) {
+                ++cnt; }
+            else {
+                // flush(prev, cnt)
+                L_uniq[size] = static_cast<uint16_t>(prev >> 16);
+                R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
+                counts[size] = cnt; ++size;
+
+                prev = keys[i]; cnt = 1; }
+        }
+        L_uniq[size] = static_cast<uint16_t>(prev >> 16);
+        R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
+        counts[size] = cnt; ++size;
 
         return L_R_token_counts_ptrs{L_uniq, R_uniq, counts, size};
     }

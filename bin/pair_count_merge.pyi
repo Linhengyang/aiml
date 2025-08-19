@@ -4,10 +4,10 @@ import typing as t
 def initialize(block_size: int) -> None:
     ...
 
-# def count_pair_batch(
-#     tokens_offsets_border,
-#     ):
-#     ...
+def count_pair_batch(
+    tokens_offsets_border,
+    ):
+    ...
 
 def merge_pair_batch(
     tokens_offsets_border,
