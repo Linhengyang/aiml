@@ -1,1 +1,1 @@
-# evaluator.py for gpt
+# evaluator.py for gpt2
