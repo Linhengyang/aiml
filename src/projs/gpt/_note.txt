@@ -1,1 +1,1 @@
-这个project是经典gpt pytorch版实现.
+这个project是gpt2 pytorch版实现.
