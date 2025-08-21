@@ -17,7 +17,7 @@ tmp_dir: '../tmp'
 
 
 ######################## 数据、外部资源地址和项目信息 ######################## 
-proj_name: 'transformer' # /logs /model /tmp /cache 的项目目录
+proj_name: 'transformer' # /log /model /tmp /cache /artifact 的项目目录
 reveal_cnt_in_train: 5 # 训练过程中披露次数, train loss/train accuracy等
 eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accuracy等
 

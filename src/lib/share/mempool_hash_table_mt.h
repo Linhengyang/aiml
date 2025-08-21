@@ -417,13 +417,12 @@ public:
 
     public:
 
-        // 迭代器的构造函数
         const_iterator(const hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node)
         {
-            _null_node_advance_to_next_valid_bucket(); // 在内部, 目标桶加桶锁
+            _null_node_advance_to_next_valid_bucket();
         }
 
         // *it 迭代器对象解引用 --> 只读返回
@@ -470,7 +469,6 @@ public:
         HashTableNode* _node;
 
         // 迭代器内部不加锁逻辑。锁在迭代器外部调用
-
         void _null_node_advance_to_next_valid_bucket() {
             while (!_node && _bucket_index < _hash_table->_capacity) {
 
@@ -542,7 +540,7 @@ public:
 
         // 迭代器对象 != 运算
         bool operator!=(const iterator& other) const {
-            return !(*this == other); // this是本对象指针, *this就是返回本对象
+            return !(*this == other);
         }
 
     private:
