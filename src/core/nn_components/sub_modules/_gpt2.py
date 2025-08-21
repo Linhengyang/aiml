@@ -39,28 +39,20 @@ class GPT2DecoderBlock(nn.Module):
         # 自回归-自注意力
         self.ARselfAttn = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
         self.addlnorm1 = AddLNorm(num_hiddens, dropout)
-        # 交叉源信息注意力
-        self.xSrcAttn = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
-        self.addlnorm2 = AddLNorm(num_hiddens, dropout)
+        # # 交叉源信息注意力
+        # self.xSrcAttn = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
+        # self.addlnorm2 = AddLNorm(num_hiddens, dropout)
         # 前向
         self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
         self.addlnorm3 = AddLNorm(num_hiddens, dropout)
     
 
-    def forward(self, tgt_query, src_enc_info, KV_Caches=None): # 函数内部对 kv_caches 作in-place操作
-        src_enc_seqs, src_valid_lens = src_enc_info
-        # src_enc_seqs, timestep 1 - num_steps, shape as
-        #   train: (batch_size, num_steps, d_dim), infer: (1, num_steps, d_dim)
-
-        # src_valid_lens, shape as
-        #   train: (batch_size,), infer: (1,)
+    def forward(self, tgt_query, KV_Caches=None): # 函数内部对 kv_caches 作in-place操作
 
         if self.training:
             # train 过程中, tgt_query 是一个 shape 为 (batch_size, num_steps, d_dim) 的tensor. 时间步为 0 至 num_steps-1
             # 代表 target sequence timestep 0 至 num_steps-1
-            assert tgt_query.shape[-1] == src_enc_seqs.shape[-1],\
-                f'training: enc output & dec input block {self.blk_ind} are not in same shape'
-            
+
             batch_size, num_steps = tgt_query.shape[:-1]
 
             # decoder 的 train 过程, 在自注意力阶段需要保证 自回归: 对序列的每个token(每条query)而言, 只有在它前面的才是valid
@@ -76,31 +68,18 @@ class GPT2DecoderBlock(nn.Module):
             tgt_dec = self.addlnorm1(tgt_query, self.ARselfAttn(tgt_query, tgt_query, tgt_query, valid_lens))
             
         else:
-            # infer过程中, tgt_query 是一个 shape 为 (1, 1, d_dim) 的tensor. 对于第i(i=1,..,T)次infer, tgt_query 的时间步是 i-1
-            # 代表 target sequence hat timestep i-1 
-            # 以此 tgt_query 为 q, target sequence hat timestep 0 - i-1 为KV, 生成 target sequence hat timestep i
-
-            # 对于第i次infer, i = 1, 2, ..., num_steps, 分别代表 生成 target sequence hat 的 timesteps 1, 2, ..., num_steps
-            # tgt_query 的时间步是 i-1, KV 需要 target sequence hat timestep 0 - i-1, 所以需要额外输入 target sequence hat timestep 0 - i-2
-            # 由于下一次 infer 需要 0-i-1, 故需要对 KV_Caches 当前 block 对应的 KV_Caches tensor 作更新, 存储给下一次infer用
-
             assert type(KV_Caches) == dict, f'in infer mode, a dictionary as KV_Caches must be input'
 
-            try: # i = 2, ..., num_steps
+            try:
                 KV_Caches[self.blk_ind] = torch.cat([KV_Caches[self.blk_ind], tgt_query], dim=1) 
-                # shape (1, i-1, d_dim) + (1, 1, d_dim) = (1, i, d_dim), 从 timesteps 看, 是 0 至 i-2 append i-1, 得到 0 至 i-1
-            except KeyError: # i = 1: 从<bos> infer第一个token时, KV_Caches 于 当前 block id, 没有 target sequence hat cache
+                # shape (1, i-1, d_dim) + (1, 1, d_dim) = (1, i, d_dim)
+            except KeyError:
                 KV_Caches[self.blk_ind] = tgt_query
             
-            KVs = KV_Caches[self.blk_ind] # 用所有 已经保存的kv_caches 加上最新输入的信息(即 tgt_query) 作KV.
+            KVs = KV_Caches[self.blk_ind]
 
-            # 自注意力+AddLayerNorm:
-            # target info 深度表达: (1, 1, d_dim) -->self_attention--> (1, 1, d_dim)
             tgt_dec = self.addlnorm1(tgt_query, self.ARselfAttn(tgt_query, KVs, KVs))
-        
-        # target info 和 source info 信息交合, tgt_dec shape same with tgt_query
-        tgt_dec = self.addlnorm2(tgt_dec, self.xSrcAttn(tgt_dec, src_enc_seqs, src_enc_seqs, src_valid_lens))
+            
+        tgt_dec = self.addlnorm3(tgt_dec, self.PosFFN(tgt_dec))
 
-        return self.addlnorm3(tgt_dec, self.PosFFN(tgt_dec)), KV_Caches
-        # train 模式下第二个输出是 None, eval 模式下第二个输出 是以 block ID为key, 该 block 的 所有输入tgt_query堆叠 (timestep 0 - i-1)
-        # 只有该block对应的 kv 被更新
+        return tgt_dec, KV_Caches
