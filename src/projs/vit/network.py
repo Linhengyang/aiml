@@ -1,5 +1,5 @@
 from ...core.nn_components.meta_frames import Encoder
-from ...core.nn_components.root_layers.positional_encoding import LearnAbsPosEnc
+from ...core.nn_components.root_layers.position_encoding import LearnAbsPosEnc
 from ...core.nn_components.root_layers.patchify import Patchify
 from ...core.nn_components.sub_modules._vit import ViTEncoderBlock
 import torch.nn as nn
