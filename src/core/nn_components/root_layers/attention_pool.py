@@ -38,20 +38,18 @@ from ...base.functions.mask import mask_on_last_dim
 # valid_lens 不能作用在 Q 和 output 中 的 n_queries 维度.
 
 
-def masked_softmax(S, valid_lens):
+def masked_softmax(S, valid_lens, where_valid='left'):
     '''
     inputs:
         S: 3-Dtensor, shape: (batch_size, n_query, n_logits);
         valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_query) or None
-    
+        where_valid: left or right.
+            left: means valid_lens is counting from index 0
+            right: means valid_lens is counting from index -1
+
     returns: convex weight tensor with shape (batch_size, n_query, n_logits), denoted as W
         W[sample_idx, query_idx, :] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
         对每个样本而言, 返回 n_query 个 凸组合权重
-
-    explains:
-        for sample i,
-            if valid_lens is 1-D tensor, W[i][:, k] are zeros when k > valid_lens[i]
-            if valid_lens is 2-D tensor, W[i][j, k] are zeros when k > valid_lens[i, j], here j is query_idx
     '''
 
     if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
@@ -66,8 +64,16 @@ def masked_softmax(S, valid_lens):
     else:
         raise ValueError(f'wrong valid_lens')
     
-    # valid 部分被 mask, 为 False; non-valid 部分不被 mask, 为 True
-    mask = mask_on_last_dim(tensor_shape=S.shape, mask_lens=valid_lens, mask_flag=False)
+    # 让 non-valid 部分为 True, 以此形成的 mask tensor 可以给 non-valid 部分填入 negative inf
+
+    if where_valid == 'left': # 当左边部分是valid时, 右边部分是non-valid，要在mask tensor中设为True
+        mask_flag = False
+    elif where_valid == 'right': # 当右边部分是valid时, 左边部分是non-valid，要在mask tensor中设为True
+        mask_flag = True
+    else:
+        raise ValueError(f'wrong where_valid')
+
+    mask = mask_on_last_dim(S.shape[-1], valid_lens, mask_flag)
 
     # mask tensor shape: (batch_size, n_query, n_kv)
 
@@ -105,7 +111,7 @@ class AdditiveAttention(nn.Module):
         self.W_v = nn.LazyLinear(1, bias=False)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
+    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
         # Q_batch: (batch_size, n_query, q_size); K_batch: (batch_size, n_kv, k_size); V_batch: (batch_size, n_kv, v_size)
         _, n_query, _ = Q_batch.shape
         _, n_kv, _ = K_batch.shape
@@ -122,7 +128,7 @@ class AdditiveAttention(nn.Module):
         Scores = self.W_v(torch.tanh(S_batch)).squeeze(-1)
 
         # Scores: (batch_size, n_query, n_kv), valid_lens 指定了每条 query 里的 valid area:(batch_size,) or (batch_size, n_query)
-        self.attention_weights = masked_softmax(Scores, valid_lens)
+        self.attention_weights = masked_softmax(Scores, valid_lens, where_valid)
 
         # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, value_size) ->  (batch_size, n_query, value_size) 
         return torch.bmm(self.dropout(self.attention_weights), V_batch)
@@ -161,7 +167,7 @@ class ScaledDotProductAttention(nn.Module):
         super().__init__(**kwargs)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
+    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
 
         assert Q_batch.size(-1) == K_batch.size(-1), \
             f'query_size {Q_batch.size(-1)} not equal to key_size {K_batch.size(-1)}'
@@ -171,7 +177,7 @@ class ScaledDotProductAttention(nn.Module):
         # Q: (batch_size, n_query, qk_size) @ K: (batch_size, n_kvs, qk_size) 转置 -> (batch_size, n_query, n_kvs)
         S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d) # 本质是 Q 和 K 的相似度计算
 
-        self.attention_weights = masked_softmax(S_batch, valid_lens) # 注意力权重shape (batch_size, n_query, n_kvs)
+        self.attention_weights = masked_softmax(S_batch, valid_lens, where_valid) # 注意力权重shape (batch_size, n_query, n_kvs)
 
         # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, v_size) ->  (batch_size, n_query, v_size) 
         return torch.bmm( self.dropout(self.attention_weights), V_batch )
@@ -237,12 +243,12 @@ class MultiHeadAttention(nn.Module):
         self.W_o = nn.LazyLinear(num_hiddens, bias=use_bias)
         self.attention = ScaledDotProductAttention(dropout)
     
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None):
+    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
         Q = transpose_qkv(self.W_q(Q_batch), self.h)
         K = transpose_qkv(self.W_k(K_batch), self.h)
         V = transpose_qkv(self.W_v(V_batch), self.h)
         if valid_lens is not None:
             valid_lens = valid_lens.repeat_interleave(self.h, dim=0)
-        O = self.attention(Q, K, V, valid_lens)
+        O = self.attention(Q, K, V, valid_lens, where_valid)
         O = transpose_o(O, self.h)
         return self.W_o(O)
