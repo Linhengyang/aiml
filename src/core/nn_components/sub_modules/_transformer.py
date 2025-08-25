@@ -57,7 +57,7 @@ class TransformerEncoderBlock(nn.Module):
 
         self.addlnorm2 = AddLNorm(num_hiddens, dropout)
     
-    def forward(self, X, valid_lens):
+    def forward(self, X, valid_lens, where_valid):
         # X 作 自注意力. X shape(batch_size, seq_len, num_hiddens), 在 dim 1 的 seq_len 里, valid area 由 valid_lens(batch_size,) 确定
         # 可以先 mask, 再作 自注意力, 即对 X 在 dim 1 作 mask
         # 也可以先 自注意力, 再 mask, 即 (Q, K) --相似度计算--> S --softmax--> W, (W, V) --n_query次线性组合 on V--> output
@@ -65,7 +65,7 @@ class TransformerEncoderBlock(nn.Module):
 
         # 在自注意力中, 对每个token(对应每条query)而言, 都只限制了整体valid 长度.
         # 故 encoder 里, 每个token是跟序列里前/后所有valid token作相关性运算的
-        Y = self.addlnorm1(X, self.attention(X, X, X, valid_lens))
+        Y = self.addlnorm1(X, self.attention(X, X, X, valid_lens, where_valid))
         return self.addlnorm2(Y, self.PosFFN(Y))
 
 
@@ -117,7 +117,7 @@ class TransformerDecoderBlock(nn.Module):
 
     def forward(self, tgt_query, src_enc_info, KV_Caches=None): # 函数内部对 kv_caches 作in-place操作
         src_enc_seqs, src_valid_lens = src_enc_info
-        # src_enc_seqs, timestep 1 - num_steps, shape as
+        # src_enc_seqs, timestep 1 <-> num_steps, shape as
         #   train: (batch_size, num_steps, d_dim), infer: (1, num_steps, d_dim)
 
         # src_valid_lens, shape as
@@ -125,7 +125,7 @@ class TransformerDecoderBlock(nn.Module):
 
         if self.training:
             # train 过程中, tgt_query 是一个 shape 为 (batch_size, num_steps, d_dim) 的tensor. 时间步为 0 至 num_steps-1
-            # 代表 target sequence timestep 0 至 num_steps-1
+            # 代表 target sequence timestep 0 至 num_steps-1。不过可能是 左pad，也可能是右pad
             assert tgt_query.shape[-1] == src_enc_seqs.shape[-1],\
                 f'training: enc output & dec input block {self.blk_ind} are not in same shape'
             
@@ -141,7 +141,7 @@ class TransformerDecoderBlock(nn.Module):
 
             # 自注意力+AddLayerNorm:
             # target info 深度表达: (batch_size, T, d_dim) --auto_regressive_self_attention + add_layernorm--> (batch_size, T, d_dim)
-            tgt_dec = self.addlnorm1(tgt_query, self.ARselfAttn(tgt_query, tgt_query, tgt_query, valid_lens))
+            tgt_dec = self.addlnorm1(tgt_query, self.ARselfAttn(tgt_query, tgt_query, tgt_query, valid_lens, ))
             
         else:
             # infer过程中, tgt_query 是一个 shape 为 (1, 1, d_dim) 的tensor. 对于第i(i=1,..,T)次infer, tgt_query 的时间步是 i-1
