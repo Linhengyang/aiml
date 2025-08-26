@@ -79,3 +79,16 @@ class LearnAbsPosEnc(nn.Module):
         # position_ids: 1D tensors of int64, shall be inside [0, max_possible_posNum-1]
         
         return self.PosEnc[:, position_ids, :] # shape as (1, len(position_ids), num_hiddens)
+
+
+
+
+
+
+class RotaryPosEnc(nn.Module):
+    '''
+    与其他PE直接加在embedding上不同, RoPE是作用在q/k上的: q/k上的每1对(2个)维度构成一个复平面, 对每个复平面上的二维向量作旋转, 旋转的角度和绝对位置相关
+    这样在qk计算时,旋转后的qk内积与相对距离(绝对位置之差)有关, 而不是绝对位置.
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
