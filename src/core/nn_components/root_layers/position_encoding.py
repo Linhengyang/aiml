@@ -89,6 +89,7 @@ class RotaryPosEnc(nn.Module):
     '''
     与其他PE直接加在embedding上不同, RoPE是作用在q/k上的: q/k上的每1对(2个)维度构成一个复平面, 对每个复平面上的二维向量作旋转, 旋转的角度和绝对位置相关
     这样在qk计算时,旋转后的qk内积与相对距离(绝对位置之差)有关, 而不是绝对位置.
+    theta向量: 由绝对位置确定（绝对位置+周期频率信号）
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
