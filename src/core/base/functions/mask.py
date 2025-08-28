@@ -6,7 +6,7 @@ import torch
 
 
 
-def mask_on_last_dim(last_dim_size, mask_lens, mask_flag=True):
+def mask_on_last_dim(last_dim_size: int, mask_lens: torch.Tensor, mask_flag:bool = True) -> torch.Tensor:
     '''
     input:
         last_dim_size: int, dim size of a tensor's last dim

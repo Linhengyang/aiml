@@ -83,13 +83,47 @@ class LearnAbsPosEnc(nn.Module):
 
 
 
+from dataclasses import dataclass
+
+@dataclass
+class RoPEConfig:
+    dim: int
+    base: float = 10000.0     # 频率基数
+    rope_scale: float = 1.0   # 角频率缩放(>1.0 可"拉长"上下文)
+    interleaved: bool = True  # 是否使用 交织布局(即每相邻偶奇两位作二维平面)
+
+
+
+def rotate_half_on_last_dim(x: torch.Tensor) -> torch.Tensor:
+    '''
+    把tensor x 的最后一维按(even, odd)成对视作二维平面上的向量(x, y), 返回逆时针旋转90度的正交向量(-y, x)
+    '''
+    even_dims, odd_dims = x[..., ::2], x[..., 1::2]
+    # even_dims: (..., 3) where last dim is 0/2/4 from original
+    # odd_dims: (..., 3) where last dim is 1/3/5 from original
+    # stack at dim -1 --> shape as (..., 3, 2) where 3 of last dim is neg1/0, neg3/2, neg5/4 --> reshape to input x
+    return torch.stack((-odd_dims, even_dims), dim=-1).reshape_as(x)
+
 
 
 class RotaryPosEnc(nn.Module):
     '''
     与其他PE直接加在embedding上不同, RoPE是作用在q/k上的: q/k上的每1对(2个)维度构成一个复平面, 对每个复平面上的二维向量作旋转, 旋转的角度和绝对位置相关
     这样在qk计算时,旋转后的qk内积与相对距离(绝对位置之差)有关, 而不是绝对位置.
-    theta向量: 由绝对位置确定（绝对位置+周期频率信号）
+    theta向量: 由绝对位置确定（绝对位置 结合 周期频率信号）
+    cosine theta向量: 用于构建旋转矩阵的 左上角 / 右下角, 用于“偶数维度”贡献“新偶数维度”的比例，和“奇数维度”贡献“新奇数维度”的比例
+    sine theta向量: 用于构建旋转矩阵的 左下角 / 右上角, 用于“奇数维度”贡献“新偶数维度”的比例（负号），和“偶数维度”贡献“新奇数维度”的比例
+    even_dims偶数维度向量: 从index 0维开始的偶数维度分量
+    odd_dims奇数维度向量: 从index 1(若有)维开始的奇数维度分量
+        cosine_theta @ even_dims + sine_theta @ (-odd_dims) -> rotated even_dims
+        cosine_theta @ odd_dims + sine_theta @ even_dims -> rotated odd_dims
+        even_dims, odd_dims 就是 original tensor, -odd_dims, even_dims 就是 rotate_half_on_last_dim(original tensor)
+        rotated tensor = cosine_theta * original_tensor + sine_theta * rotate_half_on_last_dim(original_tensor)
     '''
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, config: RoPEConfig):
+        super().__init__()
+        assert config.dim % 2 == 0, f'RoPE dim must be even'
+        self.config = config
+
+        # 仿照绝对位置编码 TrigonoAbsPosEnc 构造绝对位置相关的周期频率 w_i = base ^ (-2i/d)
+        inv_freq = 1.0 / (config.base ** ())
