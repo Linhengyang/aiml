@@ -52,9 +52,9 @@ class TransformerEncoder(Encoder):
         # source position embedding: 没有 bos, 从 1 开始到 num_steps
         # pos_embd: (num_steps,) --pos embed--> (1, num_steps, num_hiddens)
         # 1 到 num_steps, 所有位置都需要position embed. 0 是给 <bos> 的. src里没有bos
-        position_ids = torch.arange(1, num_steps+1, dtype=torch.int64, device=src.device)
+        position_ids = torch.arange(1, num_steps+1, dtype=torch.int64, device=src.device) # (num_steps,)
 
-        # input embeddings + position embedding
+        # input embeddings(batch_size, num_steps, num_hiddens) +(broadcast) position embedding(num_steps, num_hiddens)
         src_enc = self.dropout(src_embd + self.pos_encoding(position_ids))
 
         for blk in self.blks:
@@ -156,7 +156,7 @@ class TransformerDecoder(AttentionDecoder):
         #           对于第 i > 1 次infer, position_ids = tensor([i-1]), 因为此时 tgt_dec_input position 是 i-1, 即 KV_Cacues 的 value 的第二维度
         
         # target input embedding
-        # tgt_dec_input_embd: shape (batch_size, num_steps, num_hiddens)
+        # tgt_dec_input_embd shape: train (batch_size, num_steps, num_hiddens), infer (1, 1, num_hiddens)
         tgt_dec_input_embd = self.embedding(tgt_dec_input) * math.sqrt(self.num_hiddens) 
         # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
@@ -171,6 +171,8 @@ class TransformerDecoder(AttentionDecoder):
                                         dtype=torch.int64, device=tgt_dec_input.device) # (1,)
 
         # input embeddings + position embedding
+        # shapes of train: (batch_size, num_steps, num_hiddens) +(broadcast) (num_steps, num_hiddens)
+        # shapes of infer: (1, 1, num_hiddens) +(broadcast) (1, num_hiddens)
         tgt_query = self.dropout(tgt_dec_input_embd + self.pos_encoding(position_ids))
 
         # Decoder Block 的输入 tgt_query, src_enc_info, KV_Caches

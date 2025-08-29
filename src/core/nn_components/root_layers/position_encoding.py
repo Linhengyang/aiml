@@ -22,23 +22,24 @@ class TrigonoAbsPosEnc(nn.Module):
         super().__init__()
 
         # PosEnc: a long enough matrix with same d(d_dim) as input, (max_len, d_dim)
-        PosEnc = torch.zeros((1, max_len, num_hiddens))
+        PosEnc = torch.zeros((max_len, num_hiddens))
         # X 2-D tensor, 行idx是0到max_len-1, 列idx是0到num_hiddens-1之内的偶数
         X = torch.arange(max_len, dtype=torch.float32).reshape(-1, 1) / \
             torch.pow(10000, torch.arange(0, num_hiddens, 2, dtype=torch.float32).reshape(1, -1) / num_hiddens)
         
-        PosEnc[0, :, 0::2] = torch.sin(X) # P的偶数列填入sin(X)
+        PosEnc[:, 0::2] = torch.sin(X) # P的偶数列填入sin(X)
         try:
-            PosEnc[0, :, 1::2] = torch.cos(X) # P的奇数列填入cos(X). 当最后一列idx=num_hiddens-1是奇数时,正好填入
+            PosEnc[:, 1::2] = torch.cos(X) # P的奇数列填入cos(X). 当最后一列idx=num_hiddens-1是奇数时,正好填入
         except:
-            PosEnc[0, :, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx=num_hiddens-1是偶数时,去掉X的最后一列再填入
+            PosEnc[:, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx=num_hiddens-1是偶数时,去掉X的最后一列再填入
 
         self.register_buffer('PosEnc', PosEnc)
 
-    def forward(self, position_ids):
-        # position_ids: 1D tensors of int64, shall be inside [0, max_len-1]
+    def forward(self, position_ids: torch.Tensor):
+        # position_ids: 2D tensors of int64 as of (batch_size, num_positions)
+        # values are position index starting from 0. shall be inside [0, max_len-1]
         
-        return self.PosEnc[:, position_ids, :] # shape as (1, len(position_ids), num_hiddens)
+        return self.PosEnc[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens)
 
 
 
@@ -73,12 +74,13 @@ class LearnAbsPosEnc(nn.Module):
     '''
     def __init__(self, max_possible_posNum, num_hiddens):
         super().__init__()
-        self.register_parameter('PosEnc', nn.Parameter(torch.randn(1, max_possible_posNum, num_hiddens)))
+        self.register_parameter('PosEnc', nn.Parameter(torch.randn(max_possible_posNum, num_hiddens)))
 
-    def forward(self, position_ids):
-        # position_ids: 1D tensors of int64, shall be inside [0, max_possible_posNum-1]
+    def forward(self, position_ids: torch.Tensor):
+        # position_ids: 2D tensors of int64 as of (batch_size, num_positions)
+        # values are position index starting from 0. shall be inside [0, max_possible_posNum-1]
         
-        return self.PosEnc[:, position_ids, :] # shape as (1, len(position_ids), num_hiddens)
+        return self.PosEnc[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens)
 
 
 
@@ -126,4 +128,15 @@ class RotaryPosEnc(nn.Module):
         self.config = config
 
         # 仿照绝对位置编码 TrigonoAbsPosEnc 构造绝对位置相关的周期频率 w_i = base ^ (-2i/d)
-        inv_freq = 1.0 / (config.base ** ())
+        # 向量化 2i vector, dtype 设定为 float, 在 float 中计算
+        inv_freq = 1.0 / (config.base ** (torch.arange(0, config.dim, 2).float() / config.dim))
+        # 频率缩放(rope_scale>1相当于减小角度增速，延展上下文，即数值上提高上下文之间的相关程度)
+        inv_freq = inv_freq / config.rope_scale
+        # 注册成常量 buffer
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+    
+    @torch.no_grad()
+    def _angles(self, position_ids: torch.Tensor) -> torch.Tensor:
+        '''
+
+        '''
