@@ -36,9 +36,12 @@ class TrigonoAbsPosEnc(nn.Module):
         self.register_buffer('PosEnc', PosEnc)
 
     def forward(self, position_ids: torch.Tensor):
-        # position_ids: 2D tensors of int64 as of (batch_size, num_positions)
-        # values are position index starting from 0. shall be inside [0, max_len-1]
-        
+        '''
+        position_ids: 2D tensors of int64 as of (batch_size, num_positions) / 1D tensor of int64 as (num_positions,)
+        若 position_ids 是 1D tensor, 那么 input tokens-embedding + positions-embedding 的过程依赖 broadcast
+        values 是 position index starting from 0. shall be inside [0, max_len-1]
+        '''
+
         return self.PosEnc[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens)
 
 
@@ -77,10 +80,13 @@ class LearnAbsPosEnc(nn.Module):
         self.register_parameter('PosEnc', nn.Parameter(torch.randn(max_possible_posNum, num_hiddens)))
 
     def forward(self, position_ids: torch.Tensor):
-        # position_ids: 2D tensors of int64 as of (batch_size, num_positions)
-        # values are position index starting from 0. shall be inside [0, max_possible_posNum-1]
+        '''
+        position_ids: 2D tensor of int64 as of (batch_size, num_positions) / 1D tensor of int64 as (num_positions,)
+        若 position_ids 是 1D tensor, 那么 input tokens-embedding + positions-embedding 的过程依赖 broadcast
+        values 是 position index starting from 0. shall be inside [0, max_possible_posNum-1]
+        '''
         
-        return self.PosEnc[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens)
+        return self.PosEnc[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens) / (len(position_ids), num_hiddens)
 
 
 
@@ -112,6 +118,9 @@ class RotaryPosEnc(nn.Module):
     '''
     与其他PE直接加在embedding上不同, RoPE是作用在q/k上的: q/k上的每1对(2个)维度构成一个复平面, 对每个复平面上的二维向量作旋转, 旋转的角度和绝对位置相关
     这样在qk计算时,旋转后的qk内积与相对距离(绝对位置之差)有关, 而不是绝对位置.
+    其他PE是“从embedding矩阵中抽取位置代表的vector”, 所以预先对总位置数量有预设; RoPE是根据位置index确定q/k不同的旋转方式, 故不需要预设总位置数量。
+    所以RoPE对位置总量的延展性也比较好。
+
     theta向量: 由绝对位置确定（绝对位置 结合 周期频率信号）
     cosine theta向量: 用于构建旋转矩阵的 左上角 / 右下角, 用于“偶数维度”贡献“新偶数维度”的比例，和“奇数维度”贡献“新奇数维度”的比例
     sine theta向量: 用于构建旋转矩阵的 左下角 / 右上角, 用于“奇数维度”贡献“新偶数维度”的比例（负号），和“偶数维度”贡献“新奇数维度”的比例
@@ -128,7 +137,7 @@ class RotaryPosEnc(nn.Module):
         self.config = config
 
         # 仿照绝对位置编码 TrigonoAbsPosEnc 构造绝对位置相关的周期频率 w_i = base ^ (-2i/d)
-        # 向量化 2i vector, dtype 设定为 float, 在 float 中计算
+        # 向量化 2i vector, dtype 设定为 float, 在 float 中计算 --> inv_freq shape as (dim/2, )
         inv_freq = 1.0 / (config.base ** (torch.arange(0, config.dim, 2).float() / config.dim))
         # 频率缩放(rope_scale>1相当于减小角度增速，延展上下文，即数值上提高上下文之间的相关程度)
         inv_freq = inv_freq / config.rope_scale
@@ -138,5 +147,16 @@ class RotaryPosEnc(nn.Module):
     @torch.no_grad()
     def _angles(self, position_ids: torch.Tensor) -> torch.Tensor:
         '''
+        theta vector: theta = 绝对位置 index p 乘以 inv_frequence 10000^-(2i/d). 这里 2i 是 0 -> dim 的vector
+        position_ids: shape(batch_size, num_positions), dtype int64, range no-limit
+        inv_freq: shape(dim/2,), dtype float
 
+        angle matrix: position_ids 的每一个值 p 乘以 inv_freq 频率信号, 即为 每一个位置在 dim 维上的频率信号
         '''
+        pos = position_ids.to(dtype=torch.float32)
+        # 爱因斯坦求和：广播乘法的一种表示，指定 pos shape (b,s), inv_freq shape (d,), 指定广播乘法结果 shape (b,s,d)
+        # 每一个position value 乘以 inv_freq --> 得到 (dim/2,) 的1D tensor --> (batch_size, num_positions, dim/2)
+        return torch.einsum("bs,d->bsd", pos, self.inv_freq)
+    
+    def get_sin_cos(self, position_ids: torch.Tensor, device=None, dtype=None):
+        pass
