@@ -186,6 +186,11 @@ class ScaledDotProductAttention(nn.Module):
 
 
 def transpose_qkv(X, num_heads):
+    '''
+    X shape: (batch_size, seq_length, num_hiddens)
+    transpose route: --> (batch_size, num_hiddens, seq_length) --> (batch_size, num_heads, dim_per_head, seq_length)
+                     --> (batch_size, num_heads, seq_length, dim_per_head) --> (batch_size*num_heads, seq_length, dim_per_head)
+    '''
     h = num_heads
     batch_size, n, _ = X.shape
     return X.permute(0,2,1).reshape(batch_size, h, -1, n).permute(0,1,3,2).reshape(batch_size*h, n, -1)
