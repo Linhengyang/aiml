@@ -28,7 +28,7 @@ class GELU(nn.Module):
 # =============== 多头自注意力（含因果遮罩 + 可选padding遮罩） ===============
 class CausalSelfAttention(nn.Module):
     """
-    形状约定：输入/输出 hidden_states: [B, S, C]；内部 q/k/v => [B, H, S, D]
+    形状约定：输入/输出 hidden_states: [B, S, D]；内部 q/k/v => [B, H, S, d], 这里 D 模型宽度 = H*d, d = dim_per_head
     """
     def __init__(self, cfg: GPT2Config):
         super().__init__()
@@ -45,7 +45,8 @@ class CausalSelfAttention(nn.Module):
         self.resid_drop = nn.Dropout(cfg.resid_pdrop)
 
         # 预先构造上三角因果mask（在forward里会按需裁剪至当前 S）
-        # mask 形状 [1, 1, S, S] 便于广播到 [B,H,S,S]
+        # mask 形状 [1, 1, S, S] 便于广播到 [B,H,S,S], 正对角线上方(不包括对角线)的为True, 其余为False. 是为了选取True区域set to -inf
+        # 以此排除在softmax之外
         self.register_buffer(
             "causal_mask",
             torch.triu(torch.ones(cfg.n_positions, cfg.n_positions, dtype=torch.bool), diagonal=1)[None, None, :, :],
@@ -53,23 +54,26 @@ class CausalSelfAttention(nn.Module):
         )
 
     def _shape_qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        B, S, C = x.shape
-        qkv = self.qkv(x)  # [B, S, 3C]
-        q, k, v = qkv.split(C, dim=-1)
-        # [B,S,C] -> [B,H,S,D]
-        def _reshape(t):
-            return t.view(B, S, self.n_head, self.head_dim).transpose(1, 2)  # [B,H,S,D]
-        return _reshape(q), _reshape(k), _reshape(v)
+        # x shape: (B, S, D)
+        B, S, D = x.shape
+        qkv = self.qkv(x)  # [B, S, D] --> [B, S, 3*D]
+        # torch.split: 在 dim -1 维度 不重叠地 split D 宽度的 sub-tensor, 组成 sub-tensors tuple
+        q, k, v = qkv.split(D, dim=-1) # [B, S, 3*D] --split--> q[B, S, D], k[B, S, D], v[B, S, D]
+
+        def _reshape(t): # [B,S,D] = [B, S, H*d] -> [B, S, H, d] -> [B, H, S, d]
+            return t.view(B, S, self.n_head, self.head_dim).transpose(1, 2)
+        
+        return _reshape(q), _reshape(k), _reshape(v) # q[B, H, S, d], k[B, H, S, d], v[B, H, S, d]
 
     def forward(
         self,
-        x: torch.Tensor,                       # [B, S, C]
-        attention_mask: Optional[torch.Tensor] = None,  # [B, S], 1=非PAD, 0=PAD（可选）
+        x: torch.Tensor,                                               # [B, S, D]
+        attention_mask: Optional[torch.Tensor] = None,                 # [B, S], 1=非PAD, 0=PAD（可选）
         kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # (k_cache,v_cache) 形状 [B,H,S_cached,D]
         use_cache: bool = False,
     ):
-        B, S, C = x.shape
-        q, k, v = self._shape_qkv(x)  # [B,H,S,D]
+        B, S, D = x.shape
+        q, k, v = self._shape_qkv(x)  # [B,H,S,d]
 
         # 如果开启缓存（自回归解码），把新步的 k,v 追加到 cache
         if kv_cache is not None:
