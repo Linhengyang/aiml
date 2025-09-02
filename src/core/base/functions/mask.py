@@ -31,7 +31,7 @@ def mask_on_last_dim(last_dim_size: int, mask_lens: torch.Tensor, mask_flag:bool
     # braodcast 对比: [0, 1, ..., n_logits-1] 逐一 和 valid_len_i 对比, 得到 T/F mask shape as (..., n_logits)
     # 此时 mask 部分是 True, 非 mask 部分是 False. 符合 mask_flag 为 True 的情况.
 
-    # 如果 mask_flag 为 False, 那么 mask 部分应该是False, 非 mask 部分为 True
+    # 如果 mask_flag 为 False, 那么 mask 部分应该是False, 非 mask 部分为 True: 取反
     if not mask_flag:
         mask = ~mask
 

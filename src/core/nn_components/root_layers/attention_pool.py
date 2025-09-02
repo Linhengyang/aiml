@@ -199,6 +199,11 @@ def transpose_qkv(X, num_heads):
 
 
 def transpose_o(X, num_heads):
+    '''
+    X shape: (batch_size*num_heads, seq_length, dim_per_head)
+    transpose route: --> (batch_size*num_heads, dim_per_head, seq_length) --> (batch_size, num_heads*dim_per_head, seq_length)
+                     --> (batch_size, seq_length, num_heads*dim_per_head)
+    '''
     h = num_heads
     prod_batchsize_h, m, _ = X.shape
     batch_size = prod_batchsize_h // h
@@ -249,6 +254,10 @@ class MultiHeadAttention(nn.Module):
         self.attention = ScaledDotProductAttention(dropout)
     
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
+        # Q/K/V 都被split成多个head: (batch_size*num_heads, seq_length, dim_per_head)
+        # attention计算时, q/k shape (B, n_query, q_size)/(B, n_kv, k_size) --> attn_w (B, n_query, n_kv)
+        # 相关性计算只存在于dim 1和2, dim 0（B）之间没有相关性计算, dim 0维度之间仍然是独立的, 即 attn_w[i] = attn_func( q[i], k[i] )
+        # 由此, head维度被合并到batch_size维度后, 在attention计算时head之间是独立的.
         Q = transpose_qkv(self.W_q(Q_batch), self.h)
         K = transpose_qkv(self.W_k(K_batch), self.h)
         V = transpose_qkv(self.W_v(V_batch), self.h)

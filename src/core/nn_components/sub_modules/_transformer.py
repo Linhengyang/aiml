@@ -53,7 +53,7 @@ class TransformerEncoderBlock(nn.Module):
         # PosFFN
         # input: (batch_size, n_query, num_hiddens)
         # output: (batch_size, n_query, num_hiddens)
-        self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
+        self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens) # ffn_num_hiddens在原始论文里=4*num_hiddens
 
         self.addlnorm2 = AddLNorm(num_hiddens, dropout)
     
