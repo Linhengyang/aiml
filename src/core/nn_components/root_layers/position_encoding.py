@@ -154,11 +154,11 @@ class RotaryPosEnc(nn.Module):
         self.config = config
 
         # 仿照绝对位置编码 TrigonoAbsPosEnc 构造绝对位置相关的周期频率 w_i = base ^ (-2i/d)
-        # 向量化 2i vector, dtype 设定为 float, 在 float 中计算 --> inv_freq shape as (dim/2, )
-        inv_freq = 1.0 / (config.base ** (torch.arange(0, config.dim, 2).float() / config.dim))
+        # 向量化 2i vector, dtype 设定为 float, 在 float 中计算 --> inv_freq shape as (dim_per_head/2, )
+        inv_freq = 1.0 / (config.base ** (torch.arange(0, config.dim, 2).float() / config.dim)) # float32
         # 频率缩放(rope_scale>1相当于减小角度增速，延展上下文，即数值上提高上下文之间的相关程度)
         inv_freq = inv_freq / config.rope_scale
-        # 注册成常量 buffer
+        # 注册成常量 buffer inv_freq: (dim_per_head/2, )
         self.register_buffer("inv_freq", inv_freq, persistent=False)
     
     @torch.no_grad()
@@ -178,9 +178,9 @@ class RotaryPosEnc(nn.Module):
         # 爱因斯坦求和：广播乘法的一种表示，指定 pos shape (b,s), inv_freq shape (d,), 指定广播乘法结果 shape (b,s,d)
         # 每一个position value 乘以 inv_freq --> 得到 (dim/2,) 的1D tensor --> (batch_size, num_positions, dim/2)
         # 等价于 pos[:, :, None] * inv_freq[None, None, :]
-        return torch.einsum("bs,d->bsd", pos, self.inv_freq)
+        return torch.einsum("bs,d->bsd", pos, self.inv_freq) # float32
     
-    def get_sin_cos(self, position_ids: torch.Tensor, device=None, dtype=None) -> t.Tuple[torch.Tensor, torch.Tensor]:
+    def get_sin_cos(self, position_ids: torch.Tensor, device=None, dtype=None, broadcast_axis=1) -> t.Tuple[torch.Tensor, torch.Tensor]:
         '''
         根据 theta tensor(batch_size, seq_length, dim_per_head/2), 得出可供旋转计算的 cos tensor 和 sin tensor
         cos tensor 和 sin tensor 的 shape 根据 q/k tensor的形状确定:
@@ -189,7 +189,32 @@ class RotaryPosEnc(nn.Module):
             q/k形状[B, S, D], 则 cos/sin 形状是 (batch_size, seq_length, dim_per_head/2)
         cos/sin tensor 的 dtype 是 torch.float32
         '''
-        pass
+        theta = self._angles(position_ids) # (batch_size, seq_length, dim_per_head/2), float32
+        if dtype is None:
+            dtype = theta.dtype # float32
+        if device is None:
+            device = theta.device
+        
+        # 先算半维度的 cos/sin
+        cos_half = torch.cos(theta).to(dtype=dtype, device=device) # (batch_size, seq_length, dim_per_head/2)
+        sin_half = torch.sin(theta).to(dtype=dtype, device=device) # (batch_size, seq_length, dim_per_head/2)
+
+        # 处理 head 维度, 方便与 q/k 计算时的广播
+        if not isinstance(broadcast_axis, int):
+            # (batch_size, seq_length, dim_per_head/2)
+            pass
+        else:
+            # (batch_size, seq_length, dim_per_head/2) -> 
+            #       (batch_size, 1, seq_length, dim_per_head/2) / (batch_size, seq_length, 1, dim_per_head/2)
+            cos_half = cos_half.unsqueeze(broadcast_axis)
+            sin_half = sin_half.unsqueeze(broadcast_axis)
+        
+        # 在最后一维交叉复制偶/奇相邻两个维度
+        # (..., dim_per_head/2) -> (..., dim_per_head)
+        cos = cos_half.repeat_interleave(2, dim=-1)
+        sin = sin_half.repeat_interleave(2, dim=-1)
+
+        return cos, sin
 
     def apply_rope(self, q:torch.Tensor, k:torch.Tensor, cos:torch.Tensor, sin:torch.Tensor) -> t.Tuple[torch.Tensor, torch.Tensor]:
         '''
@@ -199,10 +224,11 @@ class RotaryPosEnc(nn.Module):
         '''
         # 记录下 q/k 原来的 dtype
         q_dtype, k_dtype = q.dtype, k.dtype
-        # 使用 float32 格式计算 RoPE, 使得整个计算过程保持稳定.
-        q, k = q.to(torch.float32), k.to(torch.float32)
 
-        q_rotate = cos * q + sin * rotate_half_on_last_dim(q)
-        k_rotate = cos * k + sin * rotate_half_on_last_dim(k)
+        # 使用 float32 格式计算 RoPE, 使得整个计算过程保持稳定.
+        qf, kf = q.to(torch.float32), k.to(torch.float32)
+
+        q_rotate = cos * qf + sin * rotate_half_on_last_dim(qf)
+        k_rotate = cos * kf + sin * rotate_half_on_last_dim(kf)
 
         return q_rotate.to(q_dtype), k_rotate.to(k_dtype)
