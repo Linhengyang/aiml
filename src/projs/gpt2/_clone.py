@@ -29,7 +29,6 @@ class GELU(nn.Module):
 class CausalSelfAttention(nn.Module):
     """
     形状约定：输入/输出 hidden_states: [B, S, D]；内部 q/k/v => [B, H, S, d], 这里 D 模型宽度 = H*d, d = dim_per_head
-    形状约定：输入/输出 hidden_states: [B, S, D]；内部 q/k/v => [B, H, S, d], 这里 D 模型宽度 = H*d, d = dim_per_head
     """
     def __init__(self, cfg: GPT2Config):
         super().__init__()
@@ -46,8 +45,6 @@ class CausalSelfAttention(nn.Module):
         self.resid_drop = nn.Dropout(cfg.resid_pdrop)
 
         # 预先构造上三角因果mask（在forward里会按需裁剪至当前 S）
-        # mask 形状 [1, 1, S, S] 便于广播到 [B,H,S,S], 正对角线上方(不包括对角线)的为True, 其余为False. 是为了选取True区域set to -inf
-        # 以此排除在softmax之外
         # mask 形状 [1, 1, S, S] 便于广播到 [B,H,S,S], 正对角线上方(不包括对角线)的为True, 其余为False. 是为了选取True区域set to -inf
         # 以此排除在softmax之外
         self.register_buffer(
