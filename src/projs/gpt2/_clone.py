@@ -54,65 +54,78 @@ class CausalSelfAttention(nn.Module):
         )
 
     def _shape_qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # x shape: (B, S, D)
-        B, S, D = x.shape
-        qkv = self.qkv(x)  # [B, S, D] --> [B, S, 3*D]
+        # x shape: (B, seq_len, D)
+        B, seq_len, D = x.shape
+        qkv = self.qkv(x)  # [B, seq_len, D] --> [B, seq_len, 3*D]
         # torch.split: 在 dim -1 维度 不重叠地 split D 宽度的 sub-tensor, 组成 sub-tensors tuple
-        q, k, v = qkv.split(D, dim=-1) # [B, S, 3*D] --split--> q[B, S, D], k[B, S, D], v[B, S, D]
+        q, k, v = qkv.split(D, dim=-1) # [B, seq_len, 3*D] --split--> q[B, seq_len, D], k[B, seq_len, D], v[B, seq_len, D]
 
-        def _reshape(t): # [B,S,D] = [B, S, H*d] -> [B, S, H, d] -> [B, H, S, d]
+        def _reshape(t): # [B, seq_len, D] = [B, seq_len, H*d] -> [B, seq_len, H, d] -> [B, H, seq_len, d]
             return t.view(B, S, self.n_head, self.head_dim).transpose(1, 2)
-        return _reshape(q), _reshape(k), _reshape(v) # q[B, H, S, d], k[B, H, S, d], v[B, H, S, d]
+        return _reshape(q), _reshape(k), _reshape(v) # qkv shape: [B, H, seq_len, d], 不连续
 
     def forward(
         self,
         x: torch.Tensor,                                               # [B, S, D]
         attention_mask: Optional[torch.Tensor] = None,                 # [B, S], 1=非PAD, 0=PAD（可选）
-        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # (k_cache,v_cache) 形状 [B,H,S_cached,d]
+        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # (k_cache,v_cache) 形状 [B,H,cached_len,d]
         use_cache: bool = False,
     ):
         # x shape:
-        #   train: (B, S, D), infer: (1, 1, D)
-        B, S, D = x.shape
+        B, q_len, D = x.shape # train: (B, S, D), infer: (1, 1, D)
 
         # 如果是 train mode, attention是 self-attention:
-        #   qkv 是序列长度为 S 的 x 的不同线性映射, q=W_q(x), k=W_k(x), v=W_v(x)  -->  S(q,k) * v --> output
+        #   qkv 是序列长度为 q_len=S 的 x 的不同线性映射, q=W_q(x), k=W_k(x), v=W_v(x)  -->  S(q,k) * v --> output
         #   时间步 0<->S-1 统一teacher-force预测下一个token 即 时间步 1<->S 的tokens
-        q, k, v = self._shape_qkv(x)  # q[B,H,S,d], k[B,H,S,d], v[B,H,S,d]
+        q, k, v = self._shape_qkv(x)  # qkv都是 [B,H,S=q_len,d]
 
         # 如果是 infer mode, 即开启缓存, attention是自回归:
         #   q是序列长度为 1 的 新单步token 的线性映射, kv是 新单步token 的线性映射 追加到 前面token映射cache
         #   q: 时间步 T(0<=T<=S-1) 迭代地预测下一个 T+1 时间步token, kv: 时间步 0<->T-1 tokens cache + 时间步 T token
         #       在旧的encoder-decoder架构上, infer时, q时间步是从 0 开始的. 但是 decoder-only架构, 由于存在prompt, 那么prompt tokens
-        #       decoded 就是 0<->T 时间步, q 作为时间步 T token decoded 输入, kv 是时间步 0<->T tokens decoded，从而预测T+1
+        #       decoded 就是 0<->T 时间步, q 作为时间步 T token decoded 输入, kv 是时间步 0<->T tokens decoded，从而预测时间步 T+1
+        #       计prompt的最后一个token作为生成的starting query, 它的时间步是T. 那么
+        #           第一次生成使用 query = 时间步T token, kv_cache = 时间步0<->T-1 token decoded, 追加后 kv_len = T+1
+        #           最后一次生成使用 query = 时间步S-1 token, kv_cache = 时间步0<->S-2 token decoded, 追加后 kv_len = S
+        #   记 kv_len = output_final_step: 它的值确实等于输出序列的最终时间步
         if kv_cache is not None:
-            k_cache, v_cache = kv_cache  # [B,H,S_cached,d]
-            k = torch.cat([k_cache, k], dim=2)  # [B,H,S_total,d], 这里 S_total = S_cached + 1
-            v = torch.cat([v_cache, v], dim=2)
+            k_cache, v_cache = kv_cache  # [B,H,cached_len,d]
+            k = torch.cat([k_cache, k], dim=2) # [B,H,kv_len,d], 这里 kv_len = cached_len + 1, starting query timestep < kv_len <= S
+            v = torch.cat([v_cache, v], dim=2) # [B,H,kv_len,d]
 
         # 注意力分数
         # train: q[B,H,S,d] @ k[B,H,S,d].transpose(-2,-1) -> q[B,H,S,d] @ k[B,H,d,S] -> att[B,H,S,S]
-        # infer: q[1,H,1,d] @ k[1,H,T,d].transpose(-2,-1) -> q[1,H,1,d] @ k[1,H,d,T] -> att[1,H,1,T]
-        # 总结: q[B,H,S_q,d] @ k[B,H,S_k,d].transpose(-2,-1) -> [1,H,1,T]
-        att = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B,H,S_q,S_k]
-        S_total = att.size(-1)
+        # infer: q[1,H,1,d] @ k[1,H,kv_len,d].transpose(-2,-1) -> q[1,H,1,d] @ k[1,H,d,kv_len] -> att[1,H,1,kv_len]
+        # 总结: q[B,H,q_len,d] @ k[B,H,kv_len,d].transpose(-2,-1) -> [B,H,q_len,kv_len]
+        att = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B,H,q_len,kv_len]
+        # output_final_step = S for train mode; output_final_step = input query 时间步 + 1 = output query 时间步 for infer mode
+        output_final_step = att.size(-1)
 
         # 因果遮罩：禁止看未来位置
-        causal = self.causal_mask[:, :, :S, :S_total]           # [1,1,S,S_total]
-        att = att.masked_fill(causal, float("-inf"))
+        # casual_mask 是 [1,1,S,S], dim-2代表query时间步0<->S-1，dim-1代表output时间步1<->S: 对于query i-1, output时间步 i<->S 都是未来
 
-        # 可选的 padding mask：屏蔽 encoder 序列中的 PAD（这里是 decoder 自注意力的 padding）
+        # train mode: qkv都是 从x线性映射而来的长度为 S 的序列, casual_mask本身就代表了对每一个q而言的未来mask
+        # infer mode: q是时间步为T的单步token映射, T+1=kv_len=output_final_step; kv是时间步0<->T的tokens decoded, casual_mask应该是T代表的那一行
+
+        # 所以 att [B,H, q_len, output_final_step] 的 dim-2也表示query的时间步, dim-1是对应query的输出最终时间步.
+        # 在 casual_mask 上截取 dim-2 维度q_len长，dim-1 维度最终输出时间步为kv_len 的mask
+        causal = self.causal_mask[:, :, output_final_step-q_len:output_final_step, :output_final_step] # [1, 1, q_len, kv_len]
+        
+        att = att.masked_fill(causal, float("-inf")) # [B,H,q_len,kv_len]
+
+        # 可选的 padding mask：在 label data 中, 代表屏蔽 pad 位置. 1代表非pad位置, 0代表pad位置
+        # attention_mask shape: [B, output_final_step], 是 label data 的 shape
         if attention_mask is not None:
-            # attention_mask: [B,S_total]（当有cache时 S_total=S_cached+S_new）
+            # attention_mask: [B, output_final_step]（当有cache时 output_final_step = cached_len + 1）
             # 转为 key padding mask: True 表示需要屏蔽
-            key_pad = (attention_mask == 0).view(B, 1, 1, S_total)  # [B,1,1,S_total]
+            key_pad = (attention_mask == 0).view(B, 1, 1, output_final_step) 
             att = att.masked_fill(key_pad, float("-inf"))
 
-        att = F.softmax(att, dim=-1)
-        att = self.attn_drop(att)
+        att = F.softmax(att, dim=-1) # [B,H,q_len,kv_len]
+        att = self.attn_drop(att) # [B,H,q_len,kv_len]
 
-        y = torch.matmul(att, v)  # [B,H,S,d]
-        y = y.transpose(1, 2).contiguous().view(B, S, D)  # [B,S,D]
+        y = torch.matmul(att, v)  # [B, H, q_len, kv_len] @ [B, H, kv_len, d] -> [B, H, q_len, d]
+        y = y.transpose(1, 2).contiguous().view(B, q_len, D)  # [B, H, q_len, d] -> [B, q_len, H, d] -> [B, q_len, D=H*d]
         y = self.resid_drop(self.proj(y))                 # 输出投影 + dropout
 
         new_cache = None
