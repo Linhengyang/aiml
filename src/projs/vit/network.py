@@ -56,9 +56,11 @@ class ViTEncoder(Encoder):
         X = torch.cat([self.cls_token.expand(X.shape[0], -1, -1), X], dim=1)
 
         position_ids = torch.arange(0, X.size(1), dtype=torch.int64, device=X.device) # 1D int64 tensor: 0, 1, ... num_patches
-        X = self.dropout( X + self.pos_embedding(position_ids) ) # (batch_size, seq_len=1+num_patches, num_hiddens)
+        # seq_len = 1+num_patches
+        # X(batch_size, seq_len, num_hiddens) +(broadcast) pos_embedding(seq_len, num_hiddens)
+        X = self.dropout( X + self.pos_embedding(position_ids) ) # (batch_size, seq_len, num_hiddens)
         
-        # (batch_size, seq_len=1+num_patches, num_hiddens) --> (batch_size, seq_len=1+num_patches, num_hiddens)
+        # (batch_size, seq_len, num_hiddens) --> (batch_size, seq_len, num_hiddens)
         for blk in self.blks:
             X = blk(X)
         

@@ -40,9 +40,10 @@ class BERTEncoder(nn.Module):
         # valid_lens: (batch_size,)
         # segments shape: (batch_size, seq_len)01 int64
         
-        X = self.token_embedding(tokens) + self.seg_embedding(segments)
+        X = self.token_embedding(tokens) + self.seg_embedding(segments) # X shape: (batch_size, seq_len, num_hiddens)
         # positions shape: [0, 1, ..., seq_len-1] 1D tensor
         positions = torch.arange(0, X.size(1), dtype=torch.int64, device=X.device)
+        # X(batch_size, seq_len, num_hiddens) broadcast + posenc(seq_len, num_hiddens)
         X = self.dropout( X + self.pos_encoding(positions) )
 
         for blk in self.blks:

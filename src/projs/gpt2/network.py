@@ -1,94 +1,122 @@
+from ...core.nn_components.meta_frames import Encoder, AttentionDecoder, EncoderDecoder
+from ...core.nn_components.root_layers.position_encoding import TrigonoAbsPosEnc
+from ...core.nn_components.sub_modules._gpt2 import GPT2DecoderBlock
 import torch.nn as nn
 import math
 import torch
-import numpy as np
 
-"""
-每个NN都必须继承nn.Module(可以继承再继承)
-每个NN都必须至少实现__init__和forward两个方法. 其中__init__确定了拓扑结构, forward确定了前向过程(同时也确定了反向传播过程)
-torch.nn已经定义了一些常用的基础NN, 同时torch / torch.nn.functional定义了一些梯度可传的函数操作.
-所以我们搭建NN的过程,就是用torch.nn完成基础层, 然后用torch.nn.functional完成一些更精细的操作.
-最后一些常用操作也可以帮忙控制前向过程/梯度反传过程, 比如indexput操作, 可以让被put的位置不参与相关参数的更新
-"""
-class TestNN(nn.Module):
-    """
-    这是一个测试NN, 用来快速复习搭建NN的各个函数
-    """
-    def __init__(self, onehot_size, hidden_size, out_size, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.embedding_1 = nn.Embedding(onehot_size, hidden_size)
-        self.linear_2 = nn.Linear(hidden_size, out_size)
 
-    ## 经典的带参数前向计算 layers
 
-    # nn.Embedding
-    # nn.Embedding module 相当于 将 n 维tensor的值, 作onehot处理后, 成为 n+1 维的tensor
-    # 此时最后一维 的dim size 是 onehot_size(高维稀疏空间). 随后乘以一个 onehot_size 到 hidden_size 的线性映射
-    # 最终输出 n+1 维 的tensor. 相当于原 tensor 的每个scalar值 被映射到 hidden_size 维的低维空间
 
-    # nn.Linear
-    # nn.Linear 有input_size 和 output_size, 要求输入的data tensor 的最后一维是input_size, 输出data tensor的最后一维是 output_size
 
-    # nn.LazyLinear
-    # nn.LazyLinear 只有output_size这一个参数. 对输入的data tensor的维度没有要求，它会自动根据输入的last dim来作 input_size
+class gpt2(AttentionDecoder):
+    '''
+    train 模式:
+    单次forward是 seq_length 并行, 前后关系依赖是输入 timestep 0-seq_length-1, 输出 timestep 1-seq_length, 实现对 shift1 data 的 并行预测
 
-    ## 泛化随机 dropout layers
-    # nn.Dropout
-    # nn.Dropout 取 dropout_rate (p) 作为参数, 在训练的时候以p的概率 de-activate 某个神经元(即set to 0), 然后将该神经元的值 dilate by 1/(1-p)
-    # 提高泛化性
+    1. Embedding层.
+        输入(batch_size, seq_length), 每个元素是 0-vocab_size 的int64, 代表token ID. 输出(batch_size, seq_length, num_hiddens)
 
-    ## 非线形 layers
-    # nn.ReLU / nn.Sigmoid / nn.Tanh / nn.GeLU 等等. 一般来说，为了纯粹的非线形激活, 还是多采用 nn.functional 函数的办法激活
+    2. pos_encoding层.
+        输入 (seq_length,) 的 位置信息, 对其编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
+        输出 (1, seq_length, num_hiddens)
 
-    ## 规范化 Normalization Layers
-    # nn.LayerNorm / nn.BatchNorm 等等
+    3. 连续的 decoder Block.
+        每个 DecoderBlock 的输入 tgt_embd + pos_embd (batch_size, seq_length, num_hiddens),
+        输入/输出 src_enc_info(src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)] 作为在Block间不会变的 src 信息接力传递.
+        输出 (batch_size, seq_length, num_hiddens)
 
-    ## 其他用在 图像 等数据上的 Layers
-    # Convolution / Pooling / Padding 等
+        在 Block 内部, tgt_embd 先作 自回归的自注意力 以深度表征, 再和 src_embd 作 交叉注意力 以获取信息
 
-    ## 以上构成了torch模型的一些经典layers
-    ## 在内部, 可以使用私有属性 _modules 访问
-        # print("_modules: ", self._modules)
-        # print("**************************************")
+        Block 之间没有传递 valid_lens of tgt seq 的信息. 这个 valid lens of tgt seq 用在了 求loss 的步骤里
+
+        
+    eval 模式:
+    单次forward是生产 单个token 的过程. 总共要生成 seq_length 个token, 所以总过程要执行forward seq_length次,
+    第 i 次 forward 生成 timestep 为 i 的token, i = 1,2,...,seq_length.    timestep = 0 的token是<BOS>
+
+    对于 第 i 次forward, i = 1,2,...,seq_length
+    1. Embedding层.
+        输入(1, 1), 元素是 0-vocab_size 的int64, 代表 timestep=i-1 的 token ID. 输出 (1, 1, num_hiddens)
     
-    ## 但是很多时候, 模型需要微操至tensor. torch提供多种方式添加tensor. 如果该tensor是需要被更新的, 那么它是parameter, 如果不需要, 那么它是buffer
+    2. pos_encoding层.
+        对 (1,) 的 位置信息作编码. 这里这个位置信息代表 timestep i-1.
+        在forward过程中, 依靠 KV_Caches 中, dim 1 的维度长度, 得知当前 tgt_query 的位置信息
+        输出 (1, 1, num_hiddens)
+
+    3. 连续的 decoder Block
+        每个 DecoderBlock 的输入 tgt_embd + pos_embd (1, 1, num_hiddens)
+        输入/输出 src_enc_info(src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)] 作为在Block间不会变的 src 信息接力传递.
+        输入/输出 KV_Caches: 
+            输入的 KV_Caches 记录了每个 Block 各自的 输入 tgt_tensor(timestep i-1) 在 timesteps 0 - i-2 上的堆叠,
+            输出的 KV_Caches 记录了每个 Block 堆叠了 输入 tgt_tensor(timestep i-1) 更新后的结果. 一次forward过程中, 所有KV都更新一次
     
-    ## 添加 不需要被更新的 buffer
-        # 方式0: 成员变量
-        # self.buffer = torch.tensor(1.) 这种方式是不行的, 该值不会被注册进入模型, 无法跟随 state_dict 表述, 也不能跟随整个模型在device之间移动
-        # 唯一的方式
-        self.register_buffer("my_buffer", torch.tensor(1.) )
-        # 可以使用私有属性 _buffers 访问
-        # print("_buffers: ", self._buffers)
-        # 在外部, 可以使用方法 named_buffers()/ buffers 来展示
-
-    ## 添加 需要被更新的 parameter
-        # 有两种写法，效果几乎完全相同
-        # 都是创建新 parameter 变量, 并注册到模型中; 都需要使用 nn.Parameter()方法来确定梯度
-        self.register_parameter("my_param1", nn.Parameter(torch.tensor(1.)) )
-        self.my_param2 = nn.Parameter(torch.tensor(2.))
-        # 在内部, 可以使用私有属性 _parameters 访问
-        # print("_parameters: ", self._parameters)
-        # print("**************************************")
-        # 在外部, 可以使用方法 named_parameters()/ parameters() 来展示.
-        # _parameters 只会返回 额外注册的 parameters, 通过 _modules 注册的参数不会被访问
-        # 而 外部的 named_parameters()/ parameters() 会返回 _parameters 和 _modules 所有可学习参数
+    4. dense层.
+        输出 (1, 1, vocab_size)tensor of logits, 即对 timestep=i 的token 的预测
+        输出 KV_Caches: 记录了每个 Block 各自的 输入 tgt_tensor 在 timesteps 0 - i-1 上的堆叠.
+    '''
+    def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
+        super().__init__()
+        self.num_hiddens = num_hiddens
+        self.embedding = nn.Embedding(vocab_size, num_hiddens)
+        self.pos_encoding = TrigonoAbsPosEnc(num_hiddens)
+        self.dropout = nn.Dropout(dropout)
+        self.blks = nn.Sequential()
+        for i in range(num_blk):
+            cur_blk = GPT2DecoderBlock(i, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
+            self.blks.add_module("block"+str(i), cur_blk)
+        # TODO
+        # embedding matrix or linear?
+        self.dense = nn.Linear(num_hiddens, vocab_size)
 
 
+    def forward(self, tgt_dec_input, KV_Caches=None):
+        # train: tgt_dec_input shape: (batch_size, context_size)int64, timestep 从 0 到 context_size-1
+        #        KV_Caches: None
 
-    def forward(self, X):
-        X_embd = self.embedding_1(X)
-        Y = self.linear_2(nn.functional.relu(X_embd))
-        return Y
-    
+        #        position_ids: 
+        #           训练阶段时, position_ids 应该是 tensor([0, 1, ..., context_size-1])
 
+        # 对于第i次infer: i = 1, 2, ..., context_size
+        #        tgt_dec_input shape: (1, 1)int64, 其 timestep 是 i-1, 前向的output的 timestep 是 i
+        #        input KV_Caches, which is dict with:
+        #           keys: block_ind,
+        #           values: 对于第 1 次infer, KV_Caches 为 空
+        #                   对于第 i > 1 次infer, KV_Caches 是 tensors shape as (1, i-1, d_dim), i-1 维包含 timestep 0 到 i-2
 
+        #        position_ids:
+        #           推理时阶段时, 对于第 1 次infer, position_ids 应该是 tensor([0]), 因为此时 tgt_dec_input 是 <bos>, KV_Caches 为 {}
+        #           对于第 i > 1 次infer, position_ids = tensor([i-1]), 因为此时 tgt_dec_input position 是 i-1, 即 KV_Cacues 的 value 的第二维度
+        
+        # target input embedding
+        # tgt_dec_input_embd: shape (batch_size, context_size, num_hiddens)
+        tgt_dec_input_embd = self.embedding(tgt_dec_input) * math.sqrt(self.num_hiddens) 
+        # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
+        # target position embedding
+        # 训练模式: input 的 timesteps 是从 0(bos) 到 context_size-1
+        if self.training:
+            _, context_size = tgt_dec_input.shape
+            position_ids = torch.arange(0, context_size, dtype=torch.int64, device=tgt_dec_input.device) # (context_size,)
+        # 推理模式: 对于第i次infer, input 的 timestep 就是 i-1, 而这个信息可以从 KV_Caches 的values 中的第二个维度(dim=1)得到
+        else:
+            position_ids = torch.tensor([ 0 if KV_Caches == {} else KV_Caches['0'].size(1) ],
+                                        dtype=torch.int64, device=tgt_dec_input.device) # (1,)
 
+        # input embeddings + position embedding
+        tgt_query = self.dropout(tgt_dec_input_embd + self.pos_encoding(position_ids))
 
+        # Decoder Block 的输入 tgt_query, KV_Caches
+        for blk in self.blks:
+            # 循环过程中, 单次 blk 执行, 更新了 该 blk 对应的 KV_Caches 的 block-ID: tensor 的 kv对
+            tgt_query, KV_Caches = blk(tgt_query, KV_Caches)
+        
+        # 一次 infer forward 过程, KV_Caches 中的每个 key-value pair, 都被更新, 则 整个 KV_Caches 被更新
 
-if __name__ == "__main__":
-    X = torch.randint(low=0, high=9, size=(3,4,5), dtype=torch.int)
-    tnn = TestNN(onehot_size=10, hidden_size=3, out_size=5)
-    Y = tnn(X)
-    print(  list( tnn.named_parameters() ) )
+        #train: output[0] shape: (batch_size, context_size, vocab_size)tensor of logits,  timestep 从 1 到 context_size;
+        #       output[1]: None
+        #infer: output[0] shape: (1, 1, vocab_size)tensor of logits, 对于第i次infer, timestep 是 i;
+        #       output[1]: dict of 
+        #                   keys as block_indices
+        #                   values as (1, i, d_dim) tensor, i 维 包含 timestep 0-i-1, 实际上就是 input KV_Caches 添加 timestep i-1 的 tgt_query
+        return self.dense(tgt_query), KV_Caches

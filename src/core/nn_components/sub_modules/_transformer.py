@@ -53,7 +53,7 @@ class TransformerEncoderBlock(nn.Module):
         # PosFFN
         # input: (batch_size, n_query, num_hiddens)
         # output: (batch_size, n_query, num_hiddens)
-        self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
+        self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens) # ffn_num_hiddens在原始论文里=4*num_hiddens
 
         self.addlnorm2 = AddLNorm(num_hiddens, dropout)
     
@@ -117,7 +117,7 @@ class TransformerDecoderBlock(nn.Module):
 
     def forward(self, tgt_query, src_enc_info, KV_Caches=None): # 函数内部对 kv_caches 作in-place操作
         src_enc_seqs, src_valid_lens = src_enc_info
-        # src_enc_seqs, timestep 1 - num_steps, shape as
+        # src_enc_seqs, timestep 1 <-> num_steps, shape as
         #   train: (batch_size, num_steps, d_dim), infer: (1, num_steps, d_dim)
 
         # src_valid_lens, shape as
@@ -125,7 +125,7 @@ class TransformerDecoderBlock(nn.Module):
 
         if self.training:
             # train 过程中, tgt_query 是一个 shape 为 (batch_size, num_steps, d_dim) 的tensor. 时间步为 0 至 num_steps-1
-            # 代表 target sequence timestep 0 至 num_steps-1
+            # 代表 target sequence timestep 0 至 num_steps-1。不过可能是 左pad，也可能是右pad
             assert tgt_query.shape[-1] == src_enc_seqs.shape[-1],\
                 f'training: enc output & dec input block {self.blk_ind} are not in same shape'
             
