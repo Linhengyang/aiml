@@ -28,7 +28,7 @@ class GELU(nn.Module):
 # =============== 多头自注意力（含因果遮罩 + 可选padding遮罩） ===============
 class CausalSelfAttention(nn.Module):
     """
-    形状约定：输入/输出 hidden_states: [B, S, C]；内部 q/k/v => [B, H, S, D]
+    形状约定：输入/输出 hidden_states: [B, S, D]；内部 q/k/v => [B, H, S, d], 这里 D 模型宽度 = H*d, d = dim_per_head
     """
     def __init__(self, cfg: GPT2Config):
         super().__init__()
@@ -45,7 +45,8 @@ class CausalSelfAttention(nn.Module):
         self.resid_drop = nn.Dropout(cfg.resid_pdrop)
 
         # 预先构造上三角因果mask（在forward里会按需裁剪至当前 S）
-        # mask 形状 [1, 1, S, S] 便于广播到 [B,H,S,S]
+        # mask 形状 [1, 1, S, S] 便于广播到 [B,H,S,S], 正对角线上方(不包括对角线)的为True, 其余为False. 是为了选取True区域set to -inf
+        # 以此排除在softmax之外
         self.register_buffer(
             "causal_mask",
             torch.triu(torch.ones(cfg.n_positions, cfg.n_positions, dtype=torch.bool), diagonal=1)[None, None, :, :],
@@ -53,31 +54,46 @@ class CausalSelfAttention(nn.Module):
         )
 
     def _shape_qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        B, S, C = x.shape
-        qkv = self.qkv(x)  # [B, S, 3C]
-        q, k, v = qkv.split(C, dim=-1)
-        # [B,S,C] -> [B,H,S,D]
-        def _reshape(t):
-            return t.view(B, S, self.n_head, self.head_dim).transpose(1, 2)  # [B,H,S,D]
-        return _reshape(q), _reshape(k), _reshape(v)
+        # x shape: (B, S, D)
+        B, S, D = x.shape
+        qkv = self.qkv(x)  # [B, S, D] --> [B, S, 3*D]
+        # torch.split: 在 dim -1 维度 不重叠地 split D 宽度的 sub-tensor, 组成 sub-tensors tuple
+        q, k, v = qkv.split(D, dim=-1) # [B, S, 3*D] --split--> q[B, S, D], k[B, S, D], v[B, S, D]
+
+        def _reshape(t): # [B,S,D] = [B, S, H*d] -> [B, S, H, d] -> [B, H, S, d]
+            return t.view(B, S, self.n_head, self.head_dim).transpose(1, 2)
+        return _reshape(q), _reshape(k), _reshape(v) # q[B, H, S, d], k[B, H, S, d], v[B, H, S, d]
 
     def forward(
         self,
-        x: torch.Tensor,                       # [B, S, C]
-        attention_mask: Optional[torch.Tensor] = None,  # [B, S], 1=非PAD, 0=PAD（可选）
-        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # (k_cache,v_cache) 形状 [B,H,S_cached,D]
+        x: torch.Tensor,                                               # [B, S, D]
+        attention_mask: Optional[torch.Tensor] = None,                 # [B, S], 1=非PAD, 0=PAD（可选）
+        kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # (k_cache,v_cache) 形状 [B,H,S_cached,d]
         use_cache: bool = False,
     ):
-        B, S, C = x.shape
-        q, k, v = self._shape_qkv(x)  # [B,H,S,D]
+        # x shape:
+        #   train: (B, S, D), infer: (1, 1, D)
+        B, S, D = x.shape
 
-        # 如果开启缓存（自回归解码），把新步的 k,v 追加到 cache
+        # 如果是 train mode, attention是 self-attention:
+        #   qkv 是序列长度为 S 的 x 的不同线性映射, q=W_q(x), k=W_k(x), v=W_v(x)  -->  S(q,k) * v --> output
+        #   时间步 0<->S-1 统一teacher-force预测下一个token 即 时间步 1<->S 的tokens
+        q, k, v = self._shape_qkv(x)  # q[B,H,S,d], k[B,H,S,d], v[B,H,S,d]
+
+        # 如果是 infer mode, 即开启缓存, attention是自回归:
+        #   q是序列长度为 1 的 新单步token 的线性映射, kv是 新单步token 的线性映射 追加到 前面token映射cache
+        #   q: 时间步 T(0<=T<=S-1) 迭代地预测下一个 T+1 时间步token, kv: 时间步 0<->T-1 tokens cache + 时间步 T token
+        #       在旧的encoder-decoder架构上, infer时, q时间步是从 0 开始的. 但是 decoder-only架构, 由于存在prompt, 那么prompt tokens
+        #       decoded 就是 0<->T 时间步, q 作为时间步 T token decoded 输入, kv 是时间步 0<->T tokens decoded，从而预测T+1
         if kv_cache is not None:
-            k_cache, v_cache = kv_cache  # [B,H,S_cached,D]
-            k = torch.cat([k_cache, k], dim=2)  # [B,H,S_total,D]
+            k_cache, v_cache = kv_cache  # [B,H,S_cached,d]
+            k = torch.cat([k_cache, k], dim=2)  # [B,H,S_total,d], 这里 S_total = S_cached + 1
             v = torch.cat([v_cache, v], dim=2)
 
         # 注意力分数
+        # train: q[B,H,S,d] @ k[B,H,S,d].transpose(-2,-1) -> q[B,H,S,d] @ k[B,H,d,S] -> att[B,H,S,S]
+        # infer: q[1,H,1,d] @ k[1,H,T,d].transpose(-2,-1) -> q[1,H,1,d] @ k[1,H,d,T] -> att[1,H,1,T]
+        # 总结: q[B,H,S_q,d] @ k[B,H,S_k,d].transpose(-2,-1) -> [1,H,1,T]
         att = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B,H,S_q,S_k]
         S_total = att.size(-1)
 
@@ -95,8 +111,8 @@ class CausalSelfAttention(nn.Module):
         att = F.softmax(att, dim=-1)
         att = self.attn_drop(att)
 
-        y = torch.matmul(att, v)  # [B,H,S,D]
-        y = y.transpose(1, 2).contiguous().view(B, S, C)  # [B,S,C]
+        y = torch.matmul(att, v)  # [B,H,S,d]
+        y = y.transpose(1, 2).contiguous().view(B, S, D)  # [B,S,D]
         y = self.resid_drop(self.proj(y))                 # 输出投影 + dropout
 
         new_cache = None
@@ -271,3 +287,4 @@ if __name__ == "__main__":
     # 简单生成
     out = model.generate(x[:, :8], max_new_tokens=8, temperature=1.0, top_k=50, eos_id=None)
     print("generated:", out.shape)  # [2, 16]
+
