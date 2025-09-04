@@ -132,10 +132,12 @@ class CausalSelfAttention(nn.Module):
         if use_cache:
             # 返回完整的 K/V 以供下一步复用
             new_cache = (k, v)
-
+        
+        # y shape: [B, q_len, D], new_cache: None or tuple of k[B,H,kv_len,d], v[B,H,kv_len,d]
         return y, new_cache
 
 # =============== MLP ===============
+# [..., D] --linear-porj--> [..., 4*D] --gelu--> [..., 4D] --linear-proj--> [..., D] --dropout--> [..., D]
 class MLP(nn.Module):
     def __init__(self, cfg: GPT2Config):
         super().__init__()
@@ -152,6 +154,22 @@ class MLP(nn.Module):
         return x
 
 # =============== Block（Pre-LN） ===============
+# kv_cache(if any)-->
+# x --layernorm-----> --SelfAttention--> --add_layernorm_ffn_add--> output
+#                                    --> new_kv_cache
+
+
+# 对比 Post-LN from transformer
+
+# kv_cache(if any)-->
+# x               --> --SelfAttention--> --add_layernorm--> (--XEncAttention--> add_layernorm) --ffn_add_layernorm--> output
+#                                        --> new_kv_cache
+
+# 如果去掉cross-encoder相关, 应该如下
+
+# kv_cache(if any)-->
+# x               --> --SelfAttention--> --add_layernorm_ffn_add_layernorm--> output
+#                                    --> new_kv_cache
 class Block(nn.Module):
     def __init__(self, cfg: GPT2Config):
         super().__init__()

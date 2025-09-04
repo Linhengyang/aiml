@@ -266,3 +266,24 @@ class MultiHeadAttention(nn.Module):
         O = self.attention(Q, K, V, valid_lens, where_valid)
         O = transpose_o(O, self.h)
         return self.W_o(O)
+
+
+
+
+# F.scaled_dot_product_attention 的 api 逻辑, 实现带因果遮罩 casual_mask 的 multi-head attention layer
+# (function) def scaled_dot_product_attention(
+#     query: Tensor,
+#     key: Tensor,
+#     value: Tensor,
+#     attn_mask: Tensor | None = None,
+#     dropout_p: float = 0,
+#     is_causal: bool = False,
+#     scale: float | None = None,
+#     enable_gqa: bool = False
+# ) -> Tensor
+# casual mask提供是否缓存选择:
+#   缓存则 register_buffer 一个 max_context_size 的上三角 casual mask, 以便在 forward 中slice取出每条query相应的未来位置
+#   不缓存则 在 forward 中按需构造一个 casual mask, 来制作每条query相应的未来位置
+# 在
+class RoPECasualMHA(nn.Module):
+    pass
