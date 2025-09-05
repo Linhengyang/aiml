@@ -283,7 +283,18 @@ class MultiHeadAttention(nn.Module):
 # ) -> Tensor
 # casual mask提供是否缓存选择:
 #   缓存则 register_buffer 一个 max_context_size 的上三角 casual mask, 以便在 forward 中slice取出每条query相应的未来位置
-#   不缓存则 在 forward 中按需构造一个 casual mask, 来制作每条query相应的未来位置
-# 在
-class RoPECasualMHA(nn.Module):
+#   不缓存则 在 forward 中按需构造一个 casual mask, 来制作每条query相应的未来位置, 这样就避免了forward中存在max_context_size
+# attention中提供是否rope选择:
+#   yes则在计算self-attention时, apply_rope on q/k， no则在计算self-attention时，直接计算 qk
+
+# 由此，CasualMHA 在forward过程中不依赖 max_context_size: casual_mask是根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
+# 实际上，CasualMHA 实现了 input sequence 变长：因为 RoPE 和 attention weights 都支持变长。
+# 不过, 在实际Model层面, 仍然会设定max_context_size参数，并保证所有input sequence 的长度都不大于这个值。原因如下:
+#   1. 在 CasualMHA层, casual_mask 和 attention weights在训练时, 涉及 O(query_seq_length^2) 的显存空间占用. 如果不限制 query_seq_length，
+#      那么在训练时若输入了过长的 input sequence，可能会导致OOM。这样在 CasualMHA 层避免了过大的 attention weights 矩阵。
+#   2. 很多模型在制作train dataset时，会切分长文档/拼接短文档，成固定长度的chunk。这里的固定长度就约等于模型的max_context_size，因为限制了外推能力
+#      但是现代很多LLM的训练策略是curriculum-style: 训练epoch早期使用短序列，后期用长序列，训练时sequence length是动态变化的。
+#   3. RoPE的无线拓展只是理论上的，实际上theta=position_index*频率信号，当position很大时会失真。现代模型多会启用RoPE scaling，而这里
+#      RoPE scaling 依赖 max_context_size。
+class CasualMHA(nn.Module):
     pass
