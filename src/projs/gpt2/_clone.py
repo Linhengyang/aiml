@@ -66,48 +66,54 @@ class CausalSelfAttention(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,                                               # [B, S, D]
-        attention_mask: Optional[torch.Tensor] = None,                 # [B, S], 1=非PAD, 0=PAD（可选）
+        x: torch.Tensor,                                               # [B, q_len, D]
+        attention_mask: Optional[torch.Tensor] = None,                 # [B, output_final_step], 1=非PAD, 0=PAD（可选）
         kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # (k_cache,v_cache) 形状 [B,H,cached_len,d]
         use_cache: bool = False,
     ):
         # x shape:
-        B, q_len, D = x.shape # train: (B, S, D), infer: (1, 1, D)
+        B, q_len, D = x.shape # train: (B, q_len, D), infer: (1, 1, D)
 
         # 如果是 train mode, attention是 self-attention:
-        #   qkv 是序列长度为 q_len=S 的 x 的不同线性映射, q=W_q(x), k=W_k(x), v=W_v(x)  -->  S(q,k) * v --> output
-        #   时间步 0<->S-1 统一teacher-force预测下一个token 即 时间步 1<->S 的tokens
+        #   qkv 是序列长度为 q_len 的 x 的不同线性映射, q=W_q(x), k=W_k(x), v=W_v(x)  -->  S(q,k) * v --> output
+        #   时间步 0<->q_len-1 统一teacher-force预测下一个token 即 时间步 1<->q_len 的tokens
         q, k, v = self._shape_qkv(x)  # qkv都是 [B,H,S=q_len,d]
 
         # 如果是 infer mode, 即开启缓存, attention是自回归:
-        #   q是序列长度为 1 的 新单步token 的线性映射, kv是 新单步token 的线性映射 追加到 前面token映射cache
-        #   q: 时间步 T(0<=T<=S-1) 迭代地预测下一个 T+1 时间步token, kv: 时间步 0<->T-1 tokens cache + 时间步 T token
+        #   q是序列长度为 1 的 新单步token 的线性映射, kv是 新单步token 的线性映射 追加到 past cached tokens 的线性映射
+        #   q: 时间步 T 迭代地预测下一个 T+1 时间步token(0 <= T < L_max), kv: 时间步 0<->T-1 tokens cache + 时间步 T token 得到的 0<->T tokens
         #       在旧的encoder-decoder架构上, infer时, q时间步是从 0 开始的. 但是 decoder-only架构, 由于存在prompt, 那么prompt tokens
         #       decoded 就是 0<->T 时间步, q 作为时间步 T token decoded 输入, kv 是时间步 0<->T tokens decoded，从而预测时间步 T+1
         #       计prompt的最后一个token作为生成的starting query, 它的时间步是T. 那么
         #           第一次生成使用 query = 时间步T token, kv_cache = 时间步0<->T-1 token decoded, 追加后 kv_len = T+1
-        #           最后一次生成使用 query = 时间步S-1 token, kv_cache = 时间步0<->S-2 token decoded, 追加后 kv_len = S
-        #   记 kv_len = output_final_step: 它的值确实等于输出序列的最终时间步
+        #           最后一次生成使用 query = 时间步 L_max-1 token, kv_cache = 时间步0<->L_max-2 token decoded, 追加后 kv_len = L_max
+
+        #   记 T = final_step_of_input_as_query, (0 <= T < L_max), 则 final_step_of_output = T+1
+        #   训练时 input_as_query length = T+1（即 0 至 T）, kv序列总长度 = T+1（即 1 至 T+1）
+        #   推理时 kv序列总长度 = all_num_steps_up_to_now（这里now就是 input final step T）= T+1
+        #   从而 kv的序列总长度始终等于 T+1，它同时也是 output_final_step
         if kv_cache is not None:
-            k_cache, v_cache = kv_cache  # [B,H,cached_len,d]
-            k = torch.cat([k_cache, k], dim=2) # [B,H,kv_len,d], 这里 kv_len = cached_len + 1, starting query timestep < kv_len <= S
-            v = torch.cat([v_cache, v], dim=2) # [B,H,kv_len,d]
+            k_cache, v_cache = kv_cache  # [B, H, T, d], 这里 T = input x 的final step, kv_cache 的 T代表 0<->T-1 
+            k = torch.cat([k_cache, k], dim=2) # [B, H, T+1, d]
+            v = torch.cat([v_cache, v], dim=2) # [B, H, T+1, d]
 
         # 注意力分数
-        # train: q[B,H,S,d] @ k[B,H,S,d].transpose(-2,-1) -> q[B,H,S,d] @ k[B,H,d,S] -> att[B,H,S,S]
-        # infer: q[1,H,1,d] @ k[1,H,kv_len,d].transpose(-2,-1) -> q[1,H,1,d] @ k[1,H,d,kv_len] -> att[1,H,1,kv_len]
-        # 总结: q[B,H,q_len,d] @ k[B,H,kv_len,d].transpose(-2,-1) -> [B,H,q_len,kv_len]
-        att = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B,H,q_len,kv_len]
-        # output_final_step = S for train mode; output_final_step = input query 时间步 + 1 = output query 时间步 for infer mode
-        output_final_step = att.size(-1)
+        # train: q[B, H, q_len=T+1, d] @ k[B, H, T+1, d]转置后二维 --> att[B, H, q_len=T+1, T+1=q_len]
+        # infer: q[1, H, q_len=1(时间步T), d] @ k[1, H, T+1(时间步0至T), d]转置后二维 --> att[1, H, q_len=1, T+1]
+        # 总结: q[B, H, q_len, d] @ k[B, H, T+1, d]转置后二维 --> [B, H, q_len, T+1]
+        att = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B, H, q_len, T+1]
 
-        # 因果遮罩：禁止看未来位置
-        # casual_mask 是 [1,1,S,S], dim-2代表query时间步0<->S-1，dim-1代表output时间步1<->S: 对于query i-1, output时间步 i<->S 都是未来
+        output_final_step = att.size(-1) # output_final_step == input_final_step + 1 = T+1
 
-        # train mode: qkv都是 从x线性映射而来的长度为 S 的序列, casual_mask本身就代表了对每一个q而言的未来mask
-        # infer mode: q是时间步为T的单步token映射, T+1=kv_len=output_final_step; kv是时间步0<->T的tokens decoded, casual_mask应该是T代表的那一行
+        # 因果遮罩：禁止看未来位置。这里提前实例化一个 (L_max, L_max) 大小的 casual mask.
+        # casual mask 的每一 行/dim-2，代表对于 时间步 T (0 <= T < L_max)，T+1 至 L_max 都是未来.
+        # casual mask dim-2代表query时间步T（0至L_max-1），dim-1代表output时间步T+1（1至L_max）: 对于query T, output时间步 T+1至L_max 都是未来
 
-        # 所以 att [B,H, q_len, output_final_step] 的 dim-2也表示query的时间步, dim-1是对应query的输出最终时间步.
+        # 对于 att [B,H, q_len, output_final_step=T+1]
+        #       dim-2 size q_len 代表的是input query的时间步步数(T+1-q_len至T)，dim-1代表的是past所有时间步步数(0至T)
+        # train mode: qkv都是 从x线性映射而来的长度为 q_len=T+1 的序列, casual_mask截取 0到T 行，0到T 列即可.
+        # infer mode: q是时间步为T的单步token映射, kv是时间步0<->T的tokens decoded, casual_mask应该是 T 的那一行
+
         # 在 casual_mask 上截取 dim-2 维度q_len长，dim-1 维度最终输出时间步为kv_len 的mask
         causal = self.causal_mask[:, :, output_final_step-q_len:output_final_step, :output_final_step] # [1, 1, q_len, kv_len]
         
@@ -132,10 +138,12 @@ class CausalSelfAttention(nn.Module):
         if use_cache:
             # 返回完整的 K/V 以供下一步复用
             new_cache = (k, v)
-
+        
+        # y shape: [B, q_len, D], new_cache: None or tuple of k[B,H,kv_len,d], v[B,H,kv_len,d]
         return y, new_cache
 
 # =============== MLP ===============
+# [..., D] --linear-porj--> [..., 4*D] --gelu--> [..., 4D] --linear-proj--> [..., D] --dropout--> [..., D]
 class MLP(nn.Module):
     def __init__(self, cfg: GPT2Config):
         super().__init__()
@@ -152,6 +160,22 @@ class MLP(nn.Module):
         return x
 
 # =============== Block（Pre-LN） ===============
+# kv_cache(if any)-->
+# x --layernorm-----> --SelfAttention--> --add_layernorm_ffn_add--> output
+#                                    --> new_kv_cache
+
+
+# 对比 Post-LN from transformer
+
+# kv_cache(if any)-->
+# x               --> --SelfAttention--> --add_layernorm--> (--XEncAttention--> add_layernorm) --ffn_add_layernorm--> output
+#                                        --> new_kv_cache
+
+# 如果去掉cross-encoder相关, 应该如下
+
+# kv_cache(if any)-->
+# x               --> --SelfAttention--> --add_layernorm_ffn_add_layernorm--> output
+#                                    --> new_kv_cache
 class Block(nn.Module):
     def __init__(self, cfg: GPT2Config):
         super().__init__()
@@ -196,26 +220,32 @@ class GPT2LMHeadModel(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor,                 # [B, S]
-        attention_mask: Optional[torch.Tensor] = None,  # [B, S], 1=非PAD, 0=PAD
-        use_cache: bool = False,
-        past_kv: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None,  # 每层的(k,v)
+        input_token_seqs: torch.Tensor,                 # [B, input_seq_len], input_seq 在train时是变长的. 不过同一batch内是确定的
+        attention_mask: Optional[torch.Tensor] = None,  # [B, input_seq_len], 1=非PAD, 0=PAD
+        use_cache: bool = False, # 若为True, 则返回
+        past_kv: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None,  # 每层的(k,v), 每个(k,v)是 pair of [B, H, past_length, d]
     ):
-        B, S = input_ids.shape
-        device = input_ids.device
+        B, input_seq_len = input_token_seqs.shape
+        device = input_token_seqs.device
 
-        # 位置索引（GPT-2 使用绝对位置，从 0..S_total-1）
-        if past_kv is None:
-            past_len = 0
+        # 位置索引（GPT-2 使用绝对位置. 0 <-> input_seq_len-1）
+        if past_kv is None: #
+            past_len = 0 # 如果没有输入 past kv_caches，说明是 train mode，或者说没有 past kv_caches.
+            # 那么 input_token_seqs 序列的起始位置就是 0, 序列长度是 input_seq_len
         else:
-            past_len = past_kv[0][0].size(2)  # 取第一层的缓存长度
-        pos_ids = torch.arange(past_len, past_len + S, device=device).unsqueeze(0)  # [1,S]
+            past_len = past_kv[0][0].size(2)  # 取第一层的k的dim2缓存长度，即 past_length
+            # 输入了 past kv_caches，那么 input_token_seqs 序列的起始位置是 past_length，序列长度是 input_seq_len
+
+        # 计算得到 input_token_seqs 中，token 在 序列中的 position 位置(index)
+        pos_ids = torch.arange(past_len, past_len + input_seq_len, device=device).unsqueeze(0)  # [1, input_seq_len]
 
         # 嵌入
-        tok = self.wte(input_ids)           # [B,S,C]
-        pos = self.wpe(pos_ids)             # [1,S,C]（广播到B）
-        x = self.drop(tok + pos)            # [B,S,C]
+        tok = self.wte(input_token_seqs)    # [B, input_seq_len] --linear-proj--> [B, input_seq_len, D]
+        pos = self.wpe(pos_ids)             # [1, input_seq_len] --linear-proj--> [1, input_seq_len, D]
+        x = self.drop(tok + pos)            # x = token_embedding +(broadcast) position_embedding --> [B, input_seq_len, D]
 
+        # attention_mask 作为对 input_token_seqs 的描述，在有 past_kv 的时候，需要补全对 past_kv 的描述，从而在 self-attention 前补足
+        # 对 
         # 若存在 cache，attention_mask 也要扩展到 past_len+S 的长度
         # 这里简单处理：若传入的是当前S的mask，且有cache，则把前缀视为全1（非PAD）
         if attention_mask is not None and past_len > 0:
