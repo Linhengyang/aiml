@@ -88,7 +88,7 @@ class CausalSelfAttention(nn.Module):
         use_cache: bool = False,
     ):
         # x shape:
-        B, num_steps_for_query, D = x.shape # train: (B, S, D), infer: (1, 1, D)
+        B, num_steps_for_query, D = x.shape # train: (B, S, D), infer: (B, 1, D)
 
         # 如果是 train mode:
         #   qkv 是序列长度为 S 的 x 的不同线性映射, q=W_q(x), k=W_k(x), v=W_v(x)  -->  S(q,k) * v --> output
@@ -156,8 +156,11 @@ class CausalSelfAttention(nn.Module):
             # 返回完整的 K/V 以供下一步复用
             new_cache = (k, v)
         
-        # y shape: [B, num_steps_for_query=S/1, D=H*d], new_cache: None or tuple of kv # [B, H, num_steps_so_far=T+1, d]
-        return y, new_cache # 对比一下 old_kv_cache 的 shape：[B, H, num_steps_past=T, d]，new_cache追加了时间步T
+        # output y shape: [B, num_steps_for_query=S/1, D=H*d], timestep应该统一往前一步
+        # 对比一下 input x shape: [B, num_steps_for_query=S/1, D], latest timestep T
+        # new_cache: None or tuple of kv # [B, H, num_steps_so_far=T+1, d]
+        # 对比一下 old_cache shape：[B, H, num_steps_past=T, d]，new_cache追加了时间步T
+        return y, new_cache
 
 # =============== MLP ===============
 # [..., D] --linear-porj--> [..., 4*D] --gelu--> [..., 4D] --linear-proj--> [..., D] --dropout--> [..., D]
@@ -245,12 +248,13 @@ class GPT2LMHeadModel(nn.Module):
                                                         # train时, 因为S=T+1故输入的attention_mask已经满足
                                                         # infer时, S=1，需要额外为 0<->T-1 时间步追加 全1 的attention mask，寓意past cached 全都是非PAD
 
-        use_cache: bool = False,                        # 若为True, 则返回 [B, H, num_steps_so_far=T+1（时间步0至T）, d] 的 kv cache.
+        use_cache: bool = False,                        # 若为True, 则返回 [B, H, num_steps_so_far=T+1（时间步0至T）, d] 的 kv-pair cache tuple
 
         past_kv: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None, 
                                                         # train 时为 None
-                                                        # infer时 每个(k,v) 是各层的 pair of kv_cached [B, H, num_steps_past=T（时间步0至T-1）, d]
-                                                        # infer时 S=1, 其时间步信息T，可以从这里的dim-2得知
+                                                        # infer时, 首次可以为None（没有past）. 除此之外，它是 tuple of kv_cached pair for blocks
+                                                        # 每个(k,v) 是各层的 pair of kv_cached [B, H, num_steps_past=T（时间步0至T-1）, d]
+                                                        # infer时由于S=1, 其时间步信息T，可以从这里的dim-2得知
     ):
         B, S = input_token_seqs.shape
         device = input_token_seqs.device
@@ -307,12 +311,32 @@ class GPT2LMHeadModel(nn.Module):
         eos_id: Optional[int] = None,
     ):
         """
-        简单的自回归生成（带 KV cache）
+        gpt2 model 的输入(主要关注infer时)
+        input_token_seqs: [B, S]. 记 input_token_seqs 的latest timestep = T, 在infer时 S=1
+        attention_mask: [B, S] or None. 与 input_token_seqs 保持一致. 1=非PAD, 0=PAD. infer时, S=1
+        use_cache: 若为True, 则返回 [B, H, num_steps_so_far=T+1(时间步0至T), d] 的 kv-pair cache tuple; 若为False, 则返回None
+        past_kv: infer时, 首次可以为None(没有past). 除此之外，它是 tuple of kv_cached pair for blocks.
+                 每个(k,v) 是各层的 pair of kv_cached [B, H, num_steps_past=T(时间步0至T-1), d]
+
+        从 gpt2 model 的 forward 可以看出, infer时生成generate是可以并发的, 即合并成一个batch来生成(并发size=B).
+        gpt2 model forward要求Batch内部序列长度一致, 在infer时这不是问题, 因为infer时序列长度都是 1.
+        在第一次infer, past_kv = None, input_token_seqs = prompt全部即 input_ids with shape [B, S], 记 latest timestep = T. use_cache设为True
+        这样forward返回
+        1. logits [B, S, vocab]. 其中只需要最后一个时间步的预测 preds [B, vocab], 它是关于时间步T+1的token预测分布
+        2. tuple of pair kv_cached, 其中 k/v cached 形状为 [B, H, num_steps_so_far=T+1, d], 它是关于时间步0至T的tokens tensor
+        这个第一次infer的过程叫做prefill.
+
+        后续infer, past_kv = 前一次循环返回的 tuple of pair kv_cached [B, H, num_steps_so_far=T+1, d], 寓意past时间步是0<->T, 
+        input_token_seqs 为前一次循环最后一个时间步的预测 preds [B, vocab]得到的结果 tokens [B, 1], 它是关于时间步T+1的tokens, 此时latest timestep = T+1
+        这样forward返回
+        1. logits [B, 1, vocab]. 其中只需要最后一个(也是唯一一个)时间步的预测 preds [B, vocab], 它是关于时间步T+2的token预测分布
+        2. tuple of pair kv_cached, 其中 k/v cached 形状为 [B, H, num_steps_so_far=T+2, d], 它是关于时间步0至T+1的tokens tensor
+        这样这个循环就成立了。这个后续infer的过程叫做decode.
         """
         self.eval()
         B, S = input_ids.shape
         device = input_ids.device
-
+        # 
         past_kv = None
         attention_mask = torch.ones(B, S, dtype=torch.long, device=device)
 
