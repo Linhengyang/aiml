@@ -208,18 +208,14 @@ class RotaryPosEnc(nn.Module):
         else:
             # (batch_size, seq_length, dim_per_head/2) -> 
             #       (batch_size, 1, seq_length, dim_per_head/2) 或者 (batch_size, seq_length, 1, dim_per_head/2)
-            cos_half = cos_half.unsqueeze(broadcast_axis)
-            sin_half = sin_half.unsqueeze(broadcast_axis)
+            cos_half, sin_half = cos_half.unsqueeze(broadcast_axis), sin_half.unsqueeze(broadcast_axis)
         
         # 在最后一维交叉复制偶/奇相邻两个维度
         # (..., dim_per_head/2) -> (..., dim_per_head)
-        cos = cos_half.repeat_interleave(2, dim=-1)
-        sin = sin_half.repeat_interleave(2, dim=-1)
+        cos, sin = cos_half.repeat_interleave(2, dim=-1), sin_half.repeat_interleave(2, dim=-1)
 
-        # shape 有三种可能
-        # (B, 1, seq_len, d)
-        # (B, seq_len, 1, d)
-        # (B, seq_len, d), no HEAD dim
+        # shape 有三种可能:
+        # (B, 1, seq_len, d) / (B, seq_len, 1, d) / (B, seq_len, d) without HEAD dim
         return cos, sin
 
 
@@ -230,7 +226,9 @@ class RotaryPosEnc(nn.Module):
         对应 broadcast_axis 分别是           1                   2                  None
 
         cos/sin shape:              (B, 1, seq_len, d) / (B, seq_len, 1, d) / (B, seq_len, d)
-        是和 x 的 position_ids 和 broadcast_axis 相对应的 cos 和 sin
+        是和 x 的 position_ids 和 broadcast_axis 相对应的 cos 和 sin.
+
+        通常做法是生成足够的 cos/sin tensor 之后, 根据 x 的 positions 按需截断 cos/sin, 然后 apply RoPE on x. 这样节省计算
         '''
         # 记录下 x 原来的 dtype
         dtype = x.dtype
