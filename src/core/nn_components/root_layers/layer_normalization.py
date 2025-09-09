@@ -2,7 +2,7 @@ import math
 import torch
 from torch import nn
 
-class AddLNorm(nn.Module):
+class AddLayerNorm(nn.Module):
     '''
     args: norm_shape, dropout
         norm_shape: the length of tensor's dim for layer norm
@@ -24,5 +24,4 @@ class AddLNorm(nn.Module):
         self.ln = nn.LayerNorm(norm_shape)
     
     def forward(self, X, f_X):
-        assert X.shape[1:] == f_X.shape[1:], 'Adding two inputs with different shape'
         return self.ln(X + self.dropout(f_X))
