@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from ..root_layers.layer_normalization import AddLNorm
+from ..root_layers.layer_normalization import AddLayerNorm
 from ..root_layers.attention_pool import MultiHeadAttention
 from ..root_layers.ffn import PositionWiseFFN
 
@@ -38,13 +38,13 @@ class GPT2DecoderBlock(nn.Module):
         self.blk_ind = str(blk_ind)
         # 自回归-自注意力
         self.ARselfAttn = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
-        self.addlnorm1 = AddLNorm(num_hiddens, dropout)
+        self.addlnorm1 = AddLayerNorm(num_hiddens, dropout)
         # # 交叉源信息注意力
         # self.xSrcAttn = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
         # self.addlnorm2 = AddLNorm(num_hiddens, dropout)
         # 前向
         self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
-        self.addlnorm3 = AddLNorm(num_hiddens, dropout)
+        self.addlnorm3 = AddLayerNorm(num_hiddens, dropout)
     
 
     def forward(self, tgt_query, KV_Caches=None): # 函数内部对 kv_caches 作in-place操作

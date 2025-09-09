@@ -2,7 +2,7 @@ import math
 import torch
 from torch import nn
 
-class AddLNorm(nn.Module):
+class AddLayerNorm(nn.Module):
     '''
     args: norm_shape, dropout
         norm_shape: the length of tensor's dim for layer norm

@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from ..root_layers.layer_normalization import AddLNorm
+from ..root_layers.layer_normalization import AddLayerNorm
 from ..root_layers.attention_pool import MultiHeadAttention
 from ..root_layers.ffn import PositionWiseFFN
 
@@ -49,13 +49,13 @@ class TransformerEncoderBlock(nn.Module):
         # add + layer norm
         # input: (batch_size, n_query, num_hiddens)
         # output: (batch_size, n_query, num_hiddens)
-        self.addlnorm1 = AddLNorm(num_hiddens, dropout)
+        self.addlnorm1 = AddLayerNorm(num_hiddens, dropout)
         # PosFFN
         # input: (batch_size, n_query, num_hiddens)
         # output: (batch_size, n_query, num_hiddens)
         self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens) # ffn_num_hiddens在原始论文里=4*num_hiddens
 
-        self.addlnorm2 = AddLNorm(num_hiddens, dropout)
+        self.addlnorm2 = AddLayerNorm(num_hiddens, dropout)
     
     def forward(self, X, valid_lens):
         # X 作 自注意力. X shape(batch_size, seq_len, num_hiddens), 在 dim 1 的 seq_len 里, valid area 由 valid_lens(batch_size,) 确定
@@ -106,13 +106,13 @@ class TransformerDecoderBlock(nn.Module):
         self.blk_ind = str(blk_ind)
         # 自回归-自注意力
         self.ARselfAttn = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
-        self.addlnorm1 = AddLNorm(num_hiddens, dropout)
+        self.addlnorm1 = AddLayerNorm(num_hiddens, dropout)
         # 交叉源信息注意力
         self.xSrcAttn = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
-        self.addlnorm2 = AddLNorm(num_hiddens, dropout)
+        self.addlnorm2 = AddLayerNorm(num_hiddens, dropout)
         # 前向
         self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens)
-        self.addlnorm3 = AddLNorm(num_hiddens, dropout)
+        self.addlnorm3 = AddLayerNorm(num_hiddens, dropout)
     
 
     def forward(self, tgt_query, src_enc_info, KV_Caches=None): # 函数内部对 kv_caches 作in-place操作
