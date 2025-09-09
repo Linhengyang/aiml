@@ -297,7 +297,7 @@ class GPT2LMHeadModel(nn.Module):
                 new_past.append(new_kv)
 
         x = self.ln_f(x) # pre-layernorm的架构中，block 的末尾是没有 layer-norm的（只有add）。所以这里结束所有block后，加一次layernorm
-        logits = self.lm_head(x)  # [B,S,D] --> [B,S,vocab]
+        logits = self.lm_head(x)  # [B,S,D] --> [B,S,n_vocab]
 
         return logits, (tuple(new_past) if use_cache else None)
 
@@ -322,42 +322,60 @@ class GPT2LMHeadModel(nn.Module):
         gpt2 model forward要求Batch内部序列长度一致, 在infer时这不是问题, 因为infer时序列长度都是 1.
         在第一次infer, past_kv = None, input_token_seqs = prompt全部即 input_ids with shape [B, S], 记 latest timestep = T. use_cache设为True
         这样forward返回
-        1. logits [B, S, vocab]. 其中只需要最后一个时间步的预测 preds [B, vocab], 它是关于时间步T+1的token预测分布
+        1. logits [B, S, n_vocab]. 其中只需要最后一个时间步的预测 preds [B, n_vocab], 它是关于时间步T+1的token预测分布
         2. tuple of pair kv_cached, 其中 k/v cached 形状为 [B, H, num_steps_so_far=T+1, d], 它是关于时间步0至T的tokens tensor
         这个第一次infer的过程叫做prefill.
 
         后续infer, past_kv = 前一次循环返回的 tuple of pair kv_cached [B, H, num_steps_so_far=T+1, d], 寓意past时间步是0<->T, 
-        input_token_seqs 为前一次循环最后一个时间步的预测 preds [B, vocab]得到的结果 tokens [B, 1], 它是关于时间步T+1的tokens, 此时latest timestep = T+1
+        input_token_seqs 为前一次循环最后一个时间步的预测 preds [B, n_vocab]得到的结果 tokens [B, 1], 它是关于时间步T+1的tokens, 此时latest timestep = T+1
         这样forward返回
-        1. logits [B, 1, vocab]. 其中只需要最后一个(也是唯一一个)时间步的预测 preds [B, vocab], 它是关于时间步T+2的token预测分布
+        1. logits [B, 1, n_vocab]. 其中只需要最后一个(也是唯一一个)时间步的预测 preds [B, n_vocab], 它是关于时间步T+2的token预测分布
         2. tuple of pair kv_cached, 其中 k/v cached 形状为 [B, H, num_steps_so_far=T+2, d], 它是关于时间步0至T+1的tokens tensor
         这样这个循环就成立了。这个后续infer的过程叫做decode.
         """
         self.eval()
         B, S = input_ids.shape
         device = input_ids.device
-        # 
+
+        # prefill
         past_kv = None
-        attention_mask = torch.ones(B, S, dtype=torch.long, device=device)
+        attention_mask = torch.ones(B, S, dtype=torch.long, device=device) # attention_mask 要和 
 
         for _ in range(max_new_tokens):
             logits, past_kv = self(
-                input_ids[:, -1:].contiguous() if past_kv is not None else input_ids,
-                attention_mask=attention_mask if past_kv is None else torch.ones(B, 1, device=device, dtype=torch.long),
-                use_cache=True,
-                past_kv=past_kv,
+                input_token_seqs = input_ids[:, -1:].contiguous() if past_kv is not None else input_ids,
+                # attention mask 始终保持与 input_token_seqs 形状相同, 都是 [B, S]. decode 阶段 S=1
+                attention_mask = torch.ones(B, 1, device=device, dtype=torch.long) if past_kv is not None else attention_mask,
+                use_cache = True, # prefill 后, use_cache = True 使得 kv_cache 更新了 past_kv
+                past_kv = past_kv, # prefill 时 past_kv = None
             )
-            logits = logits[:, -1, :] / max(temperature, 1e-6)  # [B,vocab]
+            # logits [B, S, n_vocab], decode 阶段时 S = 1  --取last--> [B, n_vocab], 即是next token的预测分布(raw)
+
+            logits = logits[:, -1, :] / max(temperature, 1e-6)  # 调温. 温度>1就是对logits作"平滑", 温度<1就是对logits作"锐化"
+            # 温度>1, 平滑logits, 使得低概率相对概率被拉高，从而模型输出更多样化、更随机、更具创造性. 但也加大了胡言乱语的可能性 --> 越热越活跃
+            # 温度<1, 锐化logits，使得低概率相对概率被降低，从而模型输出更确定、重复性高，更保守 --> 越热越冷静
+            # 本质是因为softmax在logits的线性伸缩下，分布非线性.
 
             if top_k is not None and top_k > 0:
                 top_k = min(top_k, logits.size(-1))
-                values, _ = torch.topk(logits, top_k, dim=-1)
-                kth = values[..., -1, None]
-                logits = torch.where(logits < kth, torch.full_like(logits, float("-inf")), logits)
+                values, _ = torch.topk(logits, top_k, dim=-1) # 在 logits[B, n_vocab] dim-1 取每行的 top_k, 从大到小 从左至右排列
+                # values shape: [B, top_k]
+                kth = values[..., -1, None] # values 取最后一列, 然后unsqueeze最后一维度 --> kth shape: [B, 1]
 
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)  # [B,1]
-            input_ids = torch.cat([input_ids, next_token], dim=1)
+                # torch.where(TF_tensor, input_tensor, other_tensor)
+                # 这里TF_tensor/input_tensor/other_tensor 的形状相同. True位置填入 input_tensor 相应元素, False位置填入 other_tensor相应元素
+                logits = torch.where(logits < kth, torch.full_like(logits, float("-inf")), logits)
+                # 这里其实是消灭了logits[B, n_vocab]每行的 top_k 之外的所有值: 用 -inf替代, 使得softmax后概率为0.
+
+            probs = F.softmax(logits, dim=-1) # [B, n_vocab], 其中 top_k 之外的概率为 0
+            # 以 probs 的行作为 多项分布的 概率分布，从中采样 1 个样本，返回样本的 行index. 其实就是依top_k的概率分布采样
+            next_token = torch.multinomial(probs, num_samples=1, replacement=False)  # [B, 1], 作为 next-token的预测
+            input_ids = torch.cat([input_ids, next_token], dim=1) # 追加更新到 input_ids 的最后一列.
+            # 它将在下一循环以 input_ids[:, -1:]的方式进入模型以推理下一个token
+
+            # 更新attention mask, 追加一列全1到原attention mask, 使之shape与input_ids保持一致.
+            # 实际上这个attention mask变量不会再在循环中进入模型. 应该只是一致性操作
+            # 此外在实际中, 应该根据生成的token是否是eos, 来确定追加的attention mask列. 如果生成token是eos, 那么mask值应该是0
             attention_mask = torch.cat([attention_mask, torch.ones(B, 1, device=device, dtype=torch.long)], dim=1)
 
             if eos_id is not None:
