@@ -160,7 +160,8 @@ class RotaryPosEnc(nn.Module):
         inv_freq = inv_freq / config.rope_scale
         # 注册成常量 buffer inv_freq: (dim_per_head/2, )
         self.register_buffer("inv_freq", inv_freq, persistent=False)
-    
+
+
     @torch.no_grad()
     def _angles(self, position_ids: torch.Tensor) -> torch.Tensor:
         '''
@@ -179,7 +180,8 @@ class RotaryPosEnc(nn.Module):
         # 每一个position value 乘以 inv_freq --> 得到 (dim/2,) 的1D tensor --> (batch_size, num_positions, dim/2)
         # 等价于 pos[:, :, None] * inv_freq[None, None, :]
         return torch.einsum("bs,d->bsd", pos, self.inv_freq) # float32
-    
+
+
     def get_sin_cos(self, position_ids: torch.Tensor, device=None, dtype=None, broadcast_axis=1) -> t.Tuple[torch.Tensor, torch.Tensor]:
         '''
         根据 theta tensor(batch_size, seq_length, dim_per_head/2), 得出可供旋转计算的 cos tensor 和 sin tensor
@@ -205,7 +207,7 @@ class RotaryPosEnc(nn.Module):
             pass
         else:
             # (batch_size, seq_length, dim_per_head/2) -> 
-            #       (batch_size, 1, seq_length, dim_per_head/2) / (batch_size, seq_length, 1, dim_per_head/2)
+            #       (batch_size, 1, seq_length, dim_per_head/2) 或者 (batch_size, seq_length, 1, dim_per_head/2)
             cos_half = cos_half.unsqueeze(broadcast_axis)
             sin_half = sin_half.unsqueeze(broadcast_axis)
         
@@ -214,21 +216,27 @@ class RotaryPosEnc(nn.Module):
         cos = cos_half.repeat_interleave(2, dim=-1)
         sin = sin_half.repeat_interleave(2, dim=-1)
 
+        # shape 有三种可能
+        # (B, 1, seq_len, d)
+        # (B, seq_len, 1, d)
+        # (B, seq_len, d), no HEAD dim
         return cos, sin
 
-    def apply_rope(self, q:torch.Tensor, k:torch.Tensor, cos:torch.Tensor, sin:torch.Tensor) -> t.Tuple[torch.Tensor, torch.Tensor]:
+
+    def apply_rope(self, x:torch.Tensor, cos:torch.Tensor, sin:torch.Tensor) -> t.Tuple[torch.Tensor, torch.Tensor]:
         '''
-        将 RoPE 作用在 q, k 上, 返回 q', k'
-        q/k shape: (batch_size, num_heads, seq_len, dim_per_head)
-        cos/sin shape: (batch_size, 1, seq_len, dim_per_head)
+        将 RoPE 作用在 x 上, 返回 x'
+        x shape:                    (B, H, seq_len, d) / (B, seq_len, H, d) / (B, seq_len, D)
+        对应 broadcast_axis 分别是           1                   2                  None
+
+        cos/sin shape:              (B, 1, seq_len, d) / (B, seq_len, 1, d) / (B, seq_len, d)
+        是和 x 的 position_ids 和 broadcast_axis 相对应的 cos 和 sin
         '''
-        # 记录下 q/k 原来的 dtype
-        q_dtype, k_dtype = q.dtype, k.dtype
+        # 记录下 x 原来的 dtype
+        dtype = x.dtype
 
         # 使用 float32 格式计算 RoPE, 使得整个计算过程保持稳定.
-        qf, kf = q.to(torch.float32), k.to(torch.float32)
+        xf = x.to(torch.float32)
+        x_rotate = cos * xf + sin * rotate_half_on_last_dim(xf)
 
-        q_rotate = cos * qf + sin * rotate_half_on_last_dim(qf)
-        k_rotate = cos * kf + sin * rotate_half_on_last_dim(kf)
-
-        return q_rotate.to(q_dtype), k_rotate.to(k_dtype)
+        return x_rotate.to(dtype)
