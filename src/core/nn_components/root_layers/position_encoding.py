@@ -96,7 +96,7 @@ from dataclasses import dataclass
 
 @dataclass
 class RoPEConfig:
-    dim: int
+    dim: int                  # 必须是偶数
     base: float = 10000.0     # 频率基数
     rope_scale: float = 1.0   # 角频率缩放(>1.0 可"拉长"上下文)
 
@@ -226,9 +226,9 @@ class RotaryPosEnc(nn.Module):
         对应 broadcast_axis 分别是           1                   2                  None
 
         cos/sin shape:              (B, 1, seq_len, d) / (B, seq_len, 1, d) / (B, seq_len, d)
-        是和 x 的 position_ids 和 broadcast_axis 相对应的 cos 和 sin.
+        是和 x 的 position_ids 和 broadcast_axis 相对应的 cos 和 sin. B维度支持broadcast
 
-        通常做法是生成足够的 cos/sin tensor 之后, 根据 x 的 positions 按需截断 cos/sin, 然后 apply RoPE on x. 这样节省计算
+        通常做法是生成足够的 cos/sin tensor 之后, 根据 x 的 positions 按需在位置维度截断 cos/sin, 然后 apply RoPE on x. 这样节省计算
         '''
         # 记录下 x 原来的 dtype
         dtype = x.dtype
