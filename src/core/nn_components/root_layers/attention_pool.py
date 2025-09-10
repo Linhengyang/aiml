@@ -350,8 +350,8 @@ class CasualMHA(nn.Module):
     灵活组合 kv_cache 和 return_cache 以满足 train / infer.prefill / infer.decode 不同阶段
         train 阶段: teacher-force策略下的 self-attention 计算, 不需要输入 kv_cache(past timesteps), 同时也不需要输出 kv(so_far timesteps)
         infer 阶段之 prefill: prompt 以 [B, S] 的形状输入, 不需要输入 kv_cache 因为没有. 但需要输出 kv(so_far timesteps) 给 decode 阶段.
-        infer 阶段之 decode: 上一次decode或者来自prefill的 last timestep 作为 单时间步的 q 输入, 输入 kv_cache(past timesteps), 合并得到
-            kv(so_far timesteps), 然后作next-token预测, 同时需要输出 kv(so_far timesteps)给下一次decode.
+        infer 阶段之 decode: 上一次decode或者来自prefill的预测结果 作为 T 单时间步 的 q 输入, 输入 kv_cache(past timesteps till T-1), 合并 T 时间
+        步得到 kv(so_far timesteps till T), 然后继续作 next-token 预测, 输出 T+1 时间步结果, 还要输出 kv(so_far timesteps till T)给下一次decode.
     '''
     def __init__(self,
                  embd_size:int,
