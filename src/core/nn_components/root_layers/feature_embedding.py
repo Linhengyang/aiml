@@ -6,19 +6,25 @@ import torch
 
 def offset_multifeatures(input_tensor:Tensor, num_classes:Tensor):
     '''
-    input_tensor: ([*, d1,...,dn], num_categorical_features)
-    num_classes:1-D tensor (num_categorical_features, )
+    input_tensor: shape as [..., num_categorical_features]
+        categorical features 排列在 last dim, 共有 num_categorical_features 个 feature
+    
+    num_classes: 1D tensor (num_categorical_features, ), dtype=torch.int64
+        依 input_tensor last dim的顺序, 指明每个feature的category size
     '''
     assert num_classes.shape[0] == input_tensor.shape[-1], 'every feature must have its num_class'
 
     assert torch.all(input_tensor < num_classes), \
         f'Categorical Features(as index number) must be strictly smaller than corresponding num_class'
     
-    # offset: 1-D tensor (num_categorical_features,) as [0, num_categs_for_ft1+num_categs_for_ft2, ...]
-    offsets = torch.cat([torch.zeros(1, device=input_tensor.device), torch.cumsum(num_classes, dim=0)[:-1]], dim=0).type(num_classes.dtype)
+    # offsets: 1-D tensor (num_categorical_features,) as [0, num_categs_for_ft1+num_categs_for_ft2, ...]
+    # offsets shift feature 1 with 0, shift feature 2 with num_categs_of_feature1, shift feature 3 with num_categs_of_feature1and2,...
+    offsets = torch.cat(
+        [torch.zeros(1, device=num_classes.device), torch.cumsum(num_classes, dim=0)[:-1]], dim=0
+        ).to(dtype=input_tensor.dtype, device=input_tensor.device)
     
     # broadcast at input_tensor's last dimenstion
-    return (input_tensor + offsets).type(input_tensor.dtype)
+    return input_tensor + offsets
 
 
 
@@ -37,30 +43,30 @@ class MultiCategFeatEmbedding(nn.Module):
 
     args:
         num_classes (Tensor): shape (num_features, ), with elements are number of levels(classes) for every categorical feature
-        embedding_dim (int): the size of each feature's embedding vector
+        embed_dim (int): the size of each feature's embedding vector
         flatten (Optional, Bool): If True, embedding output will flatten all features' embedded tensors.
-                                  Ouput last dim will be "num_features * embedding_dim"
+                                  Ouput last dim will be "num_features * embed_dim"
     
     input:
         input (Tensor): shape (*, num_features), with elements are level-index of categorical features
 
     output:
         if flatten is True:
-            returned tensor with shape (*, num_features * embedding_dim)
+            returned tensor with shape (*, num_features * embed_dim)
         else:
-            returned tensor with shape (*, num_features, embedding_dim)
+            returned tensor with shape (*, num_features, embed_dim)
     '''
-    def __init__(self, num_classes: Tensor, num_factor: int, flatten: bool, *args, **kwargs):
+    def __init__(self, num_classes: Tensor, embed_dim: int, flatten: bool = True, *args, **kwargs):
         super().__init__()
-        self.register_buffer('num_classes', num_classes)
+        self.register_buffer('num_classes', num_classes, persistent=False)
         self.flatten = flatten
-        self.embedding = nn.Embedding(int(num_classes.sum()), num_factor, *args, **kwargs)
+        self.embedding = nn.Embedding(num_classes.sum().item(), embed_dim, *args, **kwargs)
     
     def forward(self, input: Tensor):
         # input shape: (*, num_features)
         input_ = offset_multifeatures(input, self.num_classes)
-        embed_ = self.embedding(input_) # shape: (*, num_features, num_factor)
+        embed_ = self.embedding(input_)
         if self.flatten:
-            return embed_.flatten(start_dim=-2) # shape: (*, num_features*num_factor)
+            return embed_.flatten(start_dim=-2) # shape: (*, num_features*embed_dim)
         else:
-            return embed_
+            return embed_ # shape: (*, num_features, embed_dim)

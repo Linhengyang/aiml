@@ -287,14 +287,177 @@ class MultiHeadAttention(nn.Module):
 # attention中提供是否rope选择:
 #   yes则在计算self-attention时, apply_rope on q/k， no则在计算self-attention时，直接计算 qk
 
-# 由此，CasualMHA 在forward过程中不依赖 max_context_size: casual_mask是根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
-# 实际上，CasualMHA 实现了 input sequence 变长：因为 RoPE 和 attention weights 都支持变长。
+from ..root_layers.position_encoding import RoPEConfig, RotaryPosEnc
+from typing import Tuple
+import torch.nn.functional as F
+
+# 由此，CasualMHA 在forward过程可以不依赖 max_context_size: casual_mask可以根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
+# 实际上，CasualMHA 还实现了 input sequence 变长：因为 RoPE 和 attention weights 都支持变长
+
 # 不过, 在实际Model层面, 仍然会设定max_context_size参数，并保证所有input sequence 的长度都不大于这个值。原因如下:
 #   1. 在 CasualMHA层, casual_mask 和 attention weights在训练时, 涉及 O(query_seq_length^2) 的显存空间占用. 如果不限制 query_seq_length，
 #      那么在训练时若输入了过长的 input sequence，可能会导致OOM。这样在 CasualMHA 层避免了过大的 attention weights 矩阵。
-#   2. 很多模型在制作train dataset时，会切分长文档/拼接短文档，成固定长度的chunk。这里的固定长度就约等于模型的max_context_size，因为限制了外推能力
-#      但是现代很多LLM的训练策略是curriculum-style: 训练epoch早期使用短序列，后期用长序列，训练时sequence length是动态变化的。
-#   3. RoPE的无线拓展只是理论上的，实际上theta=position_index*频率信号，当position很大时会失真。现代模型多会启用RoPE scaling，而这里
-#      RoPE scaling 依赖 max_context_size。
+#   2. 很多模型在制作train dataset时，会切分长文档/拼接短文档，成固定长度的chunk。这里的固定长度就约等于模型的max_context_size，因为限制了外推能力.
+#      现代很多LLM的训练策略是curriculum-style: 训练epoch早期使用短序列，后期用长序列，训练时sequence length是动态变化的。
+#   3. RoPE的无限拓展只是理论上的，实际上theta=position_index*频率信号，当position很大时会失真。现代模型多会启用RoPE scaling，而这里
+#      RoPE scaling 依赖 max_context_size
+
 class CasualMHA(nn.Module):
-    pass
+    '''
+    初始化参数
+        embd_size: int
+        num_head: int
+        use_bias: bool
+        max_context_size: int
+            最大上下文长度.
+        attn_p_drop: float
+            注意力权重矩阵 attention weights 在与 v 进行计算之前使用 dropout 增强泛化
+        resid_p_drop: float
+            因为 attention layer 后面紧接 add 残差连接. 所以要在 CasualMHA layer 最后 使用 dropout 增强泛化
+        use_cached_casual_mask: bool
+            True: 会根据 max_context_size 预先生成 casual mask 以供裁剪去契合 attention weights
+            False:, 根据 train/eval 状态, 以及 q/k 的 seq_len_q/seq_len_k, 动态生成相应 casual mask
+        use_rope: bool
+            True: CasualMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k
+            False: CasualMHA layer 不带 位置编码. 那么 CasualMHA layer 之后应该使用 max_context_size 参数实施 绝对位置编码
+
+    前向输入
+        x: Tensor, shape [B, num_steps_for_query, D], latest timestep T, 即当前 current timestep 为 T
+            train / infer.prefill 阶段: num_steps_for_query = S, infer.decode 阶段: num_steps_for_query = 1
+
+        kv_cache: Tuple[Tensor, Tensor]|None, 默认None
+            当不输入 kv_cache 时, 说明本 CauslMHA 是 自注意力 计算, self-attention(q = W_q @ x, k = W_k @ x, v = W_v @ x)
+            当输入 kv_cache 时, k_cache / v_cache 形状 [B, H, num_steps_past=T, d]. 这里 past 指 timestep 0 至 T-1, 所以 num_steps_past = T
+
+        attention_mask: Tensor|None, 默认None
+            若非默认, 则为 tensor of 1/0, 形状 [B, num_steps_so_far=T+1], 本质是对 v[B, H, num_steps_so_far=T+1, d] 的一种描述: 0 位置表示
+            v 在该位置是 pad, 该位置的 v 不应该参与贡献 next-token 预测. 这里 so_far 指 timestep 0 至 T, 所以 num_steps_so_far = T+1.
+            此 attention_mask 会作用在 attention weights [B, ..., num_steps_for_query, num_steps_so_far] 上, 指示对于每个 sample 的 v 具备的
+            0 至 T 共 num_steps_so_far 个时间步, 哪些是 1(非pad), 0(pad, 需要屏蔽). 经过 attention_mask 后的 attention weight, 会屏蔽掉 v 对应
+            位置在 next-token 预测中的贡献. softmax 之后, v中只有 非pad 且 非未来的 位置 贡献了 自回归预测的概率分布.
+
+        return_cache: bool, 默认False
+            当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 timestep so_far 即 0 至 T 所有.
+
+    前向输出
+        y: Tensor, shape same as x [B, num_steps_for_query=S/1, D], latest timestep 为 next timestep T+1
+
+        new_kv_cache: Tuple[Tensor, Tensor]|None
+            train 阶段: new_kv_cache = None
+            infer 阶段: new_kv_cache = tuple of k and v, k / v 包含 so_far timesteps 即 0 至 T. 由 past timesteps 0 至 T-1 追加 T 得到.
+
+
+    灵活组合 kv_cache 和 return_cache 以满足 train / infer.prefill / infer.decode 不同阶段
+        train 阶段: teacher-force策略下的 self-attention 计算, 不需要输入 kv_cache(past timesteps), 同时也不需要输出 kv(so_far timesteps)
+        infer 阶段之 prefill: prompt 以 [B, S] 的形状输入, 不需要输入 kv_cache 因为没有. 但需要输出 kv(so_far timesteps) 给 decode 阶段.
+        infer 阶段之 decode: 上一次decode或者来自prefill的 last timestep 作为 单时间步的 q 输入, 输入 kv_cache(past timesteps), 合并得到
+            kv(so_far timesteps), 然后作next-token预测, 同时需要输出 kv(so_far timesteps)给下一次decode.
+    '''
+    def __init__(self,
+                 embd_size:int,
+                 num_head:int,
+                 use_bias:bool,
+                 max_context_size:int,
+                 attn_p_drop:float,
+                 resid_p_drop:float,
+                 use_cached_casual_mask:bool,
+                 use_rope:bool):
+        
+        super().__init__()
+        assert embd_size % num_head == 0, f'embedding size shall be divided into number_head'
+        self.D = embd_size
+        self.H = num_head
+        self.d = embd_size / num_head
+        assert self.d % 2 == 0, f'dim_per_head (embedding size / number_head) must be even for RoPE'
+        self.scale = 1.0 / math.sqrt(self.d)
+
+        # 合并线性映射 qkv: W_qkv(x) --> concate of [ W_q(x), W_k(x), W_v(x) ], 其中每个 W(x) 是 (B, seq_len, D) -> (B, seq_len, D)
+        self.W_qkv = nn.Linear(embd_size, 3 * embd_size, bias=use_bias) # x[B, seq_len, D] --linear-proj--> qkv[B, seq_len, 3*D]
+        self.W_o = nn.Linear(embd_size, embd_size, bias=use_bias) # y[B, seq_len, D] --linear-proj--> y[B, seq_len, D]
+
+        self.attn_drop = nn.Dropout(attn_p_drop)
+        self.resid_drop = nn.Dropout(resid_p_drop)
+
+        if use_cached_casual_mask:
+            # [1, 1, max_context_size, max_context_size] 的 T/F tensor. 其中主对角线上方(不含对角线)为True
+            self.register_buffer(
+                'casual_mask',
+                torch.triu(torch.ones(max_context_size, max_context_size, dtype=torch.bool), diagonal=1)[None, None, :, :],
+                persistent = False
+                )
+        
+        if use_rope:
+            self.rope = RotaryPosEnc(RoPEConfig(self.d))
+
+    def forward(self,
+                x:torch.Tensor,
+                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None=None,
+                attention_mask:torch.Tensor|None = None,
+                return_cache:bool = False):
+        
+        num_steps_for_q = x.size(1) # x[B, num_steps_for_q=S, D]. train/infer.prefill时, S在batch内固定; infer.decode时, S=1
+
+        # 制作 qkv: x[B, S, D] --> qkv[B, S, 3D] --split--> q/k/v[B, S, D] --reshape--> q/k/v[B, H, S, d]
+        qkv = self.W_qkv(x)
+        q, k, v = qkv.split(self.D, dim=-1) # q/k/v [B, S, D]
+        # [B, S, D] -> [B, S, H, d] -> [B, H, S, d]
+        q = q.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2) # [B, H, num_steps_for_q, d]
+        k = k.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2)
+        v = v.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2)
+
+        # only infer.decode 阶段. 此时 num_steps_for_q = 1
+        if kv_cache:
+            k_past, v_past = kv_cache # k_past/v_past[B, H, num_steps_past=T, d]
+            k, v = torch.cat([k_past, k], dim=2), torch.cat([v_past, v], dim=2) # k/v[B, H, num_steps_so_far=T+1, d]
+
+        num_steps_so_far = k.size(2) # train/infer.prefill时 等于 num_steps_for_q
+
+        if hasattr(self, 'rope'):
+            # 当使用RoPE时, k[B, H, num_steps_so_far=T+1, d] 位置id 无论在哪个阶段都是 0至T. 可以从k自身得到
+            # q 在train/infer.prefill阶段 位置id是 0至T=S-1, 可以从q或k得到. 在infer.decode阶段, 位置id是T, 必须从k得到
+            pos_ids_so_far = torch.arange(0, num_steps_so_far, device=k.device).unsqueeze(0) # shape [1, T+1]
+            cos, sin = self.rope.get_sin_cos(pos_ids_so_far, broadcast_axis=1) # shape [1, 1, T+1, d]
+
+            # 为了通用性, 采用如下写法
+            cos_q = cos[:, :, num_steps_so_far-num_steps_for_q:num_steps_so_far, :] # shape [1, 1, num_steps_for_q, d]
+            sin_q = sin[:, :, num_steps_so_far-num_steps_for_q:num_steps_so_far, :]
+
+            q = self.rope.apply(q, cos_q, sin_q)
+            k = self.rope.apply(k, cos, sin)
+
+        # qk 计算 attention weight
+        attn_w = torch.matmul(q, k.transpose(2, 3)) * self.scale # [B, H, num_steps_for_q, num_steps_so_far=T+1]
+
+        # casual_mask: [..., 0:S, 0:S] for train/infer.prefill; [..., S-1:S, 0:S] for train/infer.prefill, same as attn_w
+        # train/infer.prefill 阶段是 上三角(不含对角线)为True的[..., S, S], infer.decode 阶段是 全False 的[..., 1, S]
+        if hasattr(self, 'casual_mask'):
+            # 当使用缓存, 为了通用性, 采用如下写法
+            casual_mask = self.casual_mask[:, :, num_steps_so_far-num_steps_for_q:num_steps_so_far, :num_steps_so_far]
+        else:
+            # 动态生成, 为了通用性, 采用如下写法
+            casual_mask = torch.triu(
+                torch.ones(num_steps_for_q, num_steps_so_far, dtype = torch.bool, device = attn_w.device),
+                diagonal = num_steps_so_far-num_steps_for_q + 1
+                )[None, None, :, :]
+        
+        attn_w = attn_w.masked_fill(casual_mask, float('-inf')) # [B, H, num_steps_for_q, num_steps_so_far=T+1]
+        
+        # mask 掉 pad 位置: v_so_far 里 pad 位置不贡献 next-token 预测, 方法就是相应位置的 attn_w 赋-inf(softmax后权重为0)
+        if attention_mask is not None:
+            # attention_mask[B, num_steps_so_far=T+1] --> pad_mask[B, 1, 1, num_steps_so_far=T+1]
+            pad_mask = (attention_mask == 0)[:, None, None, :].to(attn_w.device)
+            attn_w = attn_w.masked_fill(pad_mask, float('-inf'))
+
+        # softmax
+        attn_w = F.softmax(attn_w, dim=-1) # [B, H, num_steps_for_q, num_steps_so_far=T+1]
+        attn_w = self.attn_drop(attn_w)
+
+        y = torch.matmul(attn_w, v) # [B, H, num_steps_for_q, d]
+        y = y.transpose(1, 2).reshape(-1, num_steps_for_q, self.D) # --> [B, num_steps_for_q, H, d] --> [B, num_steps_for_q, D]
+        y = self.resid_drop(self.W_o(y)) # [B, num_steps_for_q, D]
+
+        new_kv_cache = None
+        if return_cache:
+            new_kv_cache = (k, v)
+
+        return y, new_kv_cache
