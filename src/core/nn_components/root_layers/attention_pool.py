@@ -5,39 +5,6 @@ from ...base.functions.mask import mask_on_last_dim
 
 
 
-
-
-    
-# 将S打分矩阵的部分元素换成无穷小(index-set, or slice-copy), 然后再作softmax操作.
-# 在torch框架下,这两个操作都是梯度可传的, grad_fn 分别是 CopySlice 和 softmax
-
-# 1. 保证了invalid位置的元素, 不会参与计算下一层valid位置的元素.(因为softmax操作. softmax(无穷小)=0, 使得invalid位置元素的权重为0)
-# 2. 保证了invalid位置的元素, 不论结果如何, 都不会在BP中贡献更新组成运算它们的参数.(因为 slice-copy 操作)
-
-# masked_softmax是为了完成两个目标:
-#     1. 对source sequence作token是否valid甄别, 使得valid token仅由valid tokens表征.
-#     2. 对target sequence作token是否自回甄别, 使得current token仅由past tokens生成
-
-# masked_softmax 生成了 shape 为(batch_size, n_queries, n_kvpairs) 的 W, 和 V (batch_size, n_kvpairs, v_size) 作 bmm 乘法, 即 batch_size 个
-# (n_queries, n_kvpairs) @ (n_kvpairs, v_size) 矩阵乘法, 结果是 n_queries 个 V 行向量的凸线性组合, shape 为 (n_queries, v_size)
-
-# 从单条 query 的结果来看, Q (batch_size, n_queries, qk_size) 中的单条query (1, 1, qk_size) 与 K (batch_size, n_kvpairs, qk_size) 转置的 单样本
-# (1, qk_size, n_kvpairs) 生成 单条logits (1, 1, n_kvpairs)。经过mask_softmax操作后, 前 valid 部分形成 单条凸组合分布权重，后 invalid 部分权重为 0
-
-# 即: n_queries 次(1, 1, qk_size) @ (1, qk_size, n_kvpairs) --> n_queries 条凸组合分布权重 (1, 1, n_kvpairs)
-# mask_softmax只保留了 n_kvpairs 中前valid部分, 所以 K的单样本 (1, n_kvpairs, qk_size) 中只有前 valid 部分参与运算, 后 invalid 部分被舍弃
-# 单条凸组合分布权重 (1, 1, n_kvpairs) @ V的单样本 (1, n_kvpairs, v_size)，得到的 (1, 1, v_size) 中只包含了 V 的单样本中 前 valid 部分.
-
-# 综上, scaled-dot-production with masked-softmax, 即 masked_softmax(Q @ K', valid_lens) @ V 操作中, 
-# Q: (batch_size, n_queries, qk_size) @ K: (batch_size, n_kvpairs, qk_size)  --transpose_matprod--> S: (batch_size, n_queries, n_kvpairs)
-# --masked_softmax_with_valid_lens(batch_size, n_queries)--> W:  (batch_size, n_queries, n_kvpairs) @ V: (batch_size, n_kvpairs, v_size)
-# = output: (batch_size, n_queries, v_size)
-# Q中 所有 query 分别和 K中 valid 部分 得到了 W中 valid 部分, 然后和 V中 valid 部分 得到了结果。简而言之, valid_lens 作用在 K 和 V 的 n_kvpairs 维度
-# mased_softmax with valid_lens 使得 在 QkV attention 计算中, K 和 V 只有 valid 部分参与了运算.
-# Q: (batch_size, n_queries, qk_size) 代表了 (batch_size, n_queries)次 (1,1, qk_size) 查询. 查询结果output: (batch_size, n_queries, v_size)
-# valid_lens 不能作用在 Q 和 output 中 的 n_queries 维度.
-
-
 def masked_softmax(S, valid_lens, where_valid='left'):
     '''
     inputs:
