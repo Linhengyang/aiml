@@ -1,4 +1,4 @@
-from ...core.nn_components.meta_frames import Encoder, AttentionDecoder, EncoderDecoder
+from ...core.nn_components.meta_frames import Encoder, Decoder, EncoderDecoder
 from ...core.nn_components.root_layers.position_encoding import TrigonoAbsPosEnc
 from ...core.nn_components.sub_modules._transformer import TransformerEncoderBlock, TransformerDecoderBlock
 import torch.nn as nn
@@ -67,7 +67,7 @@ class TransformerEncoder(Encoder):
 
 
 
-class TransformerDecoder(AttentionDecoder):
+class TransformerDecoder(Decoder):
     '''
     train 模式:
     单次forward是 seq_length 并行, 前后关系依赖是输入 timestep 0-seq_length-1, 输出 timestep 1-seq_length, 实现对 shift1 data 的 并行预测
