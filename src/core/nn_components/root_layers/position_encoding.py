@@ -185,7 +185,7 @@ class RotaryPosEnc(nn.Module):
     def get_sin_cos(self, position_ids: torch.Tensor, device=None, dtype=None, broadcast_axis=1) -> t.Tuple[torch.Tensor, torch.Tensor]:
         '''
         根据 theta tensor(batch_size, seq_length, dim_per_head/2), 得出可供旋转计算的 cos tensor 和 sin tensor
-        cos tensor 和 sin tensor 的 shape 根据 q/k tensor的形状确定:
+        cos tensor 和 sin tensor 的 shape 根据 q/k tensor 的形状确定:
             q/k形状[B, H, S, D], 则 cos/sin 形状是 (batch_size, 1, seq_length, dim_per_head/2)
             q/k形状[B, S, H, D], 则 cos/sin 形状是 (batch_size, seq_length, 1, dim_per_head/2)
             q/k形状[B, S, D], 则 cos/sin 形状是 (batch_size, seq_length, dim_per_head/2)

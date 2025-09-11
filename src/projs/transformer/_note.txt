@@ -19,7 +19,7 @@ rnn:
     这个state关于顺序的依赖性, 在infer中也存在
     单步: 输入当前(指time i-1)token(上一步输出的or初始的), 其他信息(指包含了time 0到i-2的信息的综合state), 输出time i的token
     T步: 重复单步T次, i从1到T. 和train是一样的
-transformer's self-att层
+transformer
     train:
     单步: 从time 0到i-1生成 time i，具体方法是: self-att(time i-1作为q, time 0到i-1作为k和v).
     T步(「生成一个length为T的decode过程」): 并行化, 即: time 0 到time T-1 作为 queries, time 0到time T-1作为keys和values, 同时设定valid_lens分别为(1, 2, 3,...,T)
