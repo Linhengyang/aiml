@@ -80,8 +80,7 @@ class AdditiveAttention(nn.Module):
 
     def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
         # Q_batch: (batch_size, n_query, q_size); K_batch: (batch_size, n_kv, k_size); V_batch: (batch_size, n_kv, v_size)
-        _, n_query, _ = Q_batch.shape
-        _, n_kv, _ = K_batch.shape
+        n_query, n_kv = Q_batch.size(1), K_batch.size(1)
 
         # Q_batch_tilda shape(batch_size, n_query, h), K_batch_tilda shape(batch_size, n_kv, h)
         Q_batch, K_batch = self.W_q(Q_batch), self.W_k(K_batch)

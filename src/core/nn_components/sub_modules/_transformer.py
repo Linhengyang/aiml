@@ -1,11 +1,58 @@
 import torch
 from torch import nn
-from ..root_layers.layer_normalization import AddLayerNorm
 from ..root_layers.attention_pool import MultiHeadAttention
-from ..root_layers.feedforward import PositionWiseFFN
 
 
 
+class AddLayerNorm(nn.Module):
+    '''
+    args: norm_shape, dropout
+        norm_shape: the length of tensor's dim for layer norm
+        dropout: dropout rate. Regularization on second input
+    
+    inputs: X, f_X
+        X: minibatch
+        f_X: MLP(X) with same shape as X. Usually to achieve resildual connection
+
+    returns: denoted as O
+        O: same shape with input X
+    
+    explains:
+        Add(usually for residual connection), then layer normalize
+    '''
+    def __init__(self, norm_shape, dropout):
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+        self.ln = nn.LayerNorm(norm_shape)
+    
+    def forward(self, X, f_X):
+        return self.ln(X + self.dropout(f_X))
+    
+
+
+
+class PositionWiseFFN(nn.Module):
+    '''
+    args: ffn_num_hiddens, ffn_num_outputs
+        ffn_num_hiddens: the hidden size inside the MLP
+        ffn_num_outputs: output size of the MLP, usually the same as the input size
+    
+    inputs: X
+
+    returns: denoted as O
+    
+    explains:
+        Perform the same MLP on every position. So only one MLP is enough.
+    '''
+    def __init__(self, ffn_num_hiddens, ffn_num_outputs):
+        super().__init__()
+        self.dense1 = nn.LazyLinear(ffn_num_hiddens)
+        self.relu = nn.ReLU()
+        self.dense2 = nn.LazyLinear(ffn_num_outputs)
+    
+    def forward(self, X):
+        return self.dense2(self.relu(self.dense1(X)))
+    
 
 
 
