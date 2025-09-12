@@ -308,7 +308,7 @@ class CasualMHA(nn.Module):
     前向输出
         y: Tensor, shape same as x [B, num_steps_for_query=S/1, D], latest timestep 为 next timestep T+1
 
-        new_kv_cache: Tuple[Tensor, Tensor]|None
+        new_kv_cache: Tuple[Tensor, Tensor]|None. if return_cache == False, new_kv_cache is None
             train 阶段: new_kv_cache = None
             infer 阶段: new_kv_cache = tuple of k and v, k / v 包含 so_far timesteps 即 0 至 T. 由 past timesteps 0 至 T-1 追加 T 得到.
 
