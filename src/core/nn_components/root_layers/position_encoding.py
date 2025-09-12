@@ -78,7 +78,7 @@ class LearnAbsPosEnc(nn.Module):
     '''
     def __init__(self, max_possible_posNum, num_hiddens):
         super().__init__()
-        self.register_parameter('PosEnc', nn.Parameter(torch.randn(max_possible_posNum, num_hiddens)))
+        self.register_parameter('PosEnc', nn.Parameter(torch.zeros(max_possible_posNum, num_hiddens)))
 
     def forward(self, position_ids: torch.Tensor):
         '''

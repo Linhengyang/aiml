@@ -30,11 +30,12 @@ class GeLUFFN(nn.Module):
 
 class GPT2DecoderBlock(nn.Module):
     '''
-    ======================================== Pre-LayerNorm Block ========================================
+    pre-layer_normalization 的 decoder block 架构图:
     
         -----------------add---------------->|       ------------add------------>|
       x --layer_norm-->|--casual_attention-->|--> x_ --layer_norm-->--gelu_ffn-->|--> y
     kv_cache(if any)-->|                      --> new_kv_cache(if need)
+   attn_mask(if any)-->|
 
     x / x_ / y have same shape
     '''
