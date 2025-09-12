@@ -295,9 +295,9 @@ class CasualMHA(nn.Module):
             当不输入 kv_cache 时, 说明本 CauslMHA 是 自注意力 计算, self-attention(q = W_q @ x, k = W_k @ x, v = W_v @ x)
             当输入 kv_cache 时, k_cache / v_cache 形状 [B, H, num_steps_past=T, d]. 这里 past 指 timestep 0 至 T-1, 所以 num_steps_past = T
 
-        attention_mask: Tensor|None, 默认None
-            若非默认, 则为 tensor of 1/0, 形状 [B, num_steps_so_far=T+1], 本质是对 v[B, H, num_steps_so_far=T+1, d] 的一种描述: 0 位置表示
-            v 在该位置是 pad, 该位置的 v 不应该参与贡献 next-token 预测. 这里 so_far 指 timestep 0 至 T, 所以 num_steps_so_far = T+1.
+        attention_mask: Tensor|None, 默认None. 若非默认, 则为 tensor of 1/0, 形状 [B, num_steps_so_far=T+1]
+            本质是对 v[B, H, num_steps_so_far=T+1, d] 的一种描述: 0 位置表示 v 在该位置是 pad, 该位置的 v 不应该参与贡献 next-token 预测.
+            这里 so_far 指 timestep 0 至 T, 所以 num_steps_so_far = T+1.
             此 attention_mask 会作用在 attention weights [B, ..., num_steps_for_query, num_steps_so_far] 上, 指示对于每个 sample 的 v 具备的
             0 至 T 共 num_steps_so_far 个时间步, 哪些是 1(非pad), 0(pad, 需要屏蔽). 经过 attention_mask 后的 attention weight, 会屏蔽掉 v 对应
             位置在 next-token 预测中的贡献. softmax 之后, v中只有 非pad 且 非未来的 位置 贡献了 自回归预测的概率分布.
