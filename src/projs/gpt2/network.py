@@ -95,8 +95,8 @@ class gpt2(DecoderOnly):
 
         output:
             logits: [B, S, vocab_size]
-            past_kv: None or tuple of updated k_cache/v_cache
-            past_attention_mask: None or updated past_attention_mask which stick to past_kv
+            past_kv: None or tuple of updated k_cache/v_cache(so-far). for next-time, it'll be past
+            past_attention_mask: None or updated past_attention_mask which stick to past_kv(so-far). for next-time, it'll be past
         '''
         B, S = input_seqs.shape
         device = input_seqs.device
@@ -139,10 +139,29 @@ class gpt2(DecoderOnly):
     
     @torch.no_grad()
     def generate(self,
-                 prompt_ids: torch.Tensor, # prefill: [B, S], decode: [B, 1]. latest timestep --> T >= 0
-                 max_gen_size: int,        # max generat
-                 temperature: float = 1.0, #
-                 top_k: int|None = None,   #
-                 eos_id: int|None = None   # 
+                 input_ids: torch.Tensor, # prefill: [B, S], decode: [B, 1]. latest timestep --> T >= 0
+                 max_gen_size: int,        # max generating length
+                 temperature: float = 1.0, # flatten/sharpen the output distribution
+                 top_k: int|None = None,   # limit selections when sampling token via output distribution
+                 eos_id: int|None = None   # stop sign
                  ):
+        '''
+        generate 分为两个阶段:
+        1. prefill: input_ids [B, S], latest timestep T
+        此时, forward 输入:
+            input_seqs = input_ids [B, S], latest timestep T
+            attention_mask 根据 input_seqs 的实际 PAD 情况输入, None/[B, S]
+            past_kv = None 因为此时没有 past
+            past_attention_mask = None 因为此时没有 past
+            if_cache_kv = True 因为在 generate 时, 总需要把该次 so-far kv 作为下一次 infer 的 past_kv 输入
+
+        prefill 的输出 output [B, S], latest timestep T+1. 取出 output 的 last timestep 组成 [B, 1] 输入进入阶段2
+        2. decode: input_ids [B, 1], latest timestep T+1
+        此时, forward 输入:
+            input_seqs = input_ids [B, 1], latest timestep T+1
+            attention_mask 根据 input_seqs 的实际 PAD 情况输入. 考察 input_ids 中是否是 eos_id 决定 PAD, None/[B, 1]
+            past_kv = tuple of kv pair, past 指 0<->T timesteps, 即上一次 generate 返回的 so-far kv. 上一次的so-far是这一次的past
+            past_attention_mask: None/描述 past v 的 01 tensor, 即上一次 generate 返回的 so-far attn_mask. 上一次的so-far是这一次的past
+            if_cache_kv = True 因为在 generate 时还是要保持输出该次 so-far kv 作为下一次 infer 的 past_kv 输入
+        '''
         pass
