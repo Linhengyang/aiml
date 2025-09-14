@@ -131,8 +131,18 @@ class gpt2(DecoderOnly):
             kv_cache = past_kv[i] if past_kv is not None else None
             x, new_kv_cache = block(x, kv_cache, attention_mask, if_cache_kv)
             if if_cache_kv:
-                new_past_kv.append( new_kv_cache )
+                new_past_kv.append( new_kv_cache ) # new_kv_cache 是 torch.cat 得到的, 其内存使用是高效的.
         
         logits = self.head_tok(self.layer_norm_final(x)) # [B, S, vocab_size]
 
         return logits, tuple(new_past_kv) if if_cache_kv else None, attention_mask
+    
+    @torch.no_grad()
+    def generate(self,
+                 prompt_ids: torch.Tensor, # prefill: [B, S], decode: [B, 1]. latest timestep --> T >= 0
+                 max_gen_size: int,        # max generat
+                 temperature: float = 1.0, #
+                 top_k: int|None = None,   #
+                 eos_id: int|None = None   # 
+                 ):
+        pass
