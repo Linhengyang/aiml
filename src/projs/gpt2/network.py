@@ -112,9 +112,10 @@ class gpt2(DecoderOnly):
             position_ids = torch.arange(start_position, start_position + S, device=device).unsqueeze(0) # [1, S]
             pos = self.W_pos_embd(position_ids) # [1, S, D]
             tok = tok + pos # add abs pos encoding 到 tok embedding 上
+        # 如果使用RoPE位置编码: 无需额外操作, casual attention 层会执行RoPE
         x = self.embd_drop(tok) # [B, S, D]
 
-        if past_kv is not None: # 只有当 past_kv not None, attention_mask 作为对 input_seq 的描述, 才不等价于对 v 的描述, 才可能需要更新它
+        if past_kv is not None: # attention_mask 作为对 input_seq 的描述, 只有当 past_kv not None 才不等价于对 v 的描述, 才可能需要更新它
             if past_attention_mask is not None or attention_mask is not None:
                 # 若 past_attention_mask 和 attention_mask 有其一不为 None, 那么说明需要引入 pad 信息
                 if past_attention_mask is None:
@@ -122,9 +123,7 @@ class gpt2(DecoderOnly):
                 if attention_mask is None:
                     attention_mask = torch.ones(B, S)
                 attention_mask = torch.cat([past_attention_mask, attention_mask], dim=-1).to(device=device) # [B, num_steps_past+1]
-            else:
-                # 若 past_attention_mask 和 attention_mask 都是 None, 那么 无需更新 attention_mask: 以None输入即可
-                pass
+            # 若 past_attention_mask 和 attention_mask 都是 None, 那么 无需更新 attention_mask: 以None输入即可
         
         new_past_kv = [] if if_cache_kv else None
 
@@ -132,8 +131,18 @@ class gpt2(DecoderOnly):
             kv_cache = past_kv[i] if past_kv is not None else None
             x, new_kv_cache = block(x, kv_cache, attention_mask, if_cache_kv)
             if if_cache_kv:
-                new_past_kv.append( new_kv_cache )
+                new_past_kv.append( new_kv_cache ) # new_kv_cache 是 torch.cat 得到的, 其内存使用是高效的.
         
         logits = self.head_tok(self.layer_norm_final(x)) # [B, S, vocab_size]
 
         return logits, tuple(new_past_kv) if if_cache_kv else None, attention_mask
+    
+    @torch.no_grad()
+    def generate(self,
+                 prompt_ids: torch.Tensor, # prefill: [B, S], decode: [B, 1]. latest timestep --> T >= 0
+                 max_gen_size: int,        # max generat
+                 temperature: float = 1.0, #
+                 top_k: int|None = None,   #
+                 eos_id: int|None = None   # 
+                 ):
+        pass
