@@ -357,7 +357,7 @@ class CasualMHA(nn.Module):
 
     def forward(self,
                 x:torch.Tensor,
-                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None=None,
+                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None = None,
                 attention_mask:torch.Tensor|None = None,
                 return_cache:bool = False):
         
@@ -371,7 +371,7 @@ class CasualMHA(nn.Module):
         k = k.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2)
         v = v.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2)
 
-        # only infer.decode 阶段. 此时 num_steps_for_q = 1
+        # only for infer.decode 阶段. 此时 num_steps_for_q = 1
         if kv_cache:
             k_past, v_past = kv_cache # k_past/v_past[B, H, num_steps_past=T, d]
             k, v = torch.cat([k_past, k], dim=2), torch.cat([v_past, v], dim=2) # k/v[B, H, num_steps_so_far=T+1, d]
