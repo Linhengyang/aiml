@@ -164,4 +164,5 @@ class gpt2(DecoderOnly):
             past_attention_mask: None/描述 past v 的 01 tensor, 即上一次 generate 返回的 so-far attn_mask. 上一次的so-far是这一次的past
             if_cache_kv = True 因为在 generate 时还是要保持输出该次 so-far kv 作为下一次 infer 的 past_kv 输入
         '''
-        pass
+        self.eval()
+        
