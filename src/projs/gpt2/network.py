@@ -88,10 +88,10 @@ class gpt2(DecoderOnly):
         '''
         input:
             input_seqs: tensor [B, S]
-            attention_mask: None or tensor [B, S] to describe whether input_seqs PAD
+            attention_mask: None or tensor [B, S] to describe input_seqs PAD-info. False-->PAD, True-->non-PAD
             past_kv: None or tuple of (k_cache, v_cache) where k_cache/v_cache [B, S, num_steps_past, d]
-            past_attention_mask: None or tensor [B, num_steps_past] to describe whether past_kv PAD
-            if_cache_kv: False or True to determine if updated k_cache/v_cache returned in tuple
+            past_attention_mask: None or tensor [B, num_steps_past] to describe past_kv PAD-info
+            if_cache_kv: bool to determine if updated k_cache/v_cache returned in tuple
 
         output:
             logits: [B, S, vocab_size]
@@ -119,9 +119,9 @@ class gpt2(DecoderOnly):
             if past_attention_mask is not None or attention_mask is not None:
                 # 若 past_attention_mask 和 attention_mask 有其一不为 None, 那么说明需要引入 pad 信息
                 if past_attention_mask is None:
-                    past_attention_mask = torch.ones(B, past_kv[0][1].size(2))
+                    past_attention_mask = torch.ones(B, past_kv[0][1].size(2), dtype=torch.bool, device=device)
                 if attention_mask is None:
-                    attention_mask = torch.ones(B, S)
+                    attention_mask = torch.ones(B, S, dtype=torch.bool, device=device)
                 attention_mask = torch.cat([past_attention_mask, attention_mask], dim=-1).to(device=device) # [B, num_steps_past+1]
             # 若 past_attention_mask 和 attention_mask 都是 None, 那么 无需更新 attention_mask: 以None输入即可
         
@@ -137,6 +137,25 @@ class gpt2(DecoderOnly):
 
         return logits, tuple(new_past_kv) if if_cache_kv else None, attention_mask
     
+    @staticmethod
+    def sample_next_token(logits: torch.Tensor, temperature: float, top_k: int|None):
+        # logits: [B, vocab_size]
+        logits /= max(temperature, 1e-6)
+        if top_k is not None and top_k > 0:
+            top_k = min(top_k, logits.size(-1))
+            # values shape: [B, top_k]
+            values, _ = torch.topk(logits, top_k, dim=-1) # 在 logits[B, n_vocab] dim-1 取每行的 top_k, 从大到小 从左至右排列
+            # mask for logits to remove all elements outside tok_k
+            kth = values[..., -1, None] # [B, top_k] -> [B, 1]
+            # where outside top_k --> -inf; where inside top_k --> logits
+            logits = torch.where(logits < kth, torch.full_like(logits, float("-inf")), logits) # [B, vocab_size]
+        
+        probs = torch.nn.functional.softmax(logits, dim=-1) # [B, vocab_size]
+        # select 1 via every row distribution as next-token
+        next_token = torch.multinomial(probs, num_samples=1, replacement=False)  # [B, 1]
+
+        return next_token
+
     @torch.no_grad()
     def generate(self,
                  input_ids: torch.Tensor, # prefill: [B, S], decode: [B, 1]. latest timestep --> T >= 0
@@ -161,8 +180,44 @@ class gpt2(DecoderOnly):
             input_seqs = input_ids [B, 1], latest timestep T+1
             attention_mask 根据 input_seqs 的实际 PAD 情况输入. 考察 input_ids 中是否是 eos_id 决定 PAD, None/[B, 1]
             past_kv = tuple of kv pair, past 指 0<->T timesteps, 即上一次 generate 返回的 so-far kv. 上一次的so-far是这一次的past
-            past_attention_mask: None/描述 past v 的 01 tensor, 即上一次 generate 返回的 so-far attn_mask. 上一次的so-far是这一次的past
+            past_attention_mask: None/描述 past v 的 TF tensor, 即上一次 generate 返回的 so-far attn_mask. 上一次的so-far是这一次的past
             if_cache_kv = True 因为在 generate 时还是要保持输出该次 so-far kv 作为下一次 infer 的 past_kv 输入
         '''
+        assert max_gen_size > 0, f'max_gen_size must be larger than 0'
         self.eval()
+
+        # prefill
+        attention_mask = None
+        if eos_id is not None:
+            attention_mask = torch.ones_like(input_ids, dtype=torch.bool) # same device with input_ids
+
+        logits, past_kv, past_attention_mask = self(
+            input_seqs = input_ids,             # timesteps 0<->T
+            attention_mask = attention_mask,    # timesteps 0<->T
+            past_kv = None,
+            past_attention_mask = None,
+            if_cache_kv = True
+        )
+        # returned logits: [0, timesteps 1<->T+1, vocab_size]
+        # past_kv: tuple of kv_cache [B, H, timesteps 0<->T, d]
+        # past_attention_mask: describe of past v [B, timesteps 0<->T]
+
+        max_gen_size -= 1
+        next_token = self.sample_next_token(logits[:, -1, :], temperature, top_k) # [B, 1], timestep T+1
+
+        attention_mask = None
+        # 若 eos_id 不为 None, 则提供了判断 PAD 的标准: 等于 eos_id 的就是 PAD 位置.
+        if eos_id is not None:
+            attention_mask = next_token != eos_id # [B, 1]
+            if not attention_mask.any(): # 如果生成的 next_token 全都是 PAD --> 结束 generate
+                return next_token
         
+        # decode
+        for _ in range(max_gen_size):
+            logits, past_kv, past_attention_mask = self(
+                input_seqs = next_token,                    # [B, 1], latest timestep T+1
+                attention_mask = attention_mask,            # [B, 1]/None
+                past_kv = past_kv,                          # tuple of kv_cache [B, timesteps 0<->T]
+                past_attention_mask = past_attention_mask,
+                if_cache_kv = True
+            )
