@@ -5,11 +5,11 @@ import torch
 import typing as t
 import pandas as pd
 import yaml
-from ...core.utils.text.vocabulize import Vocab
-from ...core.utils.text.tokenizer import baseBBPETokenizer, ENDOFTEXT
+from ...core.utils.text.tokenizer import ENDOFTEXT, CharacterTokenizer
+from .network import gpt2Config, gpt2
 
 
-configs = yaml.load(open('src/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('src/projs/gpt2/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## directories ##################
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
@@ -75,52 +75,85 @@ num_epochs, batch_size, lr = 20, 512, 0.00015
 
 
 
-# 生产 tokenizer, 可视化 view
-def build_tokenizer_job():
-    print('build_tokenizer_job begin')
+# # 生产 tokenizer, 可视化 view
+# def build_tokenizer_job():
+#     print('build_tokenizer_job begin')
 
-    # create all related directories if not existed
-    for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir]:
-        os.makedirs(dir_name, exist_ok=True)
-        print(f'directory {dir_name} created')
+#     # create all related directories if not existed
+#     for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir]:
+#         os.makedirs(dir_name, exist_ok=True)
+#         print(f'directory {dir_name} created')
 
-    # generate tokenizer
-    # not use BPE
+#     # generate tokenizer
+#     # not use BPE
 
-    # 读取全部语料 corpus
-    print('read train')
-    train_df = pd.read_parquet(configs['train_data'])
-    print('read validation')
-    valid_df = pd.read_parquet(configs['valid_data'])
-    print('get full corpus')
-    full_df = pd.concat([train_df, valid_df], ignore_index=True)
-    del train_df, valid_df
+#     # 读取全部语料 corpus
+#     print('read train')
+#     train_df = pd.read_parquet(configs['train_data'])
+#     print('read validation')
+#     valid_df = pd.read_parquet(configs['valid_data'])
+#     print('get full corpus')
+#     full_df = pd.concat([train_df, valid_df], ignore_index=True)
+#     del train_df, valid_df
     
-    corpus = ENDOFTEXT.join( full_df['text'].tolist() )
+#     corpus = ENDOFTEXT.join( full_df['text'].tolist() )
 
-    # tokenizer
-    # 当 tokenizer_path 文件不存在时, 生产并保存 tokenizer 到 tokenizer_dir/gpt.tok
-    tokenizer_path = os.path.join(tokenizer_dir, 'gpt.tok')
-    if not os.path.exists(tokenizer_path):
-        # create tokenizer
-        print('bpe train begin')
-        gpt_tokenizer = baseBBPETokenizer(name='gpt')
-        gpt_tokenizer.train_bpe(corpus, num_merges=30000, verbose=True)
-        print('bpe train close')
-        gpt_tokenizer.save(tokenizer_path)
-    # 当 tokenizer_path 存在时
-    else:
-        gpt_tokenizer.load(tokenizer_path)
+#     # tokenizer
+#     # 当 tokenizer_path 文件不存在时, 生产并保存 tokenizer 到 tokenizer_dir/gpt.tok
+#     tokenizer_path = os.path.join(tokenizer_dir, 'gpt.tok')
+#     if not os.path.exists(tokenizer_path):
+#         # create tokenizer
+#         print('bpe train begin')
+#         gpt_tokenizer = boostBBPETokenizer(name='gpt')
+#         gpt_tokenizer.train_bpe(corpus, num_merges=30000, verbose=True)
+#         print('bpe train close')
+#         gpt_tokenizer.save(tokenizer_path)
+#     # 当 tokenizer_path 存在时
+#     else:
+#         gpt_tokenizer.load(tokenizer_path)
 
-    # vocab
-    print('bpe view')
-    gpt_tokenizer.view(vocab_dir)
+#     # vocab
+#     print('bpe view')
+#     gpt_tokenizer.view(vocab_dir)
 
-    print('build_tokenizer_job complete')
-    return tokenizer_path
+#     print('build_tokenizer_job complete')
+#     return tokenizer_path
 
 
 
 
 def pretrain_job(vocab_path):
     pass
+
+
+
+
+def test_job():
+    
+    test_gpt2_cfg = gpt2Config(
+        embd_size = 64,
+        vocab_size = 26,
+        embd_p_drop = 0.1,
+        ## decoder-block(casual_attention layer + ffn) configs
+        # embd_size:int
+        num_head = 2,
+        use_bias = False,
+        max_context_size = 256,
+        attn_p_drop = 0.1,
+        resid_p_drop = 0.1,
+        use_cached_casual_mask = False,
+        use_rope = True,
+        ## number of decoder-block
+        num_block = 2
+    )
+
+    gpt2_model = gpt2(test_gpt2_cfg)
+
+    corpus = ['abcde', 'heell', 'hello']
+    chartok = CharacterTokenizer()
+
+    input_seqs = torch.tensor( [chartok.encode(s) for s in corpus] ) - 97 # [3, 5]
+    
+    logits, _, _ = gpt2_model(input_seqs)
+
+    print(logits.shape)

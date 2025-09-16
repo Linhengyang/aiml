@@ -9,7 +9,7 @@ from typing import Tuple, Optional
 
 
 @dataclass
-class GPT2Config:
+class gpt2Config:
     ## embedding layer configs
     embd_size:int
     vocab_size:int
@@ -42,7 +42,7 @@ class gpt2(DecoderOnly):
                        |--> new_kv(if need) -----append_to_new_container-----> new_kv_caches(if need)
                        |-----------------------------------------------------> new_past_attention_mask(if need)
     '''
-    def __init__(self, config:GPT2Config):
+    def __init__(self, config:gpt2Config):
         super().__init__()
         self.config = config
 
@@ -207,11 +207,13 @@ class gpt2(DecoderOnly):
         attention_mask = None
 
         next_token = self.sample_next_token(logits[:, -1, :], temperature, top_k) # [B, 1]
+        output = next_token.cpu() # [B, 1]
+
         # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
         if eos_id is not None:
             attention_mask = next_token != eos_id # [B, 1]
             if not attention_mask.any(): # 如果生成的 next_token 全都是 PAD --> 结束 generate
-                return next_token
+                return output
         
         # decode
         for _ in range(max_gen_size):
@@ -227,7 +229,11 @@ class gpt2(DecoderOnly):
             # past_kv: tuple of kv_cache [B, H, L_past+1, d]
             # past_attention_mask: describe of past kv [B, L_past+1]
             next_token = self.sample_next_token(logits.squeeze(1), temperature, top_k) # [B, 1]
+            output = torch.cat([output, next_token.cpu()], dim=-1)
+
             if eos_id is not None:
                 attention_mask = next_token != eos_id # [B, 1]
                 if not attention_mask.any(): # 如果生成的 next_token 全都是 PAD --> 结束 generate
-                    return next_token
+                    return output
+        
+        return output
