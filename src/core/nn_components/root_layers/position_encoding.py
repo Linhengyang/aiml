@@ -9,9 +9,10 @@ class TrigonoAbsPosEnc(nn.Module):
         num_hiddens: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
-        position_ids: 1D tensors of int64, shall be inside [0, max_len-1]
+        position_ids: 2D tensors of [B, seq_len]int64 / 1D tensor of [seq_len,]int64
+            valid positions start from index 0
     
-    returns: (1, len(position_ids), num_hiddens)int64 position embedding of position_ids
+    returns: [B, seq_len, num_hiddens]/[seq_len, num_hiddens]
 
     explains:
         Given input position_ids(int64), TrigonoAbsPosEnc returns embeddings of position_ids with
@@ -43,7 +44,7 @@ class TrigonoAbsPosEnc(nn.Module):
         values 是 position index starting from 0. shall be inside [0, max_len-1]
         '''
 
-        return self.PosEnc[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens)
+        return self.PosEnc[position_ids, :] # (B, seq_len, num_hiddens)/(seq_len, num_hiddens)
 
 
 
@@ -53,28 +54,19 @@ class TrigonoAbsPosEnc(nn.Module):
 class LearnAbsPosEnc(nn.Module):
     '''
     args:
-        max_possible_posNum: how many possible 1D positions are there in total
-            e.g, if there are positions of 1,2,3,4,5 without 0, then max_possible_posNum = 5
-            e.g, if there are positioins of 1,2,3,4,5 but position 0 still exists, then max_possible_posNum = 6
-
-        For sequence data, max_possible_posNum can be 1 + sequence length if BOS should be considered
-
-        Given max_possible_posNum, the layer creates positions by using [0, 1, ..., max_possible_posNum-1] to index
+        max_possible_posNum: how many possible absolute positions are there in total(starting from 0)
+            Given max_possible_posNum, the layer creates positions via [0, 1, ..., max_possible_posNum-1]
 
         num_hiddens: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
-        position_ids: 1D tensors of int64, shall be inside [0, max_possible_posNum-1]
+        position_ids: 2D tensor of [B, seq_len]int64
+                      1D tensors of [seq_len,]int64
+        values shall be inside [0, max_possible_posNum-1](valid position id starts from 0)
     
-    returns: (1, len(position_ids), num_hiddens) learnable position embedding of position_ids
+    returns: [B, seq_len, num_hiddens]/[seq_len, num_hiddens]
+        learnable position embedding of position_ids
 
-    explains:
-        The Learnable absolute positional encodes P shall be shared in different position encoding layers.
-
-        PosEnc with shape (1, max_possible_posNum, num_hiddens), whose elements are all learnable parameters.
-
-        Given input position_ids(int64), selected learnable positional encoding PosEnc with shape 
-        (1, len(position_ids), num_hiddens) shall be added to every corresponding steps of data sample
     '''
     def __init__(self, max_possible_posNum, num_hiddens):
         super().__init__()
