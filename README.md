@@ -88,7 +88,7 @@ export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
     │   │   └── sentiment_analysis
     │   └── projs
     │       ├── bert
-    │       ├── gpt
+    │       ├── gpt2
     │       ├── transformer
     │       └── vit
     ├── bin
