@@ -416,7 +416,7 @@ class CasualMHA(nn.Module):
         assert embd_size % num_head == 0, f'embedding size shall be divided into number_head'
         self.D = embd_size
         self.H = num_head
-        self.d = embd_size / num_head
+        self.d = embd_size // num_head
         assert self.d % 2 == 0, f'dim_per_head (embedding size / number_head) must be even for RoPE'
         self.scale = 1.0 / math.sqrt(self.d)
 
@@ -473,8 +473,8 @@ class CasualMHA(nn.Module):
             cos, sin = self.rope.get_sin_cos(pos_ids_so_far, broadcast_axis=1) # [B/1, L_so_far] -> [B/1, 1, L_so_far, d]
             cos_q = cos[:, :, L_so_far-L_q:L_so_far, :] # cos/sin [B/1, 1, L_q, d]
             sin_q = sin[:, :, L_so_far-L_q:L_so_far, :]
-            q = self.rope.apply(q, cos_q, sin_q)
-            k = self.rope.apply(k, cos, sin)
+            q = self.rope.apply_rope(q, cos_q, sin_q)
+            k = self.rope.apply_rope(k, cos, sin)
 
         # qk 计算 attention weight
         attn_w = torch.matmul(q, k.transpose(2, 3)) * self.scale # [B, H, L_q, L_so_far]

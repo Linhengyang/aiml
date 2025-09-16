@@ -9,7 +9,7 @@ from ...core.utils.text.tokenizer import ENDOFTEXT, CharacterTokenizer
 from .network import gpt2Config, gpt2
 
 
-configs = yaml.load(open('src/projs/gpt/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('src/projs/gpt2/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## directories ##################
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
@@ -152,7 +152,7 @@ def test_job():
     corpus = ['abcde', 'heell', 'hello']
     chartok = CharacterTokenizer()
 
-    input_seqs = torch.tensor( [chartok.encode(s) for s in corpus] ) # [3, 5]
+    input_seqs = torch.tensor( [chartok.encode(s) for s in corpus] ) - 97 # [3, 5]
     
     logits, _, _ = gpt2_model(input_seqs)
 
