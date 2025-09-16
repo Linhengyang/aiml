@@ -234,6 +234,8 @@ class MultiHeadAttention(nn.Module):
         return self.W_o(O)
 
 
+
+
 # 因果矩阵: 当自回归式生成 N 个 token时, 意味着用 token1 生成 token2, token1-2 生成 token2, ..., token1-N 生成 tokenN
 # 1  0  0  0  0       ---> tok_1 = f(tok_1)
 # 1  1  0  0  0       ---> tok_2 = f(tok_1, tok_2)
@@ -245,6 +247,54 @@ class MultiHeadAttention(nn.Module):
 # 左边 因果矩阵 的构建方法:
 #     最下面一行一定是 all 1, 且 1 的个数是 num all valid tokens so-far, 记为 N
 #     往上相对距离为 i( 0 < i < N) 的行, casual 是 N-i 个 1, then i 个 0
+
+# 考虑 总序列 12345, 用1234生成2345, 则 context_size = 4. 自回归系数矩阵会是一个下三角(包含对角线)矩阵
+# 给 1234 的位置编码, 可以从0开始, 也可以从1开始. 只要train和infer时保持一致即可
+
+#   1  2  3  4
+# 1 a             --> 2
+# 2 a  a          --> 3
+# 3 a  a  a       --> 4
+# 4 a  a  a  a    --> 5
+
+# 现在考虑 左PAD. 某些模型会有一个序列起始符, 其实等价于在序列左端 PAD.
+# 现在考虑一个 总序列12345, 用1234生成2345, context_size = 4, 但左PAD到定长6, 则 attention_mask = [001111]
+# 显然有以下几个结论: 
+# 一label序列2345也要左PAD到定长6, 且不能出现用 0 生成 1 的对齐错误.
+# 二attention_mask在q行维度传播后, 可以形成x区域, 可以完美屏蔽掉 PAD 的影响.
+# 给 001234 的位置编码, 由于前两个00(PAD) 会被 attention_mask 完美屏蔽, 所以它们的位置编码其实是无所谓的, 始终不会参与计算. 统一赋0就好.
+# 关键还是1234的位置编码, 可以从0开始, 也可以从1开始. 只要train和infer保持一致即可. 从0开始, 全部位置编码为000123; 从1开始, 全部位置编码为001234
+# 所以 左PAD情况下, 位置编码必须 只关注真实token序列1234. 所以必须是根据 attention_mask 确定真实token位置的 动态位置编码.
+
+#   0  0  1  2  3  4
+# 0 x                   --> 0
+# 0 x  x                --> 0
+# 1 x  x  a             --> 2
+# 2 x  x  a  a          --> 3
+# 3 x  x  a  a  a       --> 4
+# 4 x  x  a  a  a  a    --> 5
+
+# 现在考虑 右PAD.
+# 现在考虑一个 总序列12345, 用1234生成2345, context_size = 4, 但右PAD到定长6, 则 attention_mask = [111100]
+# 对比 左PAD, 发现 右PAD 的 attention_mask 在q行维度传播形成的 x区域, 无法完全屏蔽掉 PAD 的影响: 在后两个 q行, 出现了以 0为q, 1234参与生成 0 的情况.
+# 在给1234位置编码之后(无论0开始or1开始), 给 右PAD 的两个00的位置编码, 无论怎么赋, 都会出现在 q 值中, 无法被完全屏蔽.
+# 解决方法: 引入 label_mask, 即计算loss时, 屏蔽掉 label 序列中 PAD 位置. 这样 label 的 PAD位置不会 回传梯度, PAD 位置的 a 系数不会被更新
+# 这样引入 label_mask 之后, 右PAD 的好处也显现出来, 即位置编码非常简单: 固定从0或1开始的序列编号即可. 不必担心给 右PAD 位置的编码, 因为会被 label_mask
+
+#   1  2  3  4  0  0
+# 1 a                   --> 2
+# 2 a  a                --> 3
+# 3 a  a  a             --> 4
+# 4 a  a  a  a          --> 5
+# 0 a  a  a  a  x       --> 0 (label_mask)
+# 0 a  a  a  a  x  x    --> 0 (label_mask)
+
+# 从上述左右PAD的情况可以看出, 不管左PAD还是右PAD, 归根结底还是要尽量减少PAD. PAD 信息可以 由主动传入 attention_mask 完备表达.
+# 
+# 通过 casual_mask/attention_mask/label_mask 三道屏蔽, 以及正确的数据对齐, 无论是左PAD还是右PAD, 在训练上差别不大. 但是在推理时, 如果作并发Batch推理, 
+# 由于始终会取Batch各序列的last token作为q, 那么右PAD的batch, 会导致某些序列在推理时传入了PAD作为q. 
+# 所以推理时把batch各序列作左PAD对齐 比较好. 训练数据右PAD对齐，跟推理batch左PAD对齐不矛盾.
+
 
 # F.scaled_dot_product_attention 的 api 逻辑, 实现带因果遮罩 casual_mask 的 multi-head attention layer
 # (function) def scaled_dot_product_attention(
@@ -294,7 +344,8 @@ class CasualMHA(nn.Module):
             True: 会根据 max_context_size 预先生成 casual mask 以供裁剪去契合 attention weights
             False:, 根据 train/eval 状态, 以及 q/k 的 seq_len_q/seq_len_k, 动态生成相应 casual mask
         use_rope: bool
-            True: CasualMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k
+            True: CasualMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k.
+                  本 CasualMHA 层在使用 RoPE 时, valid token 的位置编码从 0 开始. PAD(如果有)位置编码赋0. 这里不害怕混淆, 因为PAD不参与计算.
             False: CasualMHA layer 不带 位置编码. 那么 CasualMHA layer 之前, 要使用 max_context_size 参数实施 绝对位置编码
 
     前向输入
@@ -320,6 +371,7 @@ class CasualMHA(nn.Module):
 
         attention_mask: Tensor|None
           默认None, 意味着 k/v as all 1 to num_valid_tokens_so_far(N for train/prefill, J for decode) valid tokens 都是 valid.
+            此时若 use_rope = True, 由于 attention_mask 为 None, 则位置编码采用 0 开始的编码.
 
           若非None, 则为 tensor of bool, 形状 [B, num_valid_tokens_so_far], 此时 它表达了
           k/v as all 1 to num_valid_tokens_so_far(N for train/prefill, J for decode) valid tokens 的附加肯定/否定信息:
@@ -335,14 +387,14 @@ class CasualMHA(nn.Module):
             当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 num_valid_tokens_so_far 所有.
 
     前向输出
-        y: Tensor, shape same as x [B, num_steps_for_query=S/1, D], latest timestep 为 next timestep T+1
+        y: Tensor, shape same as x [B, L_q, D]. next-token 取 y 的 last dim 2.
 
         new_kv_cache: Tuple[Tensor, Tensor]|None. if return_cache == False, new_kv_cache is None
             train 阶段: new_kv_cache = None
-            infer 阶段: new_kv_cache = tuple of k and v, k / v 包含 so_far timesteps 即 0 至 T. 由 past timesteps 0 至 T-1 追加 T 得到.
+            infer 阶段: new_kv_cache = tuple of k and v, k/v [B, H, L_sofar, d]. 本输出的 L_sofar 在下一次next-token生成里就是 L_past
 
-    本 CasualMHA layer 的位置编码原则: first-true-token 的位置编码为 1.
-        这样无论起始占位符是否在实际 sequence 中存在. 如果存在, 那么它(包括左pad)的pos id为 0; 如果不存在, 那么first true token的pos id为1.
+    本 CasualMHA layer 的 RoPE 位置编码原则: first-true-token 的位置编码为 0
+        这样无论起始占位符是否在实际 sequence 中存在. 如果存在, 那么它(包括左pad)的pos id为 0; 如果不存在, 那么first true token的pos id为0.
 
     灵活组合 kv_cache 和 return_cache 以满足 train / infer.prefill / infer.decode 不同阶段
         train 阶段: teacher-force策略下的 self-attention 计算, 不需要输入 kv_cache(past timesteps), 同时也不需要输出 kv(so_far timesteps)
@@ -392,72 +444,67 @@ class CasualMHA(nn.Module):
                 attention_mask:torch.Tensor|None = None,
                 return_cache:bool = False):
         
-        num_steps_for_q = x.size(1) # x[B, num_steps_for_q=S, D]. train/infer.prefill时, S在batch内固定; infer.decode时, S=1
+        L_q = x.size(1) # x[B, L_q, D]
 
-        # 制作 qkv: x[B, S, D] --> qkv[B, S, 3D] --split--> q/k/v[B, S, D] --reshape--> q/k/v[B, H, S, d]
+        # 制作 qkv: x[B, L_q, D] --> qkv[B, L_q, 3D] --split--> q/k/v[B, L_q, D] --reshape--> q/k/v[B, H, L_q, d]
         qkv = self.W_qkv(x)
-        q, k, v = qkv.split(self.D, dim=-1) # q/k/v [B, S, D]
-        # [B, S, D] -> [B, S, H, d] -> [B, H, S, d]
-        q = q.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2) # [B, H, num_steps_for_q, d]
-        k = k.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2)
-        v = v.view(-1, num_steps_for_q, self.H, self.d).transpose(1, 2)
+        q, k, v = qkv.split(self.D, dim=-1) # q/k/v [B, L_q, D]
+        # [B, L_q, D] -> [B, L_q, H, d] -> [B, H, L_q, d]
+        q = q.view(-1, L_q, self.H, self.d).transpose(1, 2) # [B, H, L_q, d]
+        k = k.view(-1, L_q, self.H, self.d).transpose(1, 2)
+        v = v.view(-1, L_q, self.H, self.d).transpose(1, 2)
 
-        # only for infer.decode 阶段. 此时 num_steps_for_q = 1
+        # only for infer.decode 阶段. 此时 L_q = 1
         if kv_cache:
-            k_past, v_past = kv_cache # k_past/v_past[B, H, num_steps_past=T, d]
-            k, v = torch.cat([k_past, k], dim=2), torch.cat([v_past, v], dim=2) # k/v[B, H, num_steps_so_far=T+1, d]
+            k_past, v_past = kv_cache # k_past/v_past[B, H, L_past, d]
+            k, v = torch.cat([k_past, k], dim=2), torch.cat([v_past, v], dim=2) # k/v[B, H, L_so_far=L_past+1, d]
 
-        num_steps_so_far = k.size(2) # train/infer.prefill时 等于 num_steps_for_q
+        L_so_far = k.size(2) # train/infer.prefill时, L_q = L_so_far
+        # offset = L_so_far - L_q # 从 offset(包含)数到L_so_far(不包含), 长度 L_q
 
         if hasattr(self, 'rope'):
-            if attention_mask is None:
-                # 当没有 attention_mask 时, 意味着 kv 总共 num_steps_so_far 步都是 valid. 根据位置编码设计原则, first-true-token从1开始
-                # k [B, H, num_steps_so_far=T+1, d] 位置id 无论在哪个阶段都是 0至T. 可以从k自身得到
-                # q 在train/infer.prefill阶段 position ids 是 0至T=S-1, 可以从q或k得到. 在infer.decode阶段, 位置id是T, 必须从k得到
-                pos_ids_so_far = torch.arange(1, num_steps_so_far+1, device=k.device).unsqueeze(0) # shape [1, T+1]
-                cos, sin = self.rope.get_sin_cos(pos_ids_so_far, broadcast_axis=1) # shape [1, 1, T+1, d]
-
-                # 为了通用性, 采用如下写法
-                cos_q = cos[:, :, num_steps_so_far-num_steps_for_q:num_steps_so_far, :] # shape [1, 1, num_steps_for_q, d]
-                sin_q = sin[:, :, num_steps_so_far-num_steps_for_q:num_steps_so_far, :]
+            if attention_mask is None: # --> 视 k/v L_so_far 个 tokens 全部都是 valid, 都应该赋 位置编码.
+                pos_ids_so_far = torch.arange(0, L_so_far, device=k.device).unsqueeze(0) # shape [1, L_so_far]
             else:
-                # attention_mask [B, num_steps_so_far=T+1], 自带 真实位置信息
-
-
+                # attention_mask [B, L_so_far], 自带 真实位置信息
+                pos_ids_so_far = attention_mask.cumsum(dim=-1) - 1 # 第一个valid token在序列中的位置编码为0
+                pos_ids_so_far = pos_ids_so_far.masked_fill(attention_mask == False, 0) # [B, L_so_far]
+            
+            cos, sin = self.rope.get_sin_cos(pos_ids_so_far, broadcast_axis=1) # [B/1, L_so_far] -> [B/1, 1, L_so_far, d]
+            cos_q = cos[:, :, L_so_far-L_q:L_so_far, :] # cos/sin [B/1, 1, L_q, d]
+            sin_q = sin[:, :, L_so_far-L_q:L_so_far, :]
             q = self.rope.apply(q, cos_q, sin_q)
             k = self.rope.apply(k, cos, sin)
 
         # qk 计算 attention weight
-        attn_w = torch.matmul(q, k.transpose(2, 3)) * self.scale # [B, H, num_steps_for_q, num_steps_so_far=T+1]
+        attn_w = torch.matmul(q, k.transpose(2, 3)) * self.scale # [B, H, L_q, L_so_far]
 
-        # casual_mask: [..., 0:S, 0:S] for train/infer.prefill; [..., S-1:S, 0:S] for train/infer.prefill, same as attn_w
-        # train/infer.prefill 阶段是 上三角(不含对角线)为True的[..., S, S], infer.decode 阶段是 全False 的[..., 1, S]
+        # casual_mask: [B, H, L_q, L_so_far]
+        # train/infer.prefill [..., L_q=L_so_far, L_so_far], infer.decode [..., L_q=1, L_so_far]
         if hasattr(self, 'casual_mask'):
             # 当使用缓存, 为了通用性, 采用如下写法
-            casual_mask = self.casual_mask[:, :, num_steps_so_far-num_steps_for_q:num_steps_so_far, :num_steps_so_far]
+            casual_mask = self.casual_mask[:, :, L_so_far-L_q:L_so_far, :L_so_far]
         else:
-            # 动态生成, 为了通用性, 采用如下写法
+            # 当动态生成
             casual_mask = torch.triu(
-                torch.ones(num_steps_for_q, num_steps_so_far, dtype = torch.bool, device = attn_w.device),
-                diagonal = num_steps_so_far-num_steps_for_q + 1
+                torch.ones(L_q, L_so_far, dtype = torch.bool, device = attn_w.device),
+                diagonal = L_so_far-L_q + 1
                 )[None, None, :, :]
         
-        attn_w = attn_w.masked_fill(casual_mask, float('-inf')) # [B, H, num_steps_for_q, num_steps_so_far=T+1]
+        attn_w = attn_w.masked_fill(casual_mask, float('-inf')) # [B, H, L_q, L_so_far]
         
-        # mask 掉 pad 位置: v_so_far 里 pad 位置不贡献 next-token 预测, 方法就是相应位置的 attn_w 赋-inf(softmax后权重为0)
         if attention_mask is not None:
-            # attention_mask: tensor of torch.bool
-            # attention_mask[B, num_steps_so_far=T+1] --> pad_mask[B, 1, 1, num_steps_so_far=T+1]
-            pad_mask = (attention_mask == False)[:, None, None, :].to(attn_w.device)
+            # attention_mask: tensor of torch.bool [B, L_so_far]
+            pad_mask = (attention_mask == False)[:, None, None, :].to(attn_w.device) # pad_mask [B, 1, 1, L_so_far]
             attn_w = attn_w.masked_fill(pad_mask, float('-inf'))
 
         # softmax
-        attn_w = F.softmax(attn_w, dim=-1) # [B, H, num_steps_for_q, num_steps_so_far=T+1]
+        attn_w = F.softmax(attn_w, dim=-1) # [B, H, L_q, L_so_far]
         attn_w = self.attn_drop(attn_w)
 
-        y = torch.matmul(attn_w, v) # [B, H, num_steps_for_q, d]
-        y = y.transpose(1, 2).reshape(-1, num_steps_for_q, self.D) # --> [B, num_steps_for_q, H, d] --> [B, num_steps_for_q, D]
-        y = self.resid_drop(self.W_o(y)) # [B, num_steps_for_q, D]
+        y = torch.matmul(attn_w, v) # [B, H, L_q, L_so_far] @ [B, H, L_so_far, d] --> [B, H, L_q, d]
+        y = y.transpose(1, 2).reshape(-1, L_q, self.D) # --> [B, L_q, H, d] --> [B, L_q, D]
+        y = self.resid_drop(self.W_o(y)) # [B, L_q, D] --> [B, L_q, D]
 
         new_kv_cache = None
         if return_cache:
