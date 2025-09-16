@@ -105,13 +105,6 @@ class TransformerEncoderBlock(nn.Module):
         self.addlnorm2 = AddLayerNorm(num_hiddens, dropout)
     
     def forward(self, X, valid_lens):
-        # X 作 自注意力. X shape(batch_size, seq_len, num_hiddens), 在 dim 1 的 seq_len 里, valid area 由 valid_lens(batch_size,) 确定
-        # 可以先 mask, 再作 自注意力, 即对 X 在 dim 1 作 mask
-        # 也可以先 自注意力, 再 mask, 即 (Q, K) --相似度计算--> S --softmax--> W, (W, V) --n_query次线性组合 on V--> output
-        # 过程中, valid area 作用在 softmax 子过程里, 同样可以限制 valid area
-
-        # 在自注意力中, 对每个token(对应每条query)而言, 都只限制了整体valid 长度.
-        # 故 encoder 里, 每个token是跟序列里前/后所有valid token作相关性运算的
         Y = self.addlnorm1(X, self.attention(X, X, X, valid_lens))
         return self.addlnorm2(Y, self.PosFFN(Y))
 
