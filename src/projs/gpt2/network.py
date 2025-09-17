@@ -183,7 +183,8 @@ class gpt2(DecoderOnly):
             past_attention_mask: None/[B, L_past]bool, 即上一次 generate 返回的 so-far attn_mask. 上一次的so-far是这一次的past
             if_cache_kv = True 因为在 generate 时还是要保持输出该次 so-far kv 作为下一次 infer 的 past_kv 输入
         '''
-        assert max_gen_size > 0, f'max_gen_size must be larger than 0'
+        assert max_gen_size > 0 and max_gen_size + input_ids.size(1) <= self.config.max_context_size, \
+            f'max_gen_size must be larger than 0 and not larger than max_context_size minus prompt sequence length'
         self.eval()
 
         # prefill
@@ -236,4 +237,4 @@ class gpt2(DecoderOnly):
                 if not attention_mask.any(): # 如果生成的 next_token 全都是 PAD --> 结束 generate
                     return output
         
-        return output
+        return output # [B, max_gen_size]

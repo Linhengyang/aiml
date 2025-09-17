@@ -258,7 +258,7 @@ class MultiHeadAttention(nn.Module):
 # 4 a  a  a  a    --> 5
 
 # 现在考虑 左PAD. 某些模型会有一个序列起始符, 其实等价于在序列左端 PAD.
-# 现在考虑一个 总序列12345, 用1234生成2345, context_size = 4, 但左PAD到定长6, 则 attention_mask = [001111]
+# 现在考虑一个 总序列12345, 用1234生成2345, 但左PAD到定长6, context_size = 6, 则 attention_mask = [001111]
 # 显然有以下几个结论: 
 # 一label序列2345也要左PAD到定长6, 且不能出现用 0 生成 1 的对齐错误.
 # 二attention_mask在q行维度传播后, 可以形成x区域, 可以完美屏蔽掉 PAD 的影响.
@@ -275,7 +275,7 @@ class MultiHeadAttention(nn.Module):
 # 4 x  x  a  a  a  a    --> 5
 
 # 现在考虑 右PAD.
-# 现在考虑一个 总序列12345, 用1234生成2345, context_size = 4, 但右PAD到定长6, 则 attention_mask = [111100]
+# 现在考虑一个 总序列12345, 用1234生成2345, 但右PAD到定长6, context_size = 6, 则 attention_mask = [111100]
 # 对比 左PAD, 发现 右PAD 的 attention_mask 在q行维度传播形成的 x区域, 无法完全屏蔽掉 PAD 的影响: 在后两个 q行, 出现了以 0为q, 1234参与生成 0 的情况.
 # 在给1234位置编码之后(无论0开始or1开始), 给 右PAD 的两个00的位置编码, 无论怎么赋, 都会出现在 q 值中, 无法被完全屏蔽.
 # 解决方法: 引入 label_mask, 即计算loss时, 屏蔽掉 label 序列中 PAD 位置. 这样 label 的 PAD位置不会 回传梯度, PAD 位置的 a 系数不会被更新
