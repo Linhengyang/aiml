@@ -15,8 +15,28 @@
 #       f  1  1  1  1  1  1  1   --> 0
 #    从上往下数, 一直到 c --> 0 都是正常的. 但是下一行 0 --> d 就值得商榷了: ENDOFTEXT 作为 q, 前文 abc0 作为 kv, label 是下一篇文章的开头 d?
 #    再往下看, d --> e: d 作为 q, ENDOFTEXT 和前一篇文章的 abc 作为 kv, label是本文的 e?
-#    可以看出, 若 ENDOFTEXT token 进入 input_seqs, 会混淆前后两篇不相干的文章, 会干扰模型的上下文, 干扰模型的学习能力.
-#    所以一般不把 ENDOFTEXT token 做入 input_seqs. ???
+#    可以看出, 若 ENDOFTEXT token 进入 input_seqs, 会造成两个问题: 1. 混淆前后 不相干的文章 2. label为文档首token时, 对应q为 ENDOFTEXT, 这是错误的.
+
+#    但实际上, ENDOFTEXT token 进入 input_seqs 即 text-packing 成一条sequence 是刚需, 因为模型需要学会处理 ENDOFTEXT, ENDOFTEXT 需要在 input_seqs
+#    中出现, 这样才能使得 ENDOFTEXT 的 embedding 以及相关表示权重得到更新.(ENDOFTEXT 若只作为label出现, 是能学习预测生成它，而没办法学习表征它)
+
+#    如何解决 不相干的文档混淆问题？---> text-packing + block-diagonal attention_mask, 即 attention_mask 除了屏蔽PAD之外, 还要屏蔽非同文档TOKEN
+#       即 x 区域要屏蔽
+#          a  b  c  0  d  e  f
+#       a  1                     --> b
+#       b  1  1                  --> c
+#       c  1  1  1               --> 0
+#       0  1  1  1  1            --> d
+#       d  x  x  x  x  1         --> e
+#       e  x  x  x  x  1  1      --> f
+#       f  x  x  x  x  1  1  1   --> 0
+
+#    如何解决 EODOFTEXT 作为 q 生成 下一文档首TOKEN 的对齐问题 ---> valid-prev-mapping label_mask, 即 label_mask 除了屏蔽PAD之外, 还要屏蔽非法前驱TOKEN
+#       判断一个 label 是否合法，当且仅当以下两种情况: 1. q 为 PAD, label 也为 PAD；2. q 是 label  的同一文档的左邻TOKEN
+#       故上述 7 对 q-label pair 中, a->b / b->c / c->0 , d->e / e->f / f-> 0 都是合法的, 而 0->d 是非法的, 因为这里 0 和 d是不同文档的TOKEN.
+#       得 label_mask = [1,1,1,0,1,1,1]. 注意该法则在实质上已经包含了 PAD-info(PAD->token / token -> PAD 都是非法)
+
+
 
 
 # 4. corpus 切分成 input_seqs 时, 是否考虑 overlapping? 考虑对于 corpus 'abcdef0', 0代表 ENDOFTEXT, L_q = 3, 产出 data-label pair

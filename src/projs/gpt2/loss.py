@@ -29,15 +29,15 @@
 # 考虑 两个text packing: '<PAD><PAD>abc0def0', 0 是 <PAD>/ENDOFTEXT TOKEN. 产出 input_seqs '00abc0def', label_seqs '00bc0def0'. 自回归系数矩阵:
 #        0  0  a  b  c  0  d  e  f
 #     0  x                              --> 0 (mask because PAD)
-#     0  x  x                           --> 0 (mask because PAD)
+#     0  x  x                           --> 0 (mask because PAD) / a (mask because q&label not same text)
 #     a  x  x  1                        --> b
 #     b  x  x  1  1                     --> c
 #     c  x  x  1  1  1                  --> 0
-#     0  x  x  1  1  1  1               --> d (mask because FIRST-TOKEN-OF-PACKING-TEXT)
+#     0  x  x  1  1  1  1               --> d (mask because q&label not same text)
 #     d  x  x  /  /  /  /  1            --> e
 #     e  x  x  /  /  /  /  1  1         --> f
 #     f  x  x  /  /  /  /  1  1  1      --> 0
 
-# 最终实际 attention_mask = casual_mask ^ nonpad_mask ^ sametext_mask
-# 最终实际 label_maks = notpad ^ sametext_with_prev_token
-# 这里 ^ 是 且运算
+# attention_mask = nonpad_mask ^ q&k_sametext_mask, attention 内部还要 ^ casual_mask
+# label_maks = notpad ^ q&label_sametext. 而实际上, 若视 PAD 和 TOKEN 总是 not same text, label_mask 只需一条准则: q&label same text or both PAD
+# 这里 ^ 是 且运算. 

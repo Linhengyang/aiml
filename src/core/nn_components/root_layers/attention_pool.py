@@ -236,7 +236,7 @@ class MultiHeadAttention(nn.Module):
 
 
 
-# 因果矩阵: 当自回归式生成 N 个 token时, 意味着用 token1 生成 token2, token1-2 生成 token2, ..., token1-N 生成 tokenN
+# 因果遮罩 casual mask: 当自回归式生成 N 个 token时, 意味着用 token1 生成 token2, token1-2 生成 token2, ..., token1-N 生成 tokenN
 # 1  0  0  0  0       ---> tok_1 = f(tok_1)
 # 1  1  0  0  0       ---> tok_2 = f(tok_1, tok_2)
 # 1  1  1  0  0       ---> tok_3 = f(tok_1, tok_2, tok_3)
@@ -244,7 +244,7 @@ class MultiHeadAttention(nn.Module):
 # 1  1  1  1  1       ---> tok_5 = f(tok_1, tok_2, tok_3, tok_4, tok_5)
 #                     ....
 # 上述右边的式子, 假设 f 是线性的, 那么系数矩阵可以看作左边的因果矩阵 hadmad-乘 全系数矩阵
-# 左边 因果矩阵 的构建方法:
+# 左边 因果遮罩 的构建方法:
 #     最下面一行一定是 all 1, 且 1 的个数是 num all valid tokens so-far, 记为 N
 #     往上相对距离为 i( 0 < i < N) 的行, casual 是 N-i 个 1, then i 个 0
 
@@ -257,29 +257,33 @@ class MultiHeadAttention(nn.Module):
 # 3 a  a  a       --> 4
 # 4 a  a  a  a    --> 5
 
-# 现在考虑 左PAD. 某些模型会有一个序列起始符, 其实等价于在序列左端 PAD.
-# 现在考虑一个 总序列12345, 用1234生成2345, 但左PAD到定长6, context_size = 6, 则 attention_mask = [001111]
+# 注意力遮罩 attention mask: 注意力矩阵 [B, H, L_q, L_kv] 在乘 v[B, H, L_kv, d] 之前, 要屏蔽掉一些 非法的 贡献项.
+# 首先 PAD 参与计算的就是非法贡献项
+
+# 考虑 左PAD. 某些模型会有一个序列起始符, 其实等价于在序列左端 PAD.
+# 现在考虑一个 总序列12345, 用1234生成2345, 但左PAD到定长6, L_q = 6, attention mask = [001111]
 # 显然有以下几个结论: 
-# 一label序列2345也要左PAD到定长6, 且不能出现用 0 生成 1 的对齐错误.
-# 二attention_mask在q行维度传播后, 可以形成x区域, 可以完美屏蔽掉 PAD 的影响.
+# 一 label 序列2345也要有对应 PAD, 不能出现用 PAD 生成 TOKEN 的对齐错误. 这部分关乎 label mask, 请查阅 dataset.py 相关
+# 二 attention_mask [001111] 在q行维度传播后, 可以形成x区域, 可以完美屏蔽掉 PAD 的影响.
 # 给 001234 的位置编码, 由于前两个00(PAD) 会被 attention_mask 完美屏蔽, 所以它们的位置编码其实是无所谓的, 始终不会参与计算. 统一赋0就好.
 # 关键还是1234的位置编码, 可以从0开始, 也可以从1开始. 只要train和infer保持一致即可. 从0开始, 全部位置编码为000123; 从1开始, 全部位置编码为001234
 # 所以 左PAD情况下, 位置编码必须 只关注真实token序列1234. 所以必须是根据 attention_mask 确定真实token位置的 动态位置编码.
 
 #   0  0  1  2  3  4
 # 0 x                   --> 0
-# 0 x  x                --> 0
+# 0 x  x                --> 0 或 1. 无论哪个, 都要被 PAD
 # 1 x  x  a             --> 2
 # 2 x  x  a  a          --> 3
 # 3 x  x  a  a  a       --> 4
 # 4 x  x  a  a  a  a    --> 5
 
 # 现在考虑 右PAD.
-# 现在考虑一个 总序列12345, 用1234生成2345, 但右PAD到定长6, context_size = 6, 则 attention_mask = [111100]
-# 对比 左PAD, 发现 右PAD 的 attention_mask 在q行维度传播形成的 x区域, 无法完全屏蔽掉 PAD 的影响: 在后两个 q行, 出现了以 0为q, 1234参与生成 0 的情况.
+# 现在考虑一个 总序列12345, 用1234生成2345, 但右PAD到定长6, L_q = 6, attention_mask = [111100]
+# 发现 右PAD 的 attention mask [111100] 在q行维度传播形成的 x区域, 无法完全屏蔽掉 PAD 的影响: 在后两个 q行, 出现了以 0为q, 1234参与生成 0 的情况.
 # 在给1234位置编码之后(无论0开始or1开始), 给 右PAD 的两个00的位置编码, 无论怎么赋, 都会出现在 q 值中, 无法被完全屏蔽.
 # 解决方法: 引入 label_mask, 即计算loss时, 屏蔽掉 label 序列中 PAD 位置. 这样 label 的 PAD位置不会 回传梯度, PAD 位置的 a 系数不会被更新
 # 这样引入 label_mask 之后, 右PAD 的好处也显现出来, 即位置编码非常简单: 固定从0或1开始的序列编号即可. 不必担心给 右PAD 位置的编码, 因为会被 label_mask
+# 又或者, attention_mask [111100] 不是在 q行维度简单传播, 而是具体去生成 完备的 shape为 [L_q, L_q]bool 矩阵
 
 #   1  2  3  4  0  0
 # 1 a                   --> 2
@@ -290,7 +294,11 @@ class MultiHeadAttention(nn.Module):
 # 0 a  a  a  a  x  x    --> 0 (label_mask)
 
 # 从上述左右PAD的情况可以看出, 不管左PAD还是右PAD, 归根结底还是要尽量减少PAD. PAD 信息可以 由主动传入 attention_mask 完备表达.
-# 
+# 实际上：
+# attention_mask 一般确实不使用简单的 q行维度传播, 而是去具体生成完备的 shape为 [L_q, L_q]bool 矩阵, 因为除了 PAD-info 之外, 还有 TEXTDOC-info
+# 需要在 attention_mask 中处理: 只有 same TEXTDOC 的 tokens 才可以是合法贡献项.
+# label_mask 是必须的(无论左PAD还是右PAD), 因为 q -> label 必须是合法的前驱对应关系, 才可以贡献loss. 这里合法指 q 和 label same TEXTDOC.
+
 # 通过 casual_mask/attention_mask/label_mask 三道屏蔽, 以及正确的数据对齐, 无论是左PAD还是右PAD, 在训练上差别不大. 但是在推理时, 如果作并发Batch推理, 
 # 由于始终会取Batch各序列的last token作为q, 那么右PAD的batch, 会导致某些序列在推理时传入了PAD作为q. 
 # 所以推理时把batch各序列作左PAD对齐 比较好. 训练数据右PAD对齐，跟推理batch左PAD对齐不矛盾.
