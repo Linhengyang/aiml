@@ -468,7 +468,7 @@ class CasualMHA(nn.Module):
             else:
                 # attention_mask [B, L_so_far], 自带 真实位置信息
                 pos_ids_so_far = attention_mask.cumsum(dim=-1) - 1 # 第一个valid token在序列中的位置编码为0
-                pos_ids_so_far = pos_ids_so_far.masked_fill(attention_mask == False, 0) # [B, L_so_far]
+                pos_ids_so_far = pos_ids_so_far.masked_fill(attention_mask == False, 0) # PAD位置编码全部赋0
             
             cos, sin = self.rope.get_sin_cos(pos_ids_so_far, broadcast_axis=1) # [B/1, L_so_far] -> [B/1, 1, L_so_far, d]
             cos_q = cos[:, :, L_so_far-L_q:L_so_far, :] # cos/sin [B/1, 1, L_q, d]
