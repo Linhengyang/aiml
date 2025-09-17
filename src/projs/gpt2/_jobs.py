@@ -138,11 +138,11 @@ def test_job():
         # embd_size:int
         num_head = 2,
         use_bias = False,
-        max_context_size = 256,
+        max_context_size = 6,
         attn_p_drop = 0.1,
         resid_p_drop = 0.1,
-        use_cached_casual_mask = False,
-        use_rope = True,
+        use_cached_casual_mask = True,
+        use_rope = False,
         ## number of decoder-block
         num_block = 2
     )
@@ -152,8 +152,25 @@ def test_job():
     corpus = ['abcde', 'heell', 'hello']
     chartok = CharacterTokenizer()
 
-    input_seqs = torch.tensor( [chartok.encode(s) for s in corpus] ) - 97 # [3, 5]
-    
-    logits, _, _ = gpt2_model(input_seqs)
+    input_seqs = torch.tensor( [ chartok.encode(s) for s in corpus] ) - 96 # [3, 5]
+    attention_mask = torch.ones_like(input_seqs, dtype=torch.bool)
+
+    # 右 PAD. PAD id --> 0
+    input_seqs = torch.cat([input_seqs, torch.zeros(3, 1, dtype=torch.long)], dim=1)
+    attention_mask = torch.cat([attention_mask, torch.zeros(3, 1, dtype=torch.bool)], dim=1)
+
+    logits, _, _ = gpt2_model(input_seqs, attention_mask=attention_mask)
 
     print(logits.shape)
+
+    # 测试 generate. eos_id 设定为 PAD id 0
+    prompt = ['aa', 'ab']
+    prompt_seqs = torch.tensor( [ chartok.encode(s) for s in prompt] ) - 96 # [B=2, S=2]
+    max_gen_size = 4
+
+    output_ids = gpt2_model.generate(prompt_seqs, max_gen_size, eos_id=0) + 96 # [B=2, max_gen_size=4]
+    output = []
+    for seq in output_ids.tolist():
+        output.append( chartok.decode(seq) )
+    
+    print(output)
