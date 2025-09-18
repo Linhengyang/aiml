@@ -101,6 +101,33 @@ class gpt2(DecoderOnly):
         device = input_seqs.device
         L_past = past_kv[0][0].size(2) if past_kv is not None else 0
 
+        # train mode: PAD | irrelevent --> False, nonPAD & relevent --> True; PAD position -> 0, text 独立 positions starts from 0
+        if self.training:
+            if segments is not None: # segments [B, L_q]
+                pad_mask = segments != 0 # [B, L_q]bool, pad -> false, nonpad -> true
+                attention_mask = pad_mask.unsqueeze(-1) * pad_mask.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk noPAD -> true
+                relevent_mask = segments.unsqueeze(-1) == segments.unsqueeze(-2) # [B, L_q, L_q]bool, qk relevent -> true, qk not-rele -> false
+                attention_mask = attention_mask * relevent_mask # [B, L_q, L_q]bool, qk noPAD & relevent -> true, otherwise -> false
+                # TODO: from segments --> positions [B, L_q]
+            else:
+                # 若没有 segments
+                position_ids = torch.arange(0, L_q, device=device).unsqueeze(0) # [1, L_q]
+                attention_mask = None
+        # eval mode: PAD --> False, nonPAD --> True; PAD position -> 0, nonPAD 整体 positions starts from 0
+        else:
+            if past_kv is not None: # prefill
+                if segments is not None:
+                    pass
+                else:
+                    # 若没有 segments
+                    pass
+            else: # decode
+                if segments is not None:
+                    pass
+                else:
+                    # 若没有 segments
+                    pass
+
         # 只有当 segments 不为 None 时, 一起产出 positions / attention_mask(pad_mask * relevent_mask)
         if segments is not None: # [B, L_q]
             pad_mask = segments != 0 # [B, L_q]bool, pad -> false, nonpad -> true
@@ -119,8 +146,8 @@ class gpt2(DecoderOnly):
                 # TODO: from segments --> positions[B, L_q]
 
                 # decode
-                # TODO: segments [B, L_q] 补充 past --> total_segments [B, L_so_far]
-                # TODO: attention_mask[B, L_q, L_q] 补充 past --> [B, L_q, L_so_far]
+                # TODO: segments [B, L_q] 补充 past_segments --> total_segments [B, L_so_far]
+                # TODO: attention_mask[B, L_q, L_q] 补充 past_attention_mask(segments X past_segments) --> [B, L_q, L_so_far]
                 # TODO: from total_segments --> positions[B, L_so_far]
 
 
