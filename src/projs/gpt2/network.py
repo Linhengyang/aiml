@@ -80,26 +80,66 @@ class gpt2(DecoderOnly):
 
     def forward(self,
                 input_seqs: torch.Tensor,
-                attention_mask: Optional[torch.Tensor] = None,
+                segments: Optional[torch.Tensor] = None,
                 past_kv: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None,
-                past_attention_mask: Optional[torch.Tensor] = None,
+                past_segments: Optional[torch.Tensor] = None,
                 if_cache_kv: bool = False
                 ):
         '''
         input:
-            input_seqs: tensor [B, L_q]
-            attention_mask: None or tensor [B, L_q]bool to describe input_seqs PAD-info. False-->PAD, True-->non-PAD
-            past_kv: None or tuple of (k_cache, v_cache) where k_cache/v_cache [B, H, L_past, d]
-            past_attention_mask: None or tensor [B, L_past] to describe past_kv PAD-info
+            input_seqs: tensor [B, L_q]long
+            segments: None | tensor [B, L_q]long to describe input_seqs' PAD-info(0 for PAD) & TEXT-info(1/2...for textID)
+            past_kv: None | tuple of past(k_cache, v_cache), k_cache/v_cache tensor [B, H, L_past, d]float
+            past_segments: None | tensr [B, L_past]long to describe past_kv's PAD-info & TEXT-info
             if_cache_kv: bool to determine if to return updated k_cache/v_cache as in tuple
 
         output:
             logits: [B, L_q, vocab_size]
-            past_kv: None or tuple of updated k_cache/v_cache(so-far). for next-time, it'll be past
-            past_attention_mask: None or updated past_attention_mask which stick to past_kv(so-far). for next-time, it'll be past
+            past_kv: None | tuple of so_far(k_cache, v_cache). for next-time, it'll be past
         '''
         B, L_q = input_seqs.shape
         device = input_seqs.device
+        L_past = past_kv[0][0].size(2) if past_kv is not None else 0
+
+        # 只有当 segments 不为 None 时, 一起产出 positions / attention_mask(pad_mask * relevent_mask)
+        if segments is not None: # [B, L_q]
+            pad_mask = segments != 0 # [B, L_q]bool, pad -> false, nonpad -> true
+            attention_mask = pad_mask.unsqueeze(-1) * pad_mask.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk noPAD -> true
+
+            # train mode: PAD 屏蔽, text 隔离, attn_mask -> False; PAD position -> 0, text 独立 positions starts from 0
+            if self.training:
+                relevent_mask = segments.unsqueeze(-1) == segments.unsqueeze(-2) # [B, L_q, L_q]bool, qk relevent -> true, qk not-rele -> false
+                attention_mask = attention_mask * relevent_mask # [B, L_q, L_q]bool, qk noPAD & relevent -> true, otherwise -> false
+                # TODO: from segments --> positions [B, L_q]
+            
+            # eval mode: PAD 屏蔽, attn_mask -> False, text 不隔离; PAD position -> 0, non-PAD 整体 positions starts from 0
+            else:
+                # prefill
+                # attention_mask 无需再变动
+                # TODO: from segments --> positions[B, L_q]
+
+                # decode
+                # TODO: segments [B, L_q] 补充 past --> total_segments [B, L_so_far]
+                # TODO: attention_mask[B, L_q, L_q] 补充 past --> [B, L_q, L_so_far]
+                # TODO: from total_segments --> positions[B, L_so_far]
+
+
+            elif past_kv is None: # prefill
+                # TODO
+                pass
+            else: # decode
+                if past_segments is not None: # [B, L_past]
+                    segments = torch.cat([past_segments, segments], dim=-1) # [B, L_so_far=L_past+L_q]
+                else:
+                    segments = torch.cat([torch.ones(B, L_past, device=device), segments], dim=-1) # [B, L_so_far=L_past+L_q]
+        else: # segments is None
+            # TODO generate positions
+            position_ids = torch.arange(L_past, L_past + L_q, device=device).unsqueeze(0)
+
+
+                
+
+
 
         if past_kv is not None:
             L_past = past_kv[0][0].size(2)
@@ -137,7 +177,7 @@ class gpt2(DecoderOnly):
 
         return logits, tuple(new_past_kv) if if_cache_kv else None, attention_mask
     
-    
+
     @staticmethod
     def sample_next_token(logits: torch.Tensor, temperature: float, top_k: int|None):
         # logits: [B, vocab_size]
