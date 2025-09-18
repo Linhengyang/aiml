@@ -36,3 +36,42 @@ def mask_on_last_dim(last_dim_size: int, mask_lens: torch.Tensor, mask_flag:bool
         mask = ~mask
 
     return mask
+
+
+
+
+
+def relevent_mask(segment_ids:torch.Tensor) -> torch.Tensor:
+    '''
+    input:
+        segment_ids: [B, seq_length]long, whose ids implies segments
+
+    return:
+        relevent_mask: [B, seq_length, seg_length]bool
+        [seq_len, seq_len] give if-same-segment flag for each position of row of segment_ids
+
+    e.g,
+    input segments =
+        [[0, 0, 1, 2, 2, 2, 3, 3],
+         [1, 1, 2, 2, 3, 3, 3, 4]]
+    
+    return relevent_mask:
+          [[[1, 1, 0, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 1],
+            [0, 0, 0, 0, 0, 0, 1, 1]],
+
+           [[1, 1, 0, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 1, 0, 0, 0, 0],
+            [0, 0, 1, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 1, 0],
+            [0, 0, 0, 0, 1, 1, 1, 0],
+            [0, 0, 0, 0, 1, 1, 1, 0],
+            [0, 0, 0, 0, 0, 0, 0, 1]]]
+    '''
+    return segment_ids.unsqueeze(-1) == segment_ids.unsqueeze(-2)
