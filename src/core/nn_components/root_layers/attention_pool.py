@@ -376,15 +376,13 @@ class CasualMHA(nn.Module):
             k_cache/v_cache 形状 [B, H, L_past, d], L_so_far = L_past+1
             k/v 使用 k_cache/v_cache 追加 x 信息, 即 k/v as all 1<->L_so_far
             CauslMHA 是计算 with (q: L_so_far, k: 1<->L_so_far, v: 1<->L_so_far), 生成 No. L_so_far+1 token, 得到 attn_w [..., 1, L_so_far].
-            这里 [1, L_so_far]: 代表对于 No. L_so_far token 的 x, 生成 No. L_so_far+1 token 的系数向量. 显然这里应该是全 1.
-
-          综合得到 attention_weights: [B, H, L_q, L_so_far]. 有 casual_mask [L_q, L_so_far] / attention_mask [B, L_q, L_so_far]
+            这里 [1, L_so_far]: 代表对于 No. L_so_far token 的 x, 生成 No. L_so_far+1 token 的系数向量. 这里应该是全 1.
 
         return_cache: bool, 默认False
-            当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 num_valid_tokens_so_far 所有.
+            当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 L_so_far 所有.
 
         attention_mask: Tensor|None, 默认None, 否则为 tensor [B, L_q, L_so_far]bool
-            作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法相关贡献. 比如 PAD-info / TEXTDOC-info
+            作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法贡献. 对某 q, 涉及 PAD, 以及不与该 q same-text 的 k, 都是非法贡献, 要屏蔽.
 
         positions: Tensor|None, 默认None, 否则为 tensor [B, L_so_far]
             只在 use_rope = True 时, positions 才会起作用. 否则应该在 casualMHA 层之前就把 绝对位置编码 加到 x 里.
@@ -394,6 +392,12 @@ class CasualMHA(nn.Module):
     1. PAD 位置的 position = 0; q/k 任一 PAD, attention mask = False
     2. 具备相关关系的单一序列, positions 从 0 开始从左到右递增; 序列中某位置作为 q 时, 只有具备相关关系的同序列位置 作为 k 时, attention_mask = True
        相关关系在 训练 / 推理 的定义不同. 在训练时, 只有同一 TEXTDOC 的位置(包括ENDOFTEXT)才算具备相关关系. 在推理时, 全部非PAD位置都算具备相关关系
+    
+    在实操中, PAD-info/TEXTDOC-info 任一或全部都可以由 segments 表示, segments 可以一起产出 positions 和 attention_mask.
+    这里只考虑 二者同时输入tensor(不检查是否矛盾)/二者同时为None 两种情况:
+        1.只要涉及 PAD, 那么就有 segments, 从而 positions 和 attention_mask 都有.
+        2.如果 PAD-info 和 TEXTDOC-info 都没有, 那么 attention_mask 用 None 即可, positions 使用从 0 开始的递增编码即可.
+    未来完成 positions/attention_mask 相互转换的函数后(elif分支), 使得本层可以处理 positions/attention_mask 恰只有其一输入的情况. 实操里不会单一输入.
     
     前向输出
         y: Tensor, shape same as x [B, L_q, D]. next-token 取 y 的 last dim 2.
@@ -474,10 +478,10 @@ class CasualMHA(nn.Module):
         if hasattr(self, 'rope'):
             if positions is not None and attention_mask is not None:
                 pass
-            elif positions is not None and attention_mask is None:
-                attention_mask = get_attention_mask_from_position_ids(positions) # [B, H, L_q, L_so_far]
-            elif positions is None and attention_mask is not None:
-                positions = get_position_ids_from_attention_mask(attention_mask)
+            # elif positions is not None and attention_mask is None:
+            #     attention_mask = get_attention_mask_from_position_ids(positions) # [B, H, L_q, L_so_far]
+            # elif positions is None and attention_mask is not None:
+            #     positions = get_position_ids_from_attention_mask(attention_mask)
             else:
                 positions = torch.arange(0, L_so_far, dtype=torch.long, device=k.device)
                 attention_mask = None # equivalent to all True
@@ -486,11 +490,11 @@ class CasualMHA(nn.Module):
             cos_q, sin_q = cos[:, :, L_past:L_so_far, :], sin[:, :, L_past:L_so_far, :] # cos/sin: [B/1, 1, L_q, d]
             q = self.rope.apply_rope(q, cos_q, sin_q)
             k = self.rope.apply_rope(k, cos, sin)
-        else:
+        else: # positions 无用, 不关心
             if attention_mask is not None:
                 pass
-            elif positions is not None:
-                attention_mask = get_attention_mask_from_position_ids(positions)
+            # elif positions is not None:
+            #     attention_mask = get_attention_mask_from_position_ids(positions)
             else:
                 pass
         
