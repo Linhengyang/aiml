@@ -149,9 +149,10 @@ class gpt2(DecoderOnly):
                 # TODO: segments [B, L_q] 补充 past_segments --> total_segments [B, L_so_far]
                 # TODO: attention_mask[B, L_q, L_q] 补充 past_attention_mask(segments X past_segments) --> [B, L_q, L_so_far]
                 # TODO: from total_segments --> positions[B, L_so_far]
+                pass
 
 
-            elif past_kv is None: # prefill
+            if past_kv is None: # prefill
                 # TODO
                 pass
             else: # decode
