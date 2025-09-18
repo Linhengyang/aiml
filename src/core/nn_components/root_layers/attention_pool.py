@@ -434,7 +434,6 @@ class CasualMHA(nn.Module):
         # 合并线性映射 qkv: W_qkv(x) --> concate of [ W_q(x), W_k(x), W_v(x) ], 其中每个 W(x) 是 (B, seq_len, D) -> (B, seq_len, D)
         self.W_qkv = nn.Linear(embd_size, 3 * embd_size, bias=use_bias) # x[B, seq_len, D] --linear-proj--> qkv[B, seq_len, 3*D]
         self.W_o = nn.Linear(embd_size, embd_size, bias=use_bias) # y[B, seq_len, D] --linear-proj--> y[B, seq_len, D]
-
         self.attn_drop = nn.Dropout(attn_p_drop)
         self.resid_drop = nn.Dropout(resid_p_drop)
 
@@ -498,7 +497,9 @@ class CasualMHA(nn.Module):
             else:
                 pass
         
-        # qk 计算 attention weight
+        #### 等价于 y = F.scaled_dot_product_attention(q, k, v, attention_mask, attn_p_drop, True, scale=self.scale) ####
+        ######### qk 计算 attn_w --> casual_mask & attention_mask --> softmax --> dropout --> attn_w @ v ---> y #########
+
         attn_w = torch.matmul(q, k.transpose(2, 3)) * self.scale # [B, H, L_q, L_so_far]
 
         # casual_mask: [B, H, L_q, L_so_far]
@@ -512,7 +513,6 @@ class CasualMHA(nn.Module):
                 torch.ones(L_q, L_so_far, dtype = torch.bool, device = attn_w.device),
                 diagonal = L_past + 1
                 )[None, None, :, :] # [L_q, L_so_far] --> [1, 1, L_q, L_so_far]
-        
         attn_w = attn_w.masked_fill(casual_mask, float('-inf')) # [B, H, L_q, L_so_far]
         
         if attention_mask is not None:
@@ -522,8 +522,10 @@ class CasualMHA(nn.Module):
         # softmax
         attn_w = F.softmax(attn_w, dim=-1) # [B, H, L_q, L_so_far]
         attn_w = self.attn_drop(attn_w)
-
         y = torch.matmul(attn_w, v) # [B, H, L_q, L_so_far] @ [B, H, L_so_far, d] --> [B, H, L_q, d]
+
+        ############ 等价部分
+
         y = y.transpose(1, 2).reshape(-1, L_q, self.D) # --> [B, L_q, H, d] --> [B, L_q, D]
         y = self.resid_drop(self.W_o(y)) # [B, L_q, D] --> [B, L_q, D]
 

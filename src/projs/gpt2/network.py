@@ -137,6 +137,7 @@ class gpt2(DecoderOnly):
 
         return logits, tuple(new_past_kv) if if_cache_kv else None, attention_mask
     
+    
     @staticmethod
     def sample_next_token(logits: torch.Tensor, temperature: float, top_k: int|None):
         # logits: [B, vocab_size]
@@ -155,6 +156,7 @@ class gpt2(DecoderOnly):
         next_token = torch.multinomial(probs, num_samples=1, replacement=False)  # [B, 1]
 
         return next_token
+
 
     @torch.no_grad()
     def generate(self,
