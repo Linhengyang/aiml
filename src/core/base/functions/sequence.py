@@ -3,7 +3,7 @@ import torch
 import typing as t
 
 
-def get_positions_from_segments(segments:torch.Tensor, origin_pos:int = 0, pad_seg:int|None = 0, pad_pos:int = 0) -> torch.Tensor:
+def segments_to_positions(segments:torch.Tensor, origin_pos:int = 0, pad_seg:int|None = 0, pad_pos:int = 0) -> torch.Tensor:
     '''
     origin_pos: starting position id for sequence. default 0
     pad_seg: the segment id in segments to represent PAD. None implies NO-PAD in segments. default 0
@@ -39,7 +39,7 @@ def get_positions_from_segments(segments:torch.Tensor, origin_pos:int = 0, pad_s
 
 
 
-def get_segments_from_positions(positions:torch.Tensor, origin_pos:int = 0, pad_pos:int|None = 0, pad_seg:int = 0) -> torch.Tensor:
+def positions_to_segments(positions:torch.Tensor, origin_pos:int = 0, pad_pos:int|None = 0, pad_seg:int = 0) -> torch.Tensor:
     '''
     origin: smallest position for positions
     start: smallest segment id for segments

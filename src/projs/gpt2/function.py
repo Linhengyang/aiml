@@ -1,7 +1,7 @@
 # shared functions for GPT
 import torch
 from typing import Tuple
-from ...core.base.functions.sequence import get_positions_from_segments
+from ...core.base.functions.sequence import segments_to_positions
 
 
 def get_segs_pos_attnmask_train(
@@ -44,7 +44,7 @@ def get_segs_pos_attnmask_train(
     else: # segments [B, L]
         # train mode
         # positions: PAD pos --> 0, TOKEN pos --> index from 0 in relevent sequence
-        positions = get_positions_from_segments(segments) # same device with segments
+        positions = segments_to_positions(segments) # same device with segments
         # attention_mask: qk any PAD or irrelevent --> False, qk no PAD and relevent --> True
         is_pad = segments != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
         pad_mask = is_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk no PAD -> true
