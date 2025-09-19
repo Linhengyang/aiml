@@ -115,8 +115,9 @@ class gpt2(DecoderOnly):
         # 如果存在绝对位置编码层: 要 add abs pos encoding 到 tok embedding 上
         if hasattr(self, 'W_pos_embd'):
              # positions [B, L_so_far=L_past + L_q], 取 last L_q 列
-            positions_q = positions[:, -1-L_q:L_q]
-            tok = tok + self.W_pos_embd(positions_q) # [1, L_q, D]
+            positions_q = positions[:, -L_q:] # [B, L_so_far] --> [B, L_q]
+            
+            tok = tok + self.W_pos_embd(positions_q) # [B, L_q, D]
             positions = None # 位置编码已经加到 tok embedding 里了, 不再使用
         
         # 如果使用RoPE位置编码: 无需额外操作, casual attention 层会执行RoPE
