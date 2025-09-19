@@ -30,19 +30,6 @@ class gpt2Config:
 
 
 class gpt2(DecoderOnly):
-    '''
-    Decoder-Only 的 GPT2 架构:
-
-                                               seq[B, S] --embd--> tok[B, S, D]|
-    (if seq[B, S] use ABS as pos_enc) position_ids[1, S]|--embd--> pos[1, S, D]|--drop--> x[B, S, D]|---->
-                                                                              (if need past) past_kv|
-                                       (if need past) past_attention_mask|--concat--> attention_mask|
-                (if seq[B, S] involves PAD elements) attention_mask[B, S]|
-
-    >----decoder_blocks|--> x[B, S, D] -------layer_norm--reverse_embd-------> logits[B, S, vocab_size]
-                       |--> new_kv(if need) -----append_to_new_container-----> new_kv_caches(if need)
-                       |-----------------------------------------------------> new_past_attention_mask(if need)
-    '''
     def __init__(self, config:gpt2Config):
         super().__init__()
         self.config = config
