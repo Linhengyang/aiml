@@ -1,6 +1,7 @@
 from ...core.nn_components.meta_frames import Decoder, DecoderOnly
 from ...core.nn_components.root_layers.position_encoding import LearnAbsPosEnc
 from ...core.nn_components.sub_modules._gpt2 import GPT2DecoderBlock
+from .function import get_segs_pos_attnmask_train, get_segs_pos_attnmask_prefill, get_segs_pos_attnmask_decode
 import torch.nn as nn
 import math
 import torch
@@ -78,74 +79,6 @@ class gpt2(DecoderOnly):
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    
-    def __get_segs_pos_attnmask_train(self, input_segs: None|torch.Tensor, L_q: int, *, device):
-        segments = input_segs
-
-        if segments is None:
-            positions = torch.arange(0, L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_q]
-            attention_mask = None
-        else:
-            # train mode
-            # positions: PAD pos --> 0, TOKEN pos --> index from 0 in relevent sequence
-            # TODO
-            # attention_mask: qk any PAD or irrelevent --> False, qk no PAD and relevent --> True
-            is_pad = segments != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
-            pad_mask = is_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk no PAD -> true
-            relevent_mask = segments.unsqueeze(-1) == segments.unsqueeze(-2) # [B, L_q, L_q]bool, qk irrelevent -> false, qk relevent -> true
-            attention_mask = pad_mask * relevent_mask # [B, L_q, L_q]
-        
-        #     [B, L_q]   [B, L_q]   [B, L_q, L_q]
-        return segments, positions, attention_mask
-
-
-    def __get_segs_pos_attnmask_prefill(self, input_segs: None|torch.Tensor, L_q: int, *, device):
-        segments = input_segs
-
-        if segments is None:
-            positions = torch.arange(0, L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_q]
-            attention_mask = None
-        else:
-            # infer.prefill mode
-            # positions: PAD pos --> 0, TOKEN pos --> index from 0 in global sequence
-            # TODO
-            # attention_mask: qk any PAD --> False, qk no PAD --> True
-            is_pad = segments != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
-            attention_mask = is_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk no PAD -> true
-        
-        #     [B, L_q]   [B, L_q]   [B, L_q, L_q]
-        return segments, positions, attention_mask
-
-
-    def __get_segs_pos_attnmask_decode(self, input_segs: None|torch.Tensor, L_q: int, past_segs: None|torch.Tensor, L_past: int, *, device):
-        if past_segs is None and input_segs is None:
-            pass
-        elif past_segs is not None and input_segs is None:
-            # input_segs 视作全 1. 即 nonPAD
-            input_segs =  torch.ones(past_segs.size(0), L_q, dtype=torch.long, device=device)
-        elif past_segs is None and input_segs is not None:
-            # past_segs 视作全 1. 即 nonPAD
-            past_segs = torch.ones(input_segs.size(0), L_past, dtype=torch.long, device=device)
-        else:
-            pass
-
-        segments = None if past_segs == input_segs == None  else torch.cat([past_segs, input_segs], dim=-1)
-        
-        if segments is None:
-            positions = torch.arange(0, L_past+L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_so_far]
-            attention_mask = None
-        else:
-            # infer.decode mode
-            # positions: PAD pos --> 0, TOKEN pos --> index from 0 in global sequence
-            # TODO
-            # attention_mask: qk any PAD --> False, qk no PAD --> True
-            is_q_pad = input_segs != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
-            is_pad = segments != 0 # [B, L_so_far]bool, PAD -> false, nonPAD -> true
-            attention_mask = is_q_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_so_far]]bool, qk any PAD -> false, qk no PAD -> true
-        
-        #  [B, L_so_far] [B, L_so_far]   [B, L_q, L_so_far]
-        return segments, positions, attention_mask
-
 
     def forward(self,
                 input_seqs: torch.Tensor,
@@ -171,11 +104,11 @@ class gpt2(DecoderOnly):
         L_past = past_kv[0][0].size(2) if past_kv is not None else 0
 
         if self.training:
-            segments, positions, attention_mask = self.__get_segs_pos_attnmask_train(input_segs, L_q, device=device)
+            segments, positions, attention_mask = get_segs_pos_attnmask_train(input_segs, L_q, device=device)
         elif past_kv is None:
-            segments, positions, attention_mask = self.__get_segs_pos_attnmask_prefill(input_segs, L_q, device=device)
+            segments, positions, attention_mask = get_segs_pos_attnmask_prefill(input_segs, L_q, device=device)
         else:
-            segments, positions, attention_mask = self.__get_segs_pos_attnmask_decode(input_segs, L_q, past_segs, L_past, device=device)
+            segments, positions, attention_mask = get_segs_pos_attnmask_decode(input_segs, L_q, past_segs, L_past, device=device)
         
         tok = self.W_tok_embd(input_seqs) # [B, L_q] -> [B, L_q, D]
 
@@ -287,7 +220,7 @@ class gpt2(DecoderOnly):
             # past_segs: describe of past kv [B, L_past+1] | None
             next_token = self.sample_next_token(logits.squeeze(1), temperature, top_k) # [B, 1]
             output = torch.cat([output, next_token.cpu()], dim=-1)
-            
+
             # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
             if eos_id is not None and (next_token == eos_id).all():
                 return output
