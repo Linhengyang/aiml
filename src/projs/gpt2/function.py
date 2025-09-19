@@ -70,10 +70,10 @@ def get_segs_pos_attnmask_prefill(
         attention_mask = None
     else:
         # infer.prefill mode
-        # positions: PAD pos --> 0, TOKEN pos --> index from 0 in global sequence
-        # TODO
-        # attention_mask: qk any PAD --> False, qk no PAD --> True
         is_pad = segments != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
+        # positions: PAD pos --> 0, TOKEN pos --> index from 0 in global sequence
+        positions = segments_to_positions(is_pad.to(torch.long)) # same device with segments
+        # attention_mask: qk any PAD --> False, qk no PAD --> True
         attention_mask = is_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk no PAD -> true
     
     #     [B, L_q]   [B, L_q]   [B, L_q, L_q]
@@ -106,11 +106,11 @@ def get_segs_pos_attnmask_decode(
         attention_mask = None
     else:
         # infer.decode mode
+        is_pad = segments != 0 # [B, L_so_far]bool, PAD -> false, nonPAD -> true
         # positions: PAD pos --> 0, TOKEN pos --> index from 0 in global sequence
-        # TODO
+        positions = segments_to_positions(is_pad.to(torch.long)) # same device with segments
         # attention_mask: qk any PAD --> False, qk no PAD --> True
         is_q_pad = input_segs != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
-        is_pad = segments != 0 # [B, L_so_far]bool, PAD -> false, nonPAD -> true
         attention_mask = is_q_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_so_far]]bool, qk any PAD -> false, qk no PAD -> true
     
     #  [B, L_so_far] [B, L_so_far]   [B, L_q, L_so_far]
