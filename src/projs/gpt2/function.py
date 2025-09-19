@@ -1,22 +1,50 @@
 # shared functions for GPT
 import torch
 from typing import Tuple
+from ...core.base.functions.sequence import get_positions_from_segments
 
 
 def get_segs_pos_attnmask_train(
         input_segs: None|torch.Tensor, L_q: int,
         *,
         device) -> Tuple[torch.Tensor|None, torch.Tensor, torch.Tensor|None]:
-    
+    '''
+    实际的 input_segs 是 batch. e.g 只是取一行作例
+
+    input:
+        input_segs: None | tensor[B, L]long, where 0 --> PAD, 1/2/... --> TEXT ID
+        e.g, [0, 0, 1, 1, 1, 2, 2]
+
+    return:
+        segments: same as input_segs
+        e.g, [0, 0, 1, 1, 1, 2, 2]
+
+        positions: tensor[B, L]long
+            if input_segs is None: --> 0 to L-1 as positions
+            else: position id where PAD pos --> 0, TOKEN pos --> index(starting from 0) inside every sequence
+        e.g, [0, 0, 0, 1, 2, 0, 1]
+
+        attention_mask: None | tensor[B, L, L]bool
+            if input_segs is None: --> None
+            else: tensor[B, L, L]bool, qk any PAD or irrelevent --> False, qk no PAD and relevent --> True
+        e.g,   0  0  1  1  1  2  2 
+            0  F  F  F  F  F  F  F
+            0  F  F  F  F  F  F  F
+            1  F  F  T  T  T  F  F
+            1  F  F  T  T  T  F  F
+            1  F  F  T  T  T  F  F
+            2  F  F  F  F  F  T  T
+            2  F  F  F  F  F  T  T
+    '''
     segments = input_segs
 
     if segments is None:
         positions = torch.arange(0, L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_q]
         attention_mask = None
-    else:
+    else: # segments [B, L]
         # train mode
         # positions: PAD pos --> 0, TOKEN pos --> index from 0 in relevent sequence
-        # TODO
+        positions = get_positions_from_segments(segments) # same device with segments
         # attention_mask: qk any PAD or irrelevent --> False, qk no PAD and relevent --> True
         is_pad = segments != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
         pad_mask = is_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk no PAD -> true
@@ -25,6 +53,9 @@ def get_segs_pos_attnmask_train(
     
     #     [B, L_q]   [B, L_q]   [B, L_q, L_q]
     return segments, positions, attention_mask
+
+
+
 
 
 def get_segs_pos_attnmask_prefill(
@@ -47,6 +78,8 @@ def get_segs_pos_attnmask_prefill(
     
     #     [B, L_q]   [B, L_q]   [B, L_q, L_q]
     return segments, positions, attention_mask
+
+
 
 
 
