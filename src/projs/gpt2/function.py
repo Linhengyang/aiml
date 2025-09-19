@@ -99,7 +99,7 @@ def get_segs_pos_attnmask_decode(
     else:
         pass
 
-    segments = None if past_segs == input_segs == None  else torch.cat([past_segs, input_segs], dim=-1)
+    segments = None if past_segs is input_segs is None  else torch.cat([past_segs, input_segs], dim=-1)
     
     if segments is None:
         positions = torch.arange(0, L_past+L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_so_far]
