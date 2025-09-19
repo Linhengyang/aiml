@@ -36,6 +36,7 @@ class GPT2DecoderBlock(nn.Module):
       x --layer_norm-->|--casual_attention-->|--> x_ --layer_norm-->--gelu_ffn-->|--> y
     kv_cache(if any)-->|                      --> new_kv_cache(if need)
    attn_mask(if any)-->|
+   positions(if any)-->|
 
     x / x_ / y have same shape
     '''
@@ -59,10 +60,11 @@ class GPT2DecoderBlock(nn.Module):
     def forward(self,
                 x:torch.Tensor,
                 kv_cache:Tuple[torch.Tensor, torch.Tensor]|None=None,
+                return_cache:bool = False,
                 attention_mask:torch.Tensor|None = None,
-                return_cache:bool = False):
+                positions:torch.Tensor|None = None):
         
-        attn_result, new_kv_cache = self.casual_attention(self.layer_norm1(x), kv_cache, attention_mask, return_cache)
+        attn_result, new_kv_cache = self.casual_attention(self.layer_norm1(x), kv_cache, return_cache, attention_mask, positions)
         x_ = x + attn_result
         y = x_ + self.gelu_ffn(self.layer_norm2(x_))
         
