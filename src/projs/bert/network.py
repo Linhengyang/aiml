@@ -1,5 +1,4 @@
 import torch.nn as nn
-from torch import Tensor
 import torch
 from ...core.nn_components.sub_modules._transformer import TransformerEncoderBlock
 from ...core.nn_components.root_layers.position_encoding import LearnAbsPosEnc, TrigonoAbsPosEnc
@@ -136,7 +135,7 @@ class BERT(nn.Module):
         self.mlm = MLM(vocab_size, num_hiddens)
         self.nsp = NSP(num_hiddens)
     
-    def forward(self, tokens, valid_lens, segments: Tensor|None, mask_positions: Tensor|None):
+    def forward(self, tokens, valid_lens, segments: torch.Tensor|None, mask_positions: torch.Tensor|None):
         '''
         对于 fine-tune 不一定需要的输入参数, 要设默认为 None 以不进入相关任务. 比如两个 pre-train 任务特需的输入
         '''

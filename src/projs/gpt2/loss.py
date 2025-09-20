@@ -41,3 +41,11 @@
 # attention_mask = nonpad_mask ^ q&k_sametext_mask, attention 内部还要 ^ casual_mask
 # label_maks = notpad ^ q&label_sametext. 而实际上, 若视 PAD 和 TOKEN 总是 not same text, label_mask 只需一条准则: q&label same text or both PAD
 # 这里 ^ 是 且运算. 
+
+
+import torch.nn as nn
+import torch
+
+
+class gpt2loss(nn.Module):
+    pass
