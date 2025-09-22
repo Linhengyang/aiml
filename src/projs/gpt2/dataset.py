@@ -37,8 +37,6 @@
 #       得 label_mask = [1,1,1,0,1,1,1]. 注意该法则在实质上已经包含了 PAD-info(PAD->token / token -> PAD 都是非法)
 
 
-
-
 # 4. corpus 切分成 input_seqs 时, 是否考虑 overlapping? 考虑对于 corpus 'abcdef0', 0代表 ENDOFTEXT, L_q = 3, 产出 data-label pair
 #       方案一 no-overlapping: (abc, bcd), (def, ef0)
 #       方案二 overlap 1, stride = 2: (abc, bcd), (cde, def), (ef<PAD>, f0<PAD>)
@@ -47,6 +45,13 @@
 
 
 import torch
+from ...core.utils.text.tokenizer import boostBBPETokenizer
+
+
+def pack_text():
+    pass
+
+
 
 class projDataset(torch.utils.data.Dataset):
     def __init__(self, *args, **kwargs):
