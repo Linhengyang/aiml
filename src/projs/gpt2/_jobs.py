@@ -5,7 +5,7 @@ import torch
 import typing as t
 import pandas as pd
 import yaml
-from ...core.utils.text.tokenizer import ENDOFTEXT, CharacterTokenizer
+from ...core.utils.text.tokenizer import ENDOFTEXT, boostBBPETokenizer, CharacterTokenizer
 from .network import gpt2Config, gpt2
 
 
@@ -75,49 +75,45 @@ num_epochs, batch_size, lr = 20, 512, 0.00015
 
 
 
-# # 生产 tokenizer, 可视化 view
-# def build_tokenizer_job():
-#     print('build_tokenizer_job begin')
+# 生产 tokenizer, 可视化 view
+def build_tokenizer_job():
+    print('build_tokenizer_job begin')
 
-#     # create all related directories if not existed
-#     for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir]:
-#         os.makedirs(dir_name, exist_ok=True)
-#         print(f'directory {dir_name} created')
+    # create all related directories if not existed
+    for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir]:
+        os.makedirs(dir_name, exist_ok=True)
+        print(f'directory {dir_name} created')
 
-#     # generate tokenizer
-#     # not use BPE
+    # generate tokenizer
+    # not use BPE
 
-#     # 读取全部语料 corpus
-#     print('read train')
-#     train_df = pd.read_parquet(configs['train_data'])
-#     print('read validation')
-#     valid_df = pd.read_parquet(configs['valid_data'])
-#     print('get full corpus')
-#     full_df = pd.concat([train_df, valid_df], ignore_index=True)
-#     del train_df, valid_df
+    # 读取全部语料 corpus
+    print('get full corpus')
+    with open(configs['train_data'], 'r', encoding='utf-8') as f:
+        full_data = f.readlines() # full_data 中存在 \t \n 等其他空白符
     
-#     corpus = ENDOFTEXT.join( full_df['text'].tolist() )
+    corpus = ENDOFTEXT.join(full_data)
 
-#     # tokenizer
-#     # 当 tokenizer_path 文件不存在时, 生产并保存 tokenizer 到 tokenizer_dir/gpt.tok
-#     tokenizer_path = os.path.join(tokenizer_dir, 'gpt.tok')
-#     if not os.path.exists(tokenizer_path):
-#         # create tokenizer
-#         print('bpe train begin')
-#         gpt_tokenizer = boostBBPETokenizer(name='gpt')
-#         gpt_tokenizer.train_bpe(corpus, num_merges=30000, verbose=True)
-#         print('bpe train close')
-#         gpt_tokenizer.save(tokenizer_path)
-#     # 当 tokenizer_path 存在时
-#     else:
-#         gpt_tokenizer.load(tokenizer_path)
+    # tokenizer
+    # 当 tokenizer_path 文件不存在时, 生产并保存 tokenizer 到 tokenizer_dir/gpt.tok
+    tokenizer_path = os.path.join(tokenizer_dir, 'mt.tok')
+    if not os.path.exists(tokenizer_path):
+        # create tokenizer
+        print('bpe train begin')
+        gpt_tokenizer = boostBBPETokenizer(name='mt')
+        gpt_tokenizer.train_bpe(30000, corpora=corpus, verbose=True)
+        print('bpe train close')
+        gpt_tokenizer.save(tokenizer_path)
+    # 当 tokenizer_path 存在时
+    else:
+        gpt_tokenizer.load(tokenizer_path)
 
-#     # vocab
-#     print('bpe view')
-#     gpt_tokenizer.view(vocab_dir)
+    # vocab
+    print('bpe view')
+    gpt_tokenizer.view(vocab_dir)
 
-#     print('build_tokenizer_job complete')
-#     return tokenizer_path
+    print('build_tokenizer_job complete')
+    return tokenizer_path
 
 
 
