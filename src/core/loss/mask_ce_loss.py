@@ -28,16 +28,16 @@ class MaskedCrossEntropyLoss(nn.CrossEntropyLoss):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def forward(self, input: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, target: torch.Tensor, mask: torch.Tensor|None) -> torch.Tensor:
         '''
         input: (batch_size, num_cls, [d1...dk])float as logits
         target: (batch_size, [d1...dk])int64 as label
-        mask: (batch_size, [d1...dk])bool as mask
+        mask: (batch_size, [d1...dk])bool as mask. only count loss of true-area.
         '''
 
-        # pred(B, C, [d1...dk])float, label(B, [d1...dk])long --> loss(B, [d1...dk])float
-        # pred(B, C)float, label(B,)long --> loss(B,)float
-        # pred(C,)float, label(1,)long --> loss(1,)float
+        # pred(B, C, [d1...dk])float, label(B, [d1...dk])long --> unmasked_loss(B, [d1...dk])float
+        # pred(B, C)float, label(B,)long --> unmasked_loss(B,)float
+        # pred(C,)float, label(1,)long --> unmasked_loss(1,)float
         unmasked_loss = F.cross_entropy(
             input,
             target,
@@ -46,14 +46,16 @@ class MaskedCrossEntropyLoss(nn.CrossEntropyLoss):
             reduction='none',
             label_smoothing=self.label_smoothing,
         )
-
-
-        masked_loss = unmasked_loss.masked_fill(mask, 0.)
+        if mask is None:
+            _loss = unmasked_loss
+        else:
+            _loss = unmasked_loss.masked_fill((mask==False), 0.)
+        
         if self.reduction == 'none':
-            return masked_loss
+            return _loss
         elif self.reduction == 'mean':
-            return masked_loss.mean()
+            return _loss.mean()
         elif self.reduction == 'sum':
-            return masked_loss.sum()
+            return _loss.sum()
         else:
             raise ValueError(f'wrong arg `reduction` {self.reduction}. must be one of `mean`/`sum`/`none`.')
