@@ -221,7 +221,7 @@ class Transformer(EncoderDecoder):
 class transformer_loss(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.loss = MaskedCrossEntropyLoss()
+        self.loss = MaskedCrossEntropyLoss(*args, **kwargs)
     
     def forward(self, Y_hat, Y_label, Y_valid_lens):
         # Y_hat, tensor of logits(batch_size, num_steps, vocab_size)
@@ -230,4 +230,4 @@ class transformer_loss(nn.Module):
 
         valid_area = torch.arange(Y_label.size(1), dtype=torch.int32, device=Y_valid_lens.device).unsqueeze(0) < Y_valid_lens.unsqueeze(1)
 
-        return self.loss(Y_hat.permute(0,2,1), Y_label, ~valid_area)
+        return self.loss(Y_hat.permute(0,2,1), Y_label, valid_area)
