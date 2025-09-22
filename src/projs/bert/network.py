@@ -205,8 +205,7 @@ class BERTLoss(nn.Module):
         # --> (N, num_masktks) for each row_i, where col index < mlm_valid_lens_i, 1 ; otherwise, 0
         valid_area = torch.arange( mlm_Y_hat.size(1), dtype=torch.int64, device=mlm_valid_lens.device ) < mlm_valid_lens.unsqueeze(1)
 
-
-        mlm_l = self.mlmloss( mlm_Y_hat.permute(0,2,1), mlm_label, valid_area ) / mlm_valid_lens # (batch_size,) / (batch_size, )
+        mlm_l = self.mlmloss( mlm_Y_hat.permute(0,2,1), mlm_label, ~valid_area ) / mlm_valid_lens # (batch_size,) / (batch_size, )
         nsp_l = self.nsploss( nsp_Y_hat, nsp_label ) # (batch_size,)
 
         return mlm_l, nsp_l
