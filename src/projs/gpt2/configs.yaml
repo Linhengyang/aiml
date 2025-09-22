@@ -23,8 +23,8 @@ eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accur
 
 
 # data-params
-train_data: '../../data/TinyStories/raw/train.parquet'
-valid_data: '../../data/TinyStories/raw/validation.parquet'
+train_data: '../../data/WMT14/en-fr/167130.txt'
+valid_data: '../../data/WMT14/en-fr/8356.txt'
 
 
 max_len: 64

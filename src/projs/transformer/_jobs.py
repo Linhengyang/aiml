@@ -4,8 +4,7 @@ warnings.filterwarnings("ignore")
 import torch
 import typing as t
 from .dataset import seq2seqDataset
-from .network import TransformerEncoder, TransformerDecoder, Transformer
-from ...core.loss.mask_ce_loss import MaskedCrossEntropyLoss
+from .network import TransformerEncoder, TransformerDecoder, Transformer, transformer_loss
 from .trainer import transformerTrainer
 from .evaluator import transformerEpochEvaluator
 from .predictor import sentenceTranslator
@@ -174,7 +173,7 @@ def train_job(eng_vocab_path, fra_vocab_path):
     transdec = TransformerDecoder(vocab_size=tgt_vocab_size, **net_args)
 
     net = Transformer(transenc, transdec)
-    loss = MaskedCrossEntropyLoss()
+    loss = transformer_loss()
 
     # init trainer
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)

@@ -1,4 +1,4 @@
-# Mask.py
+# mask.py
 import typing as t
 import torch
 

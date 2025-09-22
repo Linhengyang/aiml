@@ -195,7 +195,7 @@ class baseBBPETokenizer(Tokenizer):
         self.pat_str = pat_str
         self._merge_ranks = merge_ranks
         self._special_marks = special_marks
-        # special marks 必须都能被 pat_str 切开，不然可能会导致 merge-generated in BPE
+        # special marks 必须都能被 pat_str 切开，不然可能会导致 merge-regenerate-special_mark in BPE, 导致混淆
         assert all([ len(re.findall(pat_str, mark)) > 1 for mark in special_marks ])
 
         if merge_ranks: # 如果输入了非空的 merge_ranks
@@ -458,19 +458,20 @@ class baseBBPETokenizer(Tokenizer):
         按理来说, special tokens 是拿来控制 LLM 的, 不应该出现在 text 中。这里 额外处理special的逻辑与 OpenAI tiktoken 保持一致。
         即：如果在 text 中检测到 special tokens, 则 raise error。
         
-        通过 allowed_special, disallowed_special 来 控制 special tokens 的粒度。allow 和 disallow 的区别在于是否 raise error:
+        通过参数 allowed_special/disallowed_special 来 控制 special tokens 的粒度。allow 和 disallow 的区别在于是否 raise error.
 
         第一步 确定 disallowed specials, 以此 判断本次 encode 要不要 raise error: 若 text 中出现了 disallowed specials, 则 raise error; 否则进入第二步
-        第二步 用 encode_special 方法来 encode text: 即 allowed specials 和 注册 specials 的交集会被 map to special token ID
+        第二步 用 encode_special 方法来 encode text: 即 allowed specials 和 registered specials 的交集会被 map to special token ID, 其余全部正常encode
         
         1. 确定 disallowed specials。若 text 里包含 disallowed specials, 则 raise error。不包含则进入下一步
             如何确定 disallowed specials?
                 1. input arg disallowed_special = all: 意味着 该tokenizer 注册的 special tokens 减去 arg allowed_special, 就是 disallowed specials
-                （此时若 arg allowed_special = all, 则 disallowed_special 为 空，即 没有 disallow 的 special。）
-                2. input arg disallowed_special = (): 意味着 disallowed_special 为 空，即 没有 disallow 的 special。
-                3. input arg disallowed_special = set of str marks: 意味着 disallowed_special 是一个 valid 集合
+                (此时若 arg allowed_special = all, 则 disallowed_special 为 空，即 没有 disallow 的 special.)
+                2. input arg disallowed_special = (): 意味着 disallowed_special 为 空，即 没有 disallow 的 special.
+                3. input arg disallowed_special = set of str marks: 意味着 disallowed_special 是一个 valid 集合, 检测该集合的 marks 是否出现即可.
         
-        2. 若在 第1步没有 raise error, 则采用 encode with special on text
+        2. 若在 第1步没有 raise error, 则采用 encode with special on text. 参数 allowed_special 确定了 map to special token ID 的 special marks范围.
+           这里 allowed_special 即使和上文确定的 disallowed_special 有交集也无所谓的, 因为已经保证了 text 中不存在 disallowed_special.
         '''
         assert hasattr(self, 'special_tokens') # 有 / 无 special_tokens 属性, 可以区分 tokenizer 的 merge_ranks-empty / merge_ranks not-generated
 

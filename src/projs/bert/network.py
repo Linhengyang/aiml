@@ -1,5 +1,4 @@
 import torch.nn as nn
-from torch import Tensor
 import torch
 from ...core.nn_components.sub_modules._transformer import TransformerEncoderBlock
 from ...core.nn_components.root_layers.position_encoding import LearnAbsPosEnc, TrigonoAbsPosEnc
@@ -136,7 +135,7 @@ class BERT(nn.Module):
         self.mlm = MLM(vocab_size, num_hiddens)
         self.nsp = NSP(num_hiddens)
     
-    def forward(self, tokens, valid_lens, segments: Tensor|None, mask_positions: Tensor|None):
+    def forward(self, tokens, valid_lens, segments: torch.Tensor|None, mask_positions: torch.Tensor|None):
         '''
         对于 fine-tune 不一定需要的输入参数, 要设默认为 None 以不进入相关任务. 比如两个 pre-train 任务特需的输入
         '''
@@ -181,11 +180,8 @@ class BERTLoss(nn.Module):
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        # pred: (batch_size, num_cls, [d1...dk] as position dims)float logits
-        # label: (batch_size, [d1...dk] as position dims)int64
-        # valid_area: (batch_size, [d1...dk] as position dims)0-1(int32)/True-False(bool)
-        self.mlmloss = MaskedCrossEntropyLoss()
+        
+        self.mlmloss = MaskedCrossEntropyLoss(reduction='none') # --> (B, [d1...dk])
 
         # pred: (batch_size, num_cls, [d1...dk] as position dims)float logits
         # label: (batch_size, [d1...dk] as position dims)int64
@@ -206,8 +202,8 @@ class BERTLoss(nn.Module):
         # --> (N, num_masktks) for each row_i, where col index < mlm_valid_lens_i, 1 ; otherwise, 0
         valid_area = torch.arange( mlm_Y_hat.size(1), dtype=torch.int64, device=mlm_valid_lens.device ) < mlm_valid_lens.unsqueeze(1)
 
-
-        mlm_l = self.mlmloss( mlm_Y_hat.permute(0,2,1), mlm_label, valid_area ) / mlm_valid_lens # (batch_size,) / (batch_size, )
-        nsp_l = self.nsploss( nsp_Y_hat, nsp_label ) # (batch_size,)
+        # (batch_size,) / (batch_size, )
+        mlm_l = self.mlmloss(mlm_Y_hat.permute(0,2,1), mlm_label, valid_area).sum(dim=-1, keepdim=True) / mlm_valid_lens
+        nsp_l = self.nsploss(nsp_Y_hat, nsp_label) # (batch_size,)
 
         return mlm_l, nsp_l

@@ -158,8 +158,8 @@ class RotaryPosEnc(nn.Module):
     def _angles(self, position_ids: torch.Tensor) -> torch.Tensor:
         '''
         position_ids: shape(batch_size, num_positions), dtype int64, range >= 0
+        
         inv_freq: shape(dim/2,), dtype float
-
         theta tensor: theta = 绝对位置 index p 乘以 inv_frequence 10000^-(2i/d). 这里 2i 是 0 -> dim 的vector
 
         return:

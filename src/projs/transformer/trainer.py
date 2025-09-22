@@ -84,23 +84,14 @@ class transformerTrainer(easyTrainer):
     def FP_step(net:nn.Module, loss:nn.Module, net_inputs_batch, loss_inputs_batch):
         # net_inputs_batch, loss_inputs_batch 从 data_iter 中生成
 
-        # Y_label_batch: (batch_size, num_steps)
-        # Y_valid_lens_batch: (batch_size,)
-        Y_label_batch, Y_valid_lens_batch = loss_inputs_batch
+        # Y_label: (batch_size, num_steps)
+        # Y_valid_lens: (batch_size,)
+        Y_label, Y_valid_lens = loss_inputs_batch
 
         Y_hat, _ = net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
-        Y_hat = Y_hat.permute(0,2,1) # (batch_size, num_steps, vocab_size) --> (batch_size, vocab_size, num_steps)
         
-        # generate T/F or 0/1 mask tensor with shape (batch_size, num_steps)
-        num_steps = Y_label_batch.size(1)
-
-        device = Y_valid_lens_batch.device
-        # [[0,1,2,...,num_steps-1]] ?<? [ [valid_len_sample1], [valid_len_sample2],...,[valid_len_sampleN] ]
-        # ----> T/F mask tensor shape as (N, num_steps)
-        valid_area_mask = torch.arange(num_steps, dtype=torch.int32, device=device).unsqueeze(0) < Y_valid_lens_batch.unsqueeze(1)
-
         # get loss
-        l = loss(Y_hat, Y_label_batch, valid_area_mask)
+        l = loss(Y_hat, Y_label, Y_valid_lens)
 
         return l, Y_hat
 

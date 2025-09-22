@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+import torch.nn.functional as F
 
 
 class MaskedCrossEntropyLoss(nn.CrossEntropyLoss):
@@ -27,19 +28,34 @@ class MaskedCrossEntropyLoss(nn.CrossEntropyLoss):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def forward(self, pred, label, valid_area):
+    def forward(self, input: torch.Tensor, target: torch.Tensor, mask: torch.Tensor|None) -> torch.Tensor:
         '''
-        pred: (batch_size, num_cls, [d1...dk] as position dims)float logits
-        label: (batch_size, [d1...dk] as position dims)int64
-        valid_area: (batch_size, [d1...dk] as position dims)0-1(int32)/True-False(bool)
+        input: (batch_size, num_cls, [d1...dk])float as logits
+        target: (batch_size, [d1...dk])int64 as label
+        mask: (batch_size, [d1...dk])bool as mask. only count loss of true-area.
         '''
 
-        self.reduction = 'none'
-
-        # unmasked_loss shape: (batch_size, [d1...dk] as position dims) with float logits
-        unmasked_loss = super(MaskedCrossEntropyLoss, self).forward(pred, label)
-
-        # valid_area shape: (batch_size, [d1...dk] as position dims) with 0-1/True-False elements where 1/True indicates valid
-        # sum on dims other than 0 of (batch_size, [d1...dk] as position dims) --> (batch_size,)
-
-        return (unmasked_loss * valid_area.to(dtype=torch.bool)).sum( dim=tuple(range(1, valid_area.ndim)) )
+        # pred(B, C, [d1...dk])float, label(B, [d1...dk])long --> unmasked_loss(B, [d1...dk])float
+        # pred(B, C)float, label(B,)long --> unmasked_loss(B,)float
+        # pred(C,)float, label(1,)long --> unmasked_loss(1,)float
+        unmasked_loss = F.cross_entropy(
+            input,
+            target,
+            weight=self.weight,
+            ignore_index=self.ignore_index,
+            reduction='none',
+            label_smoothing=self.label_smoothing,
+        )
+        if mask is None:
+            _loss = unmasked_loss
+        else:
+            _loss = unmasked_loss.masked_fill((mask==False), 0.)
+        
+        if self.reduction == 'none':
+            return _loss
+        elif self.reduction == 'mean':
+            return _loss.mean()
+        elif self.reduction == 'sum':
+            return _loss.sum()
+        else:
+            raise ValueError(f'wrong arg `reduction` {self.reduction}. must be one of `mean`/`sum`/`none`.')

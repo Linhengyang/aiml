@@ -1,6 +1,7 @@
 from ...core.nn_components.meta_frames import Decoder, DecoderOnly
 from ...core.nn_components.root_layers.position_encoding import LearnAbsPosEnc
 from ...core.nn_components.sub_modules._gpt2 import GPT2DecoderBlock
+from .function import get_segs_pos_attnmask_train, get_segs_pos_attnmask_prefill, get_segs_pos_attnmask_decode
 import torch.nn as nn
 import math
 import torch
@@ -29,19 +30,6 @@ class gpt2Config:
 
 
 class gpt2(DecoderOnly):
-    '''
-    Decoder-Only 的 GPT2 架构:
-
-                                               seq[B, S] --embd--> tok[B, S, D]|
-    (if seq[B, S] use ABS as pos_enc) position_ids[1, S]|--embd--> pos[1, S, D]|--drop--> x[B, S, D]|---->
-                                                                              (if need past) past_kv|
-                                       (if need past) past_attention_mask|--concat--> attention_mask|
-                (if seq[B, S] involves PAD elements) attention_mask[B, S]|
-
-    >----decoder_blocks|--> x[B, S, D] -------layer_norm--reverse_embd-------> logits[B, S, vocab_size]
-                       |--> new_kv(if need) -----append_to_new_container-----> new_kv_caches(if need)
-                       |-----------------------------------------------------> new_past_attention_mask(if need)
-    '''
     def __init__(self, config:gpt2Config):
         super().__init__()
         self.config = config
@@ -70,6 +58,7 @@ class gpt2(DecoderOnly):
 
         self.apply(self._init_weights) # _init_weights 中对 linear/embedding 的weights 作相同分布的初始化. 由于已tied, 故两层都以最后一次初始化为结果
 
+
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -78,65 +67,62 @@ class gpt2(DecoderOnly):
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+
     def forward(self,
                 input_seqs: torch.Tensor,
-                attention_mask: Optional[torch.Tensor] = None,
+                input_segs: Optional[torch.Tensor] = None,
                 past_kv: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None,
-                past_attention_mask: Optional[torch.Tensor] = None,
+                past_segs: Optional[torch.Tensor] = None,
                 if_cache_kv: bool = False
                 ):
         '''
         input:
-            input_seqs: tensor [B, L_q]
-            attention_mask: None or tensor [B, L_q]bool to describe input_seqs PAD-info. False-->PAD, True-->non-PAD
-            past_kv: None or tuple of (k_cache, v_cache) where k_cache/v_cache [B, H, L_past, d]
-            past_attention_mask: None or tensor [B, L_past] to describe past_kv PAD-info
+            input_seqs: tensor [B, L_q]long
+            input_segs: None | tensor [B, L_q]long to describe input_seqs' PAD-info(0 for PAD) & TEXT-info(1/2...for textID)
+            past_kv: None | tuple of past(k_cache, v_cache), k_cache/v_cache tensor [B, H, L_past, d]float
+            past_segs: None | tensr [B, L_past]long to describe past_kv's PAD-info & TEXT-info
             if_cache_kv: bool to determine if to return updated k_cache/v_cache as in tuple
 
         output:
             logits: [B, L_q, vocab_size]
-            past_kv: None or tuple of updated k_cache/v_cache(so-far). for next-time, it'll be past
-            past_attention_mask: None or updated past_attention_mask which stick to past_kv(so-far). for next-time, it'll be past
+            past_kv: None | tuple of so_far(k_cache, v_cache). for next-time, it'll be past
         '''
         B, L_q = input_seqs.shape
         device = input_seqs.device
+        L_past = past_kv[0][0].size(2) if past_kv is not None else 0
 
-        if past_kv is not None:
-            L_past = past_kv[0][0].size(2)
-            # attention_mask 作为对 input_seq 的描述, 只有当 past_kv not None 才不等价于对 v 的描述, 才可能需要更新它
-            if past_attention_mask is not None or attention_mask is not None:
-                # 若 past_attention_mask 和 attention_mask 有其一不为 None, 那么说明需要引入 pad 信息
-                if past_attention_mask is None:
-                    past_attention_mask = torch.ones(B, L_past, dtype=torch.bool, device=device)
-                if attention_mask is None:
-                    attention_mask = torch.ones(B, L_q, dtype=torch.bool, device=device)
-                attention_mask = torch.cat([past_attention_mask, attention_mask], dim=-1).to(device=device) # [B, L_past+L_q]
+        if self.training:
+            segments, positions, attention_mask = get_segs_pos_attnmask_train(input_segs, L_q, device=device)
+        elif past_kv is None:
+            segments, positions, attention_mask = get_segs_pos_attnmask_prefill(input_segs, L_q, device=device)
         else:
-            L_past = 0
-            # 若 past_attention_mask 和 attention_mask 都是 None, 那么 无需更新 attention_mask: 以None输入即可
+            segments, positions, attention_mask = get_segs_pos_attnmask_decode(input_segs, L_q, past_segs, L_past, device=device)
         
         tok = self.W_tok_embd(input_seqs) # [B, L_q] -> [B, L_q, D]
 
         # 如果存在绝对位置编码层: 要 add abs pos encoding 到 tok embedding 上
         if hasattr(self, 'W_pos_embd'):
-             # 因为 pos encoding 从0开始, 故 L_past for this q = this q's position
-            position_ids = torch.arange(L_past, L_past + L_q, device=device).unsqueeze(0) # [1, L_q]
-            pos = self.W_pos_embd(position_ids) # [1, L_q, D]
-            tok = tok + pos
+             # positions [B, L_so_far=L_past + L_q], 取 last L_q 列
+            positions_q = positions[:, -L_q:] # [B, L_so_far] --> [B, L_q]
+            
+            tok = tok + self.W_pos_embd(positions_q) # [B, L_q, D]
+            positions = None # 位置编码已经加到 tok embedding 里了, 不再使用
+        
         # 如果使用RoPE位置编码: 无需额外操作, casual attention 层会执行RoPE
         x = self.embd_drop(tok) # [B, L_q, D]
         
         new_past_kv = [] if if_cache_kv else None
         for i, block in enumerate(self.blocks):
             kv_cache = past_kv[i] if past_kv is not None else None
-            x, new_kv_cache = block(x, kv_cache, attention_mask, if_cache_kv)
+            x, new_kv_cache = block(x, kv_cache, if_cache_kv, attention_mask, positions)
             if if_cache_kv:
                 new_past_kv.append( new_kv_cache ) # new_kv_cache 是 torch.cat 得到的, 其内存使用是高效的.
         
         logits = self.head_tok(self.layer_norm_final(x)) # [B, L_q, vocab_size]
 
-        return logits, tuple(new_past_kv) if if_cache_kv else None, attention_mask
+        return logits, tuple(new_past_kv) if if_cache_kv else None, segments
     
+
     @staticmethod
     def sample_next_token(logits: torch.Tensor, temperature: float, top_k: int|None):
         # logits: [B, vocab_size]
@@ -156,9 +142,11 @@ class gpt2(DecoderOnly):
 
         return next_token
 
+
     @torch.no_grad()
     def generate(self,
                  input_ids: torch.Tensor, # prefill: [B, L_q], decode: [B, 1]
+                 input_segs: torch.Tensor|None, # [B, L_q]
                  max_gen_size: int,        # max generating length
                  temperature: float = 1.0, # flatten/sharpen the output distribution
                  top_k: int|None = None,   # limit selections when sampling token via output distribution
@@ -169,18 +157,18 @@ class gpt2(DecoderOnly):
         1. prefill: input_ids [B, S]
         此时, forward 输入:
             input_seqs = input_ids [B, S]
-            attention_mask 根据 input_seqs 的实际 PAD 情况输入, None/[B, S]
+            input_segs 根据 input_seqs 的实际 PAD/TEXT 情况输入, None/[B, S]
             past_kv = None 因为此时没有 past
-            past_attention_mask = None 因为此时没有 past
+            past_segs = None 因为此时没有 past
             if_cache_kv = True 因为在 generate 时, 总需要把该次 so-far kv 作为下一次 infer 的 past_kv 输入
         prefill 的输出 output [B, S]. 取出 output 的 last dim 2 --> [B, 1] 作为输入进入阶段2
 
         2. decode: input_ids [B, 1]
         此时, forward 输入:
             input_seqs = input_ids [B, 1]
-            attention_mask 根据 input_ids 的实际 PAD 情况输入: 考察 input_ids 中是否是 eos_id(如果有) 决定 PAD-info. None/[B, 1]bool
+            input_segs = None 即使产出 eos 也不算 PAD, 希望模型考虑 eos 而不是屏蔽 eos
             past_kv = tuple of k/v [B, H, L_past, d], 即上一次 generate 返回的 so-far kv. 上一次的so-far是这一次的past
-            past_attention_mask: None/[B, L_past]bool, 即上一次 generate 返回的 so-far attn_mask. 上一次的so-far是这一次的past
+            past_segs: None/[B, L_past], 即上一次 generate 返回的 so-far segments. 上一次的so-far是这一次的past
             if_cache_kv = True 因为在 generate 时还是要保持输出该次 so-far kv 作为下一次 infer 的 past_kv 输入
         '''
         assert max_gen_size > 0 and max_gen_size + input_ids.size(1) <= self.config.max_context_size, \
@@ -188,53 +176,42 @@ class gpt2(DecoderOnly):
         self.eval()
 
         # prefill
-        attention_mask = None
-        if eos_id is not None:
-            attention_mask = torch.ones_like(input_ids, dtype=torch.bool) # same device with input_ids
-            attention_mask = attention_mask.masked_fill(input_ids == eos_id, False) # eos 位置 --> False as PAD-info
-
-        logits, past_kv, past_attention_mask = self(
-            input_seqs = input_ids,             # [B, S]
-            attention_mask = attention_mask,    # [B, S]/None
+        logits, past_kv, past_segs = self(
+            input_seqs = input_ids,             # [B, L_q]
+            input_segs = input_segs,            # [B, L_q]|None
             past_kv = None,
-            past_attention_mask = None,
+            past_segs = None,
             if_cache_kv = True
         )
         # logits: [B, S, vocab_size]
-        # past_kv: tuple of kv_cache [B, H, L_past=S, d]
-        # past_attention_mask: describe of past kv [B, L_past=S]
+        # past_kv: tuple of kv_cache [B, H, L_past=L_q, d]
+        # past_segs: describe of past kv [B, L_past=L_q]|None
 
         max_gen_size -= 1
-        attention_mask = None
-
         next_token = self.sample_next_token(logits[:, -1, :], temperature, top_k) # [B, 1]
         output = next_token.cpu() # [B, 1]
 
         # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
-        if eos_id is not None:
-            attention_mask = next_token != eos_id # [B, 1]
-            if not attention_mask.any(): # 如果生成的 next_token 全都是 PAD --> 结束 generate
-                return output
+        if eos_id is not None and (next_token == eos_id).all():
+            return output
         
         # decode
         for _ in range(max_gen_size):
-            logits, past_kv, past_attention_mask = self(
+            logits, past_kv, past_segs = self(
                 input_seqs = next_token,                    # [B, 1]
-                attention_mask = attention_mask,            # [B, 1]/None
+                input_segs = None,                          # None
                 past_kv = past_kv,                          # tuple of kv_cache [B, H, L_past, d]
-                past_attention_mask = past_attention_mask,  # [B, L_past]/None
-                if_cache_kv = True
-            )
+                past_segs = past_segs,                      # [B, L_past]|None
+                if_cache_kv = True)
 
             # logits: [B, 1, vocab_size]
             # past_kv: tuple of kv_cache [B, H, L_past+1, d]
-            # past_attention_mask: describe of past kv [B, L_past+1]
+            # past_segs: describe of past kv [B, L_past+1] | None
             next_token = self.sample_next_token(logits.squeeze(1), temperature, top_k) # [B, 1]
             output = torch.cat([output, next_token.cpu()], dim=-1)
 
-            if eos_id is not None:
-                attention_mask = next_token != eos_id # [B, 1]
-                if not attention_mask.any(): # 如果生成的 next_token 全都是 PAD --> 结束 generate
-                    return output
+            # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
+            if eos_id is not None and (next_token == eos_id).all():
+                return output
         
         return output # [B, max_gen_size]
