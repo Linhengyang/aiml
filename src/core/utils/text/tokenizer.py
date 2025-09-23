@@ -864,8 +864,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         如果 extra_save_dir 是None,
         生成 _buffer_dir/tokens/0 目录, 并在其中生成 corpora 的 byte-tokens .pq文件们
 
-        corpora: list of string or parquet files
-        text_colnames: corresponding column names for parquet files. None for string
+        corpora: list of string or parquet file paths
+        text_colnames: corresponding column names for parquet files. place None for string
             e.g.,
             corpora: ['aaabbc', '../data/raw/train.pq', '../data/raw/valid.pq']
             text_colnames: [None, 'text', 'text']
@@ -1340,13 +1340,13 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
     def train_bpe(self,
-                  num_merges:int|None = None, # global num merges fir the tokenizer
+                  num_merges:int|None = None,               # global num merges for the tokenizer
                   *,
-                  corpora:t.List[str]|str|None,
-                  colnames:t.List[str|None]|None = None,
-                  backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 172470436, # max num of token-chunks in memory for each core. 0.16GB
-                  keep_window:int = 3, # max reserved tokens_pq file in disk
+                  corpora:t.List[str]|str|None,             # None 代表从 buffer_dir 续train; 可以是直接输入文本str; 可以是parquet路径; 可以混合
+                  colnames:t.List[str|None]|None = None,    # 和 corpora 对应, 指定 parquet 文件里 文本 列名
+                  backup_init_tokens_dir:str|None = None,   # backup the init tokens files of corpus
+                  buffer_size:int = 172470436,              # max num of token-chunks in memory for each core. 0.16GB
+                  keep_window:int = 3,                      # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
         
