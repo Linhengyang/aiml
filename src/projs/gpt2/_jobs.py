@@ -127,6 +127,11 @@ def build_tokenizer_job():
 
 
 def tokenize_save_job(tokenizer, corpora_paths: t.List[str], save_dir: str):
+    '''
+    将 corpora_paths 中的所有 txt 文件(包含EOT), tokenize 为 token IDs, 一个 text 一行, 列名为 token_id;
+    每个 TEXT-DOC 从 1 开始编号(0 留给 PAD), 每行 text 都有独属的 text ID, 列名为 doc_id;
+    统计每个 text 的长度(包含EOT), 为text-packing作准备, 列名为 doc_len;
+    '''
     # load tokenizer. name 以及其他参数都会被 load 覆盖
     tok = boostBBPETokenizer(name='to_load', buffer_dir=buffer_dir)
     tok.load(tokenizer)
@@ -137,3 +142,4 @@ def tokenize_save_job(tokenizer, corpora_paths: t.List[str], save_dir: str):
         
         with open(corpus, 'r', encoding='utf-8') as raw, open(save_path, 'w', encoding='utf-8') as tokenized:
             text = raw.readline()
+            
