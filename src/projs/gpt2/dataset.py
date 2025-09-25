@@ -48,7 +48,6 @@ import torch
 import typing as t
 import math
 from ...core.utils.text.tokenizer import boostBBPETokenizer
-from dataclasses import dataclass
 
 # 用一个三维 torch.Tensor 代表一批同长序列: [B, 3, L] ---> seqBox
 # 指 B 个 datapoint, 每个 datapoint 是 三个长度为 L 的序列, 分别为 input 序列 / segments 序列 / label 序列
@@ -63,8 +62,6 @@ def _regularize_batch(S: int, P: int, data: t.Dict[int, torch.Tensor]):
     # 对于 L = S 的 seq_box, 它是现成的, 无需操作 --> [_, 3, S]
     if S not in data:
         data[S] = torch.empty(0, 3, S, dtype=torch.long) # 空 Tensor, [0, 3, S]
-    
-    output = data[S] # 不涉及copy. torch 的好处就是这里的行为统一引用复用地址
 
     # 对于 L > S 的 seq_box, L = kS + b, k >=1, 0 <= b < S
     for L in range(S+1, P):
@@ -72,9 +69,9 @@ def _regularize_batch(S: int, P: int, data: t.Dict[int, torch.Tensor]):
             k, b = L // S, L % S
             splitted = data[L].split(S, dim=-1) # [B, 3, kS+b] --split--> k 个 [B, 3, S], 1 个 [B, 3, b]
             if b == 0:
-                output = torch.concat([output, *splitted], dim=0) # [_, 3, S] stack k 个 [B, 3, S]
+                data[S] = torch.concat([data[S], *splitted], dim=0) # [_, 3, S] stack k 个 [B, 3, S]
             else:
-                output = torch.concat([output, *splitted[:-1]], dim=0) # [_, 3, S] stack k 个 [B, 3, S]
+                data[S] = torch.concat([data[S], *splitted[:-1]], dim=0) # [_, 3, S] stack k 个 [B, 3, S]
                 # [_, 3, b] --> [_+B, 3, b]
                 data[b] = torch.concat([data.get(b, torch.empty(0, 3, b, dtype=torch.long)), splitted[-1]], dim=0)
             del data[L] # L 已经拆散分配到 S 和 b. 分配完毕后 从 data 中消除对应 kv
@@ -85,7 +82,7 @@ def _size_stat(S: int, P: int, data: t.Dict[int, torch.Tensor]):
     计算长度从 S(包含) 到 P(不包含) 的 所有 seqBox 的总 size
     '''
     _size = 0
-    for L in range(S+1, P):
+    for L in range(S, P):
         if L in data:
             _size += data[L].size(0) # [B, 3, L]
     return _size
@@ -104,48 +101,32 @@ def _pad(data: torch.Tensor, L):
         return data
 
 
-def pack_text(tgt_L: int, data: t.Dict[int, torch.Tensor]):
+def pack_text(data: t.Dict[int, torch.Tensor], tgt_L: int, min_L: int):
     '''
-    对于长度 大于等于 tgt_L 的 seqBox, regularize 到 tgt_L. 计算此时 tgt_L/2 到 tgt_L 的seqBox的总size B, 以及1到tgt_L的总size B_
-    如果 B >= 2, 则执行下一步; 如果 B < 2 但是 B_ >=2, 则把所有 1到tgt_L/2 的都PAD到 tgt_L/2, 然后执行下一步后结束; 如果 B_ < 2, 结束
-
-    对于长度 大于等于 tgt_L/2 但又小于 tgt_L 的seqBox, regularize 到 tgt_L/2 后 得到 [B, 3, tgt_L/2] 的 seqBox.
-    拆分 dim0 pack 到 dim2, 得到 [B//2, 3, tgt_L]. 这里可能要pack 1条 [1, 3, tgt_L/2] 的 datapoint 到 residual
-
-    对于长度 大于等于 tgt_L/4 但又小于 tgt_L/2 的seqBox, regularize 到 tgt_L/4 后 得到 [B, 3, tgt_L/4] 的 seqBox.
-    拆分 dim0 pack 到 dim2, 得到 [B//4, 3, tgt_L]. 这里可能要pack 3条 [1, 3, tgt_L/4] 的 datapoint 到 residual.
-
-    ...
-
-    重复上述流程 t-1 次后, 检查所有长度小于 tgt_L/2^t 的 seqBoxes, 计算 min_L, 以及总size B. 若 min_L < tgt_L/2^t, B >= 2^t 成立,
-    步骤一: 对于长度小于 tgt_L/2^t 的, 全部 PAD 到 长度 tgt_L/2^t.
-    步骤二: 对于长度 大于等于 tgt_L/2^t 但又小于 tgt_L/2^(t-1) 的seqBox, regularize 到 tgt_L/2^t 后 得到 [B, 3, tgt_L/2^t] 的 seqBox.
-    拆分 dim0 pack 到 dim2, 得到 [B//2^t, 3, tgt_L]. 这里可能要 pack 2^t-1 条 [1, 3, tgt_L/2^t] 的 datapoints 到 residual.
+    data: 字典of key: L, 表示序列长度, value: tensor[B, 3, L], 表示 B 条长度为 L 的序列, 每条序列包括 input/label/segments
+          data 按 key 从小到大排序.
+          input/label/segments 中:
+            input/label 是 sequence of token|PAD, token用tokenID表示, PAD用pad_id表示
+            segments 是 sequene of doc-text-ID|PAD, doc-text-ID是正整数, 代表独立text-doc, PAD用0表示, 
     '''
-    min_L, max_L = min(data), max(data)
-    T = int( math.log2(tgt_L/min_L) )
+    T = int( math.log2(tgt_L/min_L) ) # what if T = 0 here?
     
-    _regularize_batch(tgt_L, max_L+1, data) # what if tgt_L >= max_L?
+    _regularize_batch(tgt_L, max(data)+1, data) # what if tgt_L >= max_L?
     # 此时 data: min_L -- tgt_L
 
-    residual = torch.empty(1, 3, 0)
+    residual = torch.empty(1, 3, 0, dtype=torch.long)
 
     for t in range(1, T+1): # t 最多到 T, 因为当 t > T 时, min_L > tgt_L/2^t, 而裁剪 min_L 实属没有必要.
-        # 考虑子区间 tgt_L/2^t -- tgt_L/2^(t-1), 即:
-        # t = 1: tgt_L/2 -- tgt_L
-        # t = 2: tgt_L/4 -- tgt_L/2
-        # ...
-        # t = t: tgt_L/2^t -- tgt_L/2^(t-1)
         L_t = tgt_L//2**t
         up_semi_size = _size_stat(L_t, tgt_L//2**(t-1), data) # size from tgt_L/2^t(incl) -- tgt_L/2^(t-1)(not-incl)
         down_semi_size = _size_stat(min_L, L_t, data) # size from min_L(incl) -- tgt_L/2^t(not-incl)
 
         if up_semi_size >= 2**t:
-            _regularize_batch(L_t, tgt_L//2**(t-1))
-            temp = data[L_t] # [up_semi_size, 3, tgt_L//2**t]
-            # up_semi_size = 2**t * up_semi_size//2**t + r, 0 <= r < 2**t
+            _regularize_batch(L_t, tgt_L//2**(t-1), data)
+            # data[L_t]: [up_semi_size, 3, tgt_L//2**t]
+            # up_semi_size = 2**t * incre_size + r, 0 <= r < 2**t
             incre_size, r = up_semi_size//(2**t), up_semi_size%(2**t)
-            splitted = temp.split(incre_size, dim=0) # 2**t个 [incre_size, 3, tgt_L//2**t], 1个 [r, 3, tgt_L//2**t]
+            splitted = data[L_t].split(incre_size, dim=0) # 2**t个 [incre_size, 3, tgt_L//2**t], 1个 [r, 3, tgt_L//2**t]
             if r != 0:
                 increment = _pad( torch.cat(splitted[:-1], dim=-1), tgt_L ) # [incre_size, 3, tgt_L]
                 # 补充 last [r, 3, tgt_L//2**t] 到 [2**t, 3, tgt_L//2**t]
@@ -165,11 +146,11 @@ def pack_text(tgt_L: int, data: t.Dict[int, torch.Tensor]):
                 if l in data:
                     data[L_t] = torch.cat([data[L_t], _pad(data[l], L_t)], dim=0) # [..++, 3, tgt_L//2**t]
                     del data[l]
-            _regularize_batch(L_t, tgt_L//2**(t-1))
-            temp = data[L_t] # [_size, 3, tgt_L//2**t]
+            _regularize_batch(L_t, tgt_L//2**(t-1), data)
+            # data[L_t] [_size, 3, tgt_L//2**t]
             # _size = 2**t * incre_size + r, 0 <= r < 2**t
             incre_size, r = _size//(2**t), _size%(2**t)
-            splitted = temp.split(incre_size, dim=0) # 2**t个 [incre_size, 3, tgt_L//2**t], 1个 [r, 3, tgt_L//2**t]
+            splitted = data[L_t].split(incre_size, dim=0) # 2**t个 [incre_size, 3, tgt_L//2**t], 1个 [r, 3, tgt_L//2**t]
             if r != 0:
                 increment = _pad( torch.cat(splitted[:-1], dim=-1), tgt_L ) # [incre_size, 3, tgt_L]
                 # 补充 last [r, 3, tgt_L//2**t] 到 [2**t, 3, tgt_L//2**t]
@@ -182,7 +163,7 @@ def pack_text(tgt_L: int, data: t.Dict[int, torch.Tensor]):
         else:
             break
 
-    return data[tgt_L]
+    return data[tgt_L], data
 
 
 
