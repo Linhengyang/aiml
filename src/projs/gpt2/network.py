@@ -77,7 +77,7 @@ class gpt2(DecoderOnly):
                 ):
         '''
         input:
-            input_seqs: tensor [B, L_q]long
+            input_seqs: tensor [B, L_q]long whose value must within embedding table
             input_segs: None | tensor [B, L_q]long to describe input_seqs' PAD-info(0 for PAD) & TEXT-info(1/2...for textID)
             past_kv: None | tuple of past(k_cache, v_cache), k_cache/v_cache tensor [B, H, L_past, d]float
             past_segs: None | tensr [B, L_past]long to describe past_kv's PAD-info & TEXT-info
@@ -86,6 +86,10 @@ class gpt2(DecoderOnly):
         output:
             logits: [B, L_q, vocab_size]
             past_kv: None | tuple of so_far(k_cache, v_cache). for next-time, it'll be past
+        
+        本模型默认准则: segment 中, 0 代表 PAD, PAD 的 segment 赋 0; 位置编码中, PAD 位置编码赋 0, 有效序列的位置编码从 0 开始(第一位赋0)
+        本模型对 input 序列中, PAD 具体赋哪个值 并不关心(因为 PAD 会被 attention_mask 屏蔽计算). 但是此值必须在embedding table范围内.
+        数据处理时, input 序列中的 PAD 位置可用 0 直接填充, 这样永远不会 out-of-table, 处理也方便.
         '''
         B, L_q = input_seqs.shape
         device = input_seqs.device
