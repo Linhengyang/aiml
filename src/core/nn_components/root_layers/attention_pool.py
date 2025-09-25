@@ -358,59 +358,6 @@ class CasualMHA(nn.Module):
             True: CasualMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k.
                   本 CasualMHA 层在使用 RoPE 时, valid token 的位置编码从 0 开始. PAD(如果有)位置编码赋0. 不害怕混淆, 因为PAD不参与计算.
             False: CasualMHA layer 不带 位置编码. 那么 CasualMHA layer 之前, 要使用 max_context_size 参数实施 绝对位置编码
-
-    前向输入
-        x: Tensor, shape [B, L_q, D], dim 1是 序列的排序, 即 x[:, -1, :] 代表 last token.
-          train: L_q             --> 分别输入 x as first 1, 2, ..., L_q, 生成 No. 2, 3, ..., L_q+1
-          infer.prefill: L_q     --> 分别输入 x as first 1, 2, ..., L_q, 生成 No. 2, 3, ..., L_q+1, 这里 No. L_q+1 是 only need
-          infer.decode: L_q = 1  --> 输入 x as No. L_so_far, 配合 past as kv_cache 即 No. 1, 2, ..., L_past, 生成 No. L_so_far+1 token
-
-        kv_cache: Tuple[Tensor, Tensor]|None, 默认None, 否则 k_cache/v_cache 分别为 tensor [B, H, L_past, d]float
-          train/infer.prefill:
-            x [B, L_q, D], 代表分别输入 x as first 1, 2, ..., L_q
-            kv_cache = None, kv 直接使用 x 自身信息, 即 k/v as all 1<->L_q
-            CauslMHA 是 自注意力计算 with (q: 1<->L_q, k: 1<->L_q, v: 1<->L_q), 生成 No. 2, 3, ..., L_q+1, 得到 attn_w[..., L_q, L_q]
-            这里 attention weights[..., L_q, L_q] 还需要 经过 casual_mask / attention_mask 等, 去屏蔽 不该相关 区域.
-          infer.decode:
-            x [B, 1, D] 代表输入 x as No. L_so_far token.
-            k_cache/v_cache 形状 [B, H, L_past, d], L_so_far = L_past+1
-            k/v 使用 k_cache/v_cache 追加 x 信息, 即 k/v as all 1<->L_so_far
-            CauslMHA 是计算 with (q: L_so_far, k: 1<->L_so_far, v: 1<->L_so_far), 生成 No. L_so_far+1 token, 得到 attn_w [..., 1, L_so_far].
-            这里 [1, L_so_far]: 代表对于 No. L_so_far token 的 x, 生成 No. L_so_far+1 token 的系数向量. 这里应该是全 1.
-
-        return_cache: bool, 默认False
-            当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 L_so_far 所有.
-
-        attention_mask: Tensor|None, 默认None, 否则为 tensor [B, L_q, L_so_far]bool
-            作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法贡献. 对某 q, 涉及 PAD, 以及不与该 q same-text 的 k, 都是非法贡献, 要屏蔽.
-
-        positions: Tensor|None, 默认None, 否则为 tensor [B, L_so_far]
-            只在 use_rope = True 时, positions 才会起作用. 否则应该在 casualMHA 层之前就把 绝对位置编码 加到 x 里.
-            positions 代表了 L_past + L_q = L_so_far 的所有位置信息. 从中取 后L_q部分, 即为 q 的 位置编码.
-        
-    positions 和 attention_mask 互为伴生, 实际上它们都应该是 PAD-info 和 TEXTDOC-info 的衍生物:
-    1. PAD 位置的 position = 0; q/k 任一 PAD, attention mask = False
-    2. 具备相关关系的单一序列, positions 从 0 开始从左到右递增; 序列中某位置作为 q 时, 只有具备相关关系的同序列位置 作为 k 时, attention_mask = True
-       相关关系在 训练 / 推理 的定义不同. 在训练时, 只有同一 TEXTDOC 的位置(包括ENDOFTEXT)才算具备相关关系. 在推理时, 全部非PAD位置都算具备相关关系
-    
-    在实操中, PAD-info/TEXTDOC-info 任一或全部都可以由 segments 表示, segments 可以一起产出 positions 和 attention_mask.
-    这里只考虑 二者同时输入tensor(不检查是否矛盾)/二者同时为None 两种情况:
-        1.只要涉及 PAD, 那么就有 segments, 从而 positions 和 attention_mask 都有.
-        2.如果 PAD-info 和 TEXTDOC-info 都没有, 那么 attention_mask 用 None 即可, positions 使用从 0 开始的递增编码即可.
-    未来完成 positions/attention_mask 相互转换的函数后(elif分支), 使得本层可以处理 positions/attention_mask 恰只有其一输入的情况. 实操里不会单一输入.
-    
-    前向输出
-        y: Tensor, shape same as x [B, L_q, D]. next-token 取 y 的 last dim 2.
-
-        new_kv_cache: Tuple[Tensor, Tensor]|None. 当 return_cache == False, new_kv_cache 为 None
-            train 阶段: new_kv_cache = None
-            infer 阶段: new_kv_cache = tuple of k and v, k/v [B, H, L_sofar, d]. 本输出的 L_sofar 在下一次next-token生成里就是 L_past
-
-    灵活组合 kv_cache 和 return_cache 以满足 train / infer.prefill / infer.decode 不同阶段
-        train: teacher-force策略下的 self-attention 计算, 不需要输入 kv_cache(past), 同时也不需要输出 kv(so_far)
-        infer.prefill: prompt 以 [B, S] 的形状输入, 不需要输入 kv_cache 因为没有. 但需要输出 kv(so_far) 给 decode 阶段.
-        infer.decode: 上一次decode或者来自prefill的预测结果作为 单时间步 q 输入, 输入 kv_cache(past), 合并 q 得到 kv(so_far), 
-                      输出 L_so_far+1, 并输出 kv(so_far)给下一次decode.
     '''
     def __init__(self,
                  embd_size:int,
@@ -455,7 +402,63 @@ class CasualMHA(nn.Module):
                 attention_mask:torch.Tensor|None = None,                # [B, L_q, L_so_far=L_past+L_q]
                 positions:torch.Tensor|None = None,                     # [B, L_so_far]/[1, L_so_far]
                 ):
+        '''
+        前向输入
+        x: Tensor, shape [B, L_q, D], dim 1是 序列的排序, 即 x[:, -1, :] 代表 last token.
+          train: L_q             --> 分别输入 x as first 1, 2, ..., L_q, 生成 No. 2, 3, ..., L_q+1
+          infer.prefill: L_q     --> 分别输入 x as first 1, 2, ..., L_q, 生成 No. 2, 3, ..., L_q+1, 这里 No. L_q+1 是 only need
+          infer.decode: L_q = 1  --> 输入 x as No. L_so_far, 配合 past as kv_cache 即 No. 1, 2, ..., L_past, 生成 No. L_so_far+1 token
+
+        kv_cache: Tuple[Tensor, Tensor]|None, 默认None, 否则 k_cache/v_cache 分别为 tensor [B, H, L_past, d]float
+          train/infer.prefill:
+            x [B, L_q, D], 代表分别输入 x as first 1, 2, ..., L_q
+            kv_cache = None, kv 直接使用 x 自身信息, 即 k/v as all 1<->L_q
+            CauslMHA 是 自注意力计算 with (q: 1<->L_q, k: 1<->L_q, v: 1<->L_q), 生成 No. 2, 3, ..., L_q+1, 得到 attn_w[..., L_q, L_q]
+            这里 attention weights[..., L_q, L_q] 还需要 经过 casual_mask / attention_mask 等, 去屏蔽 不该相关 区域.
+          infer.decode:
+            x [B, 1, D] 代表输入 x as No. L_so_far token.
+            k_cache/v_cache 形状 [B, H, L_past, d], L_so_far = L_past+1
+            k/v 使用 k_cache/v_cache 追加 x 信息, 即 k/v as all 1<->L_so_far
+            CauslMHA 是计算 with (q: L_so_far, k: 1<->L_so_far, v: 1<->L_so_far), 生成 No. L_so_far+1 token, 得到 attn_w [..., 1, L_so_far].
+            这里 [1, L_so_far]: 代表对于 No. L_so_far token 的 x, 生成 No. L_so_far+1 token 的系数向量. 这里应该是全 1.
+
+        return_cache: bool, 默认False
+            当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 L_so_far 所有.
+
+        attention_mask: Tensor|None, 默认None, 否则为 tensor [B, L_q, L_so_far]bool
+            作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法贡献. 对某 q, 涉及 PAD, 以及不与该 q same-text 的 k, 都是非法贡献, 要屏蔽.
+
+        positions: Tensor|None, 默认None, 否则为 tensor [B, L_so_far]
+            只在 use_rope = True 时, positions 才会起作用. 否则应该在 casualMHA 层之前就把 绝对位置编码 加到 x 里.
+            positions 代表了 L_past + L_q = L_so_far 的所有位置信息. 从中取 后L_q部分, 即为 q 的 位置编码.
+            当 use_rope = True 但又不输入 positions, 那么此 layer 会自动生成从 0 开始的 positions 作为 q/k 的位置编码.
+
+            
+        positions 和 attention_mask 应该遵循的准则: PAD position = 0; position for valid sequence starts from 0.
+        positions 和 attention_mask 互为伴生, 实际上它们都应该是 PAD-info 和 TEXTDOC-info 的衍生物:
+        1. PAD 位置的 position = 0; q/k 任一 PAD, attention mask = False
+        2. 具备相关关系的单一序列, positions 从 0 开始从左到右递增; 序列中某位置作为 q 时, 只有具备相关关系的同序列位置 作为 k 时, attention_mask = True
+        相关关系在 训练 / 推理 的定义不同. 在训练时, 只有同一 TEXTDOC 的位置(包括ENDOFTEXT)才算具备相关关系. 在推理时, 全部非PAD位置都算具备相关关系
         
+        在实操中, PAD-info/TEXTDOC-info 任一或全部都可以由 segments 表示, segments 可以一起产出 positions 和 attention_mask.
+        这里只考虑 二者同时输入tensor(不检查是否矛盾)/二者同时为 None 两种情况:
+            1.只要涉及 PAD, 那么就有 segments, 从而 positions 和 attention_mask 都有.
+            2.如果 PAD-info 和 TEXTDOC-info 都没有, 那么 attention_mask 用 None 即可, positions 使用从 0 开始的递增编码即可.
+        未来完成 positions/attention_mask 相互转换的函数后(elif分支), 使得本层可以处理 positions/attention_mask 恰只有其一输入的情况. 实操里不会单一输入.
+        
+        前向输出
+            y: Tensor, shape same as x [B, L_q, D]. next-token 取 y 的 last dim 2.
+
+            new_kv_cache: Tuple[Tensor, Tensor]|None. 当 return_cache == False, new_kv_cache 为 None
+                train 阶段: new_kv_cache = None
+                infer 阶段: new_kv_cache = tuple of k and v, k/v [B, H, L_sofar, d]. 本输出的 L_sofar 在下一次next-token生成里就是 L_past
+
+        灵活组合 kv_cache 和 return_cache 以满足 train / infer.prefill / infer.decode 不同阶段
+            train: teacher-force策略下的 self-attention 计算, 不需要输入 kv_cache(past), 同时也不需要输出 kv(so_far)
+            infer.prefill: prompt 以 [B, S] 的形状输入, 不需要输入 kv_cache 因为没有. 但需要输出 kv(so_far) 给 decode 阶段.
+            infer.decode: 上一次decode或者来自prefill的预测结果作为 单时间步 q 输入, 输入 kv_cache(past), 合并 q 得到 kv(so_far), 
+                        输出 L_so_far+1, 并输出 kv(so_far)给下一次decode.
+        '''
         L_q = x.size(1)
 
         # 制作 qkv: x[B, L_q, D] --> qkv[B, L_q, 3D] --split--> q/k/v[B, L_q, D] --reshape--> q/k/v[B, H, L_q, d]
