@@ -3,7 +3,10 @@ import torch
 from typing import Tuple
 from ...core.base.functions.sequence import segments_to_positions
 
-
+# train mode 下, 从 input 的 segments(可以为None) 按以下标准生成对应的 positions 和 attention mask
+# 若 input_segs = None, 默认 input 属于同一个text且没有PAD, 则 segments = None, positions = 从0开始总长度为L_q的位置编码 [1, L_q], attention_mask = None
+# 若 input_segs != None, 那么默认其中 0 代表PAD, 位置编码赋0; 从 0 开始给每个单一 seg代表的单一序列 独立 赋位置编码, tensor [B, L_q]long
+# attention_mask 是 tensor [B, L_q, L_q]long, 只有 qk 都非PAD 且 qk 的 segment 相等 才为 True, 其余都是 False
 def get_segs_pos_attnmask_train(
         input_segs: None|torch.Tensor, L_q: int,
         *,
@@ -57,7 +60,10 @@ def get_segs_pos_attnmask_train(
 
 
 
-
+# infer.prefill mode 下, 从 input 的 segments(可以为None) 按以下标准生成对应的 positions 和 attention mask
+# 若 input_segs = None, 默认 input 属于同一个text且没有PAD, 则 segments = None, positions = 从0开始总长度为L_q的位置编码 [1, L_q], attention_mask = None
+# 若 input_segs != None, 那么默认其中 0 代表PAD, 位置编码赋0; 从 0 开始给所有非 PAD 位置按序 赋位置编码, tensor [B, L_q]long
+# attention_mask 是 tensor [B, L_q, L_q]long, 只有 qk 都非PAD 才为 True, 其余都是 False
 def get_segs_pos_attnmask_prefill(
         input_segs: None|torch.Tensor, L_q: int,
         *,
@@ -82,7 +88,13 @@ def get_segs_pos_attnmask_prefill(
 
 
 
+# infer.prefill mode 下, 从 input 的 input_segs(可以为None) 和 kv_cache 的 past_segs(可以为None) 按以下标准生成对应的 positions 和 attention mask
+# step1: 确定 segments: 包含 past + input 的 segments
+#        若 二者都为 None, 则 segments = None; 若二者有其一不为None, 则视另外一个为全1(即非PAD单一序列); 若二者皆存在, 则OK
 
+# 若 segments = None, 则 segments = None, positions = 从0开始总长度为 L_q+L_past 的位置编码 [1, L_q+L_past], attention_mask = None
+# 若 segments != None, 那么默认其中 0 代表PAD, 位置编码赋0; 从 0 开始给所有非 PAD 位置按序 赋位置编码, tensor [B, L_q+L_past]long
+# attention_mask 是 tensor [B, L_q, L_q+L_past]long, 只有 qk 都非PAD 才为 True, 其余都是 False
 def get_segs_pos_attnmask_decode(
         input_segs: None|torch.Tensor, L_q: int, past_segs: None|torch.Tensor, L_past: int,
         *,
