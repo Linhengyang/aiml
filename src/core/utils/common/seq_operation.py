@@ -114,7 +114,7 @@ def pack_seq_to_batch_pow2(data: t.Dict[int, torch.Tensor], tgt_L: int, min_L: i
     assert tgt_L < max_L, f'target batch sequence length must be smaller than max sequence length of data'
     n = data[max_L].size(1) # {1:[B1, n, 1], 2:[B2, n, 2], ..., L:[B, n, L],...}
 
-    _regularize_batch(tgt_L, max_L+1, data)
+    _regularize_batch(tgt_L, max_L+1, data, n)
 
     residual = torch.empty(1, n, 0, dtype=torch.long) # 零碎的 residual 会 concat 到 dim-1
 
@@ -154,4 +154,10 @@ def pack_seq_to_batch_pow2(data: t.Dict[int, torch.Tensor], tgt_L: int, min_L: i
             increment = _pad(torch.cat(splitted[:-1], dim=-1), tgt_L, -1, pad_value) # [incre_B, n, tgt_L]
         data[tgt_L] = torch.cat([data[tgt_L], increment], dim=0)
 
+        del data[mid_L]
+
     return data[tgt_L], data
+
+
+
+
