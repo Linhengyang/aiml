@@ -7,7 +7,7 @@ cache_play = '../cache/playground/'
 
 
 from src.core.utils.text.tokenizer import boostBBPETokenizer, ENDOFTEXT
-from src.core.utils.common.seq_operation import pack_seq_to_batch_pow2
+from src.core.utils.common.seq_operation import pack_seq_to_batch_slide
 
 
 if __name__ == "__main__":
@@ -56,32 +56,16 @@ He writes letters to his mother.	Il écrit des lettres à sa mère."""
     tok.load('../artifact/gpt2/tokenizer/mt.tok')
 
     lines = text.split('\n')
-    data = {}
+    data = torch.empty(2,0, dtype=torch.long) # 2 for tokens/segments
     for i, line in enumerate(lines):
-        line += ENDOFTEXT
-        tokens = tok.encode(line, allowed_special=set([ENDOFTEXT]))
-        L = len(tokens) - 1
-        input = tokens[:-1]
-        label = tokens[1:]
-        segments = [i+1]*L
-        datapoint = torch.tensor([input, label, segments], dtype=torch.long).unsqueeze(0) # [1, 3, L]
-        data[L] = torch.cat([data.get(L, torch.empty(0, 3, L, dtype=torch.long)), datapoint], dim=0)
+        line += ENDOFTEXT # str append
+        tokens = tok.encode(line, allowed_special=set([ENDOFTEXT])) # str tokenize to list of ints
+        segments = [i+1]*len(tokens)
+        datapoint = torch.tensor([tokens, segments], dtype=torch.long) # [2, l]
+        data = torch.concat([data, datapoint], dim=-1) # [2, L + l]
+    
+    input_seq_seg = pack_seq_to_batch_slide(seq=data[:, :-1], tgt_L=64, overlap=0, pad_value=0) # [B, 2, tgt_L=64]
+    label_seq_seg = pack_seq_to_batch_slide(seq=data[:, 1:], tgt_L=64, overlap=0, pad_value=0) # [B, 2, tgt_L=64]
 
     # 检查 tokenizer 正确性
-    assert tok.decode(data[13][0][0].tolist()) == lines[0]
-
-    sorted_data = {k: data[k] for k in sorted(data)}
-    data = sorted_data
-    tgt_L = 20
-
-    # output, all_ = pack_text(tgt_L, data)
-    output, all_ = pack_seq_to_batch_pow2(data, tgt_L, min_L=2, pad_value=0)
-
-    _len = 0
-    for l in all_.keys():
-        if l == tgt_L:
-            continue
-        print(f'{l}: size {all_[l].size(0)}, len {all_[l].size(2)}')
-        _len += all_[l].size(0)*all_[l].size(2)
-    print(_len)
-    
+    print( tok.decode(input_seq_seg[0][0].tolist()) )
