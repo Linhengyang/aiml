@@ -49,7 +49,7 @@ class transformerEpochEvaluator(epochEvaluator):
 
 
     # 确定当前 epcoh 要不要作 reveal train situation 或 evaluate current validation situation
-    def epoch_judge(self, epoch):
+    def judge_epoch(self, epoch):
         '''
         训练起始(epoch=0)时要 reveal train situation, 也要 evaluate validation situation
         在训练过程中, 要满足 reveal 总次数 接近设定好的 reveal_cnts, eval 总次数 接近设定好的 eval_cnts
@@ -64,7 +64,7 @@ class transformerEpochEvaluator(epochEvaluator):
     
 
     # @train: record values for scalars
-    def batch_record(self, net_inputs_batch, loss_inputs_batch, Y_hat, l):
+    def record_batch(self, net_inputs_batch, loss_inputs_batch, Y_hat, l):
         # net_inputs_batch = (X, Y_frontshift1, X_valid_lens)
         # shapes: (batch_size, num_steps), (batch_size, num_steps), (batch_size,)
         # loss_inputs_batch = (Y, Y_valid_lens)
@@ -94,7 +94,7 @@ class transformerEpochEvaluator(epochEvaluator):
 
 
 
-    def epoch_metric_cast(self):
+    def cast_metric(self):
 
         loss_avg, eval_loss_avg = None, None
 

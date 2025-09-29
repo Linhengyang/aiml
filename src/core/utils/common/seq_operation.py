@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import typing as t
 import math
 
@@ -100,9 +101,9 @@ def _pad(t: torch.Tensor, tgt_L: int, pad_dim: int = -1, pad_value: int = 0):
         return t
 
 
-def pack_seq_to_batch_pow2(data: t.Dict[int, torch.Tensor], tgt_L: int, min_L: int, pad_value: int):
+def pack_seq_to_batch_pow2(data: t.Dict[int, torch.Tensor], tgt_L: int, min_L: int, pad_value: int = 0):
     '''
-    data: 字典 key: L, 等于序列长度, value: tensor[B, n, L], 表示 B 条长度为 L 的序列, 每条序列包括 input/label/segments/... 共 n 种
+    data: 字典 key: L, 等于序列长度, value: tensor[B, n, L], 表示 B 条长度为 L 的序列, 每个序列包括 input/label/segments/... 共 n 种
           data 按 key 从小到大排序 ----------> {1:[B1, n, 1], 2:[B2, n, 2], ..., L:[B, n, L],...}
     tgt_L: int, 表示最终 packed batch 中的序列长度. 大于 tgt_L 的部分会被不断 以2的幂次的比例 切割, 然后跨文档 pack 到 tgt_L 的长度.
     min_L: int, 表示在 packing 过程中, 小于 min_L 的序列会被丢弃.
@@ -161,3 +162,28 @@ def pack_seq_to_batch_pow2(data: t.Dict[int, torch.Tensor], tgt_L: int, min_L: i
 
 
 
+def pack_seq_to_batch_slide(seq: torch.Tensor, tgt_L: int, overlap: int = 0, pad_value: int = 0):
+    '''
+    seq: tensor of [n, cat_L] 或 [cat_L,]. n或1 条 长度为 cat_L 的序列. cat_L 是指该序列可能是 concated sequence
+    tgt_L: 目标 seq batch [B, n, tgt_L] 的长度. 从 cat_L 上以 tgt_L-overlap 为步距, tgt_L 为滑动窗口, 滑动得到 batch
+    overlap: 在 cat_L 上滑动时的重叠长度, tgt_L - overlap = 滑动步距. 默认为 0 即滑动不重叠
+    pad_value: 
+    '''
+    assert overlap < tgt_L, f'overlap must smaller than tgt_L'
+    stride = tgt_L - overlap
+
+    if len(seq.shape) == 2:
+        cat_L  = seq.size(1)
+        assert cat_L >= tgt_L
+        # pad: (last dim 左，last dim 右，last 2nd dim 上，last 2nd dim 下...)
+        seq = nn.functional.pad(seq, (0, stride - (cat_L-tgt_L)%stride), mode='constant', value=pad_value)
+        # [n, L]/[L, 1] --unfold_on_1--> [n, L/w, w]/[L, stride, 1] --transpose_01--> [L/w, n, w]/[stride, L, 1]
+        return seq.unfold(-1, tgt_L, stride).transpose(0,1) # [L/w=B, n, w]/[stride, L, 1]
+    elif len(seq.shape) == 1:
+        cat_L  = seq.size(0)
+        assert cat_L >= tgt_L
+        seq = nn.functional.pad(seq, (0, stride - (cat_L-tgt_L)%stride), mode='constant', value=pad_value)
+        # [L,]/[1,] --unfold_on_0--> [L/w, w]/[stride, 1]
+        return seq.unfold(-1, tgt_L, stride)
+    else:
+        raise ValueError(f'wrong shape for seq. must be 2D or 1D tensor')

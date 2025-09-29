@@ -505,7 +505,7 @@ class CasualMHA(nn.Module):
 
         attn_w = torch.matmul(q, k.transpose(2, 3)) * self.scale # [B, H, L_q, L_so_far]
 
-        # casual_mask: [B, H, L_q, L_so_far]
+        # casual_mask: [B, H, L_q, L_so_far]/bool. True --> 上三角(不包含对角线, 会被-inf替代), False --> 下三角(包含对角线, 原值)
         # train/infer.prefill [..., L_q=L_so_far, L_so_far], infer.decode [..., L_q=1, L_so_far]
         if hasattr(self, 'casual_mask'):
             # 当使用缓存, 为了通用性, 采用如下写法
@@ -517,10 +517,14 @@ class CasualMHA(nn.Module):
                 diagonal = L_past + 1
                 )[None, None, :, :] # [L_q, L_so_far] --> [1, 1, L_q, L_so_far]
         attn_w = attn_w.masked_fill(casual_mask, float('-inf')) # [B, H, L_q, L_so_far]
-        
+
         if attention_mask is not None:
             # attention_mask: tensor [B, L_q, L_so_far]/bool. True --> valid_area, False --> invalid_area
-            attn_w = attn_w.masked_fill((attention_mask == False).unsqueeze(1) , float('-inf'))
+            # 这里用 -1e9 填入 而不再用 -inf, 因为 casual_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
+            # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃.
+            # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
+            # 所以这里用 finite 大负数 -1e9 而不是 -inf. softmax能正确处理 大负数 和全大负数行.
+            attn_w = attn_w.masked_fill((attention_mask == False).unsqueeze(1) , -1e9)
 
         # softmax
         attn_w = F.softmax(attn_w, dim=-1) # [B, H, L_q, L_so_far]

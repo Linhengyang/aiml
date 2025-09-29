@@ -47,18 +47,30 @@
 import torch
 import typing as t
 import math
-from ...core.utils.text.tokenizer import boostBBPETokenizer
+from ...core.utils.text.tokenizer import boostBBPETokenizer, ENDOFTEXT
+from ...core.utils.common.seq_operation import pack_seq_to_batch_slide
 
 
 
+class mtDataset(torch.utils.data.Dataset):
+    def __init__(self, data_path, seq_len, overlap=0, pad_value=0):
+        super().__init__()
+        data = torch.load(data_path)
 
-class projDataset(torch.utils.data.Dataset):
-    def __init__(self, *args, **kwargs):
-        pass
-    
+        input_seq_seg = pack_seq_to_batch_slide(data[:, :-1], seq_len, overlap, pad_value) # [B, 2, seq_len]
+        label_seq_seg = pack_seq_to_batch_slide(data[:, 1:], seq_len, overlap, pad_value) # [B, 2, seq_len]
+
+        self.input_seqs = input_seq_seg[:, 0, :] # [B, seq_len]
+        self.input_segs = input_seq_seg[:, 1, :] # [B, seq_len]
+
+        self.labels = label_seq_seg[:, 0, :] # [B, seq_len]
+        self.label_segs = label_seq_seg[:, 1, :] # [B, seq_len]
+
+        self._size = self.input_seqs.size(0)
+
     def __getitem__(self, index):
-        pass
+        return self.input_seqs[index], self.input_segs[index], self.labels[index], self.label_segs[index]
     
     def __len__(self):
-        pass
+        return self._size
     

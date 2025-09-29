@@ -7,7 +7,10 @@ import pandas as pd
 import yaml
 from ...core.utils.text.tokenizer import ENDOFTEXT, boostBBPETokenizer, CharacterTokenizer
 from .network import gpt2Config, gpt2
-
+from .loss import gpt2_pretrain_loss
+from .dataset import mtDataset
+from .trainer import gpt2Trainer
+from .evaluator import gpt2EpochEvaluator
 
 configs = yaml.load(open('src/projs/gpt2/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -17,83 +20,35 @@ configs = yaml.load(open('src/projs/gpt2/configs.yaml', 'rb'), Loader=yaml.FullL
 ################## tokenizer in workspace/artifact ##################
 tokenizer_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'tokenizer' )
 
-
-
+################## tokenizer in workspace/artifact ##################
+data_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'data' )
 
 ################## view vocab in workspace/tmp ##################
 vocab_dir = os.path.join( configs['tmp_dir'], configs['proj_name'], 'vocab' )
 
-
-
-
 ################## buffer directory for BPE in workspace/cache ##################
 buffer_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'buffer')
-
-
 
 ################## params saved in workspace/model ##################
 model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 
-
-
 ################## log file in workspace/logs ##################
 log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-################## data-params ##################
-max_len = configs['max_len']
-
-
-
-
-
-################## network-params ##################
-num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias = 2, 2, 128, 0.1, 256, False
-
-
-
-
-
-
 ################## train-params ##################
-num_epochs, batch_size, lr = 20, 512, 0.00015
+num_epochs, batch_size, lr = 20, 128, 0.00015
 
 
-
-
-
-
-
-
-# num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
-# batch_size
-# ---------------------> 4GB 显存
-
-
-
+def env_set():
+    # create all related directories if not existed
+    for dir_name in [tokenizer_dir, vocab_dir, data_dir, buffer_dir, model_dir, log_dir]:
+        os.makedirs(dir_name, exist_ok=True)
+        print(f'directory {dir_name} created')
 
 
 # 生产 tokenizer, 可视化 view
 def build_tokenizer_job():
     print('build_tokenizer_job begin')
-
-    # create all related directories if not existed
-    for dir_name in [tokenizer_dir, vocab_dir, model_dir, log_dir, buffer_dir]:
-        os.makedirs(dir_name, exist_ok=True)
-        print(f'directory {dir_name} created')
     
     # 读取全部语料 corpus
     print('get full corpus')
@@ -105,11 +60,13 @@ def build_tokenizer_job():
     # tokenizer
     # 当 tokenizer_path 文件不存在时, 生产并保存 tokenizer 到 tokenizer_dir/gpt.tok
     tokenizer_path = os.path.join(tokenizer_dir, 'mt.tok')
+
+    num_merges, specials = 30000, [ENDOFTEXT]
     if not os.path.exists(tokenizer_path):
         # create tokenizer
         print('bpe train begin')
-        gpt_tokenizer = boostBBPETokenizer(name='mt', buffer_dir=buffer_dir, special_marks=[ENDOFTEXT])
-        gpt_tokenizer.train_bpe(30000, corpora=corpus, verbose=True)
+        gpt_tokenizer = boostBBPETokenizer(name='mt', buffer_dir=buffer_dir, special_marks=specials)
+        gpt_tokenizer.train_bpe(num_merges, corpora=corpus, verbose=True)
         print('bpe train close')
         gpt_tokenizer.save(tokenizer_path)
     # 当 tokenizer_path 存在时
@@ -124,22 +81,81 @@ def build_tokenizer_job():
     return tokenizer_path
 
 
+@torch.no_grad()
+def tokenize_corpus(mt_text_path, tok_path, data_path):
+
+    with open(mt_text_path, 'r', encoding='utf-8') as f:
+        raw_text = f.read()
+
+    tok = boostBBPETokenizer(name='.', buffer_dir='.')
+    tok.load(tok_path)
+
+    lines = raw_text.split('\n')
+    data = torch.empty(2,0, dtype=torch.long) # 2 for tokens/segments
+
+    for i, line in enumerate(lines):
+        print(f'tokenize line {i}')
+        line += ENDOFTEXT # str append
+        tokens = tok.encode(line, allowed_special=set([ENDOFTEXT])) # str tokenize to list of ints
+        segments = [i+1]*len(tokens)
+        datapoint = torch.tensor([tokens, segments], dtype=torch.long) # [2, l]
+        data = torch.concat([data, datapoint], dim=-1) # [2, L + l]
+
+    torch.save(data, data_path)
 
 
-def tokenize_save_job(tokenizer, corpora_paths: t.List[str], save_dir: str):
-    '''
-    将 corpora_paths 中的所有 txt 文件(包含EOT), tokenize 为 token IDs, 一个 text 一行, 列名为 token_id;
-    每个 TEXT-DOC 从 1 开始编号(0 留给 PAD), 每行 text 都有独属的 text ID, 列名为 doc_id;
-    统计每个 text 的长度(包含EOT), 为text-packing作准备, 列名为 doc_len;
-    '''
-    # load tokenizer. name 以及其他参数都会被 load 覆盖
-    tok = boostBBPETokenizer(name='to_load', buffer_dir=buffer_dir)
-    tok.load(tokenizer)
 
-    for corpus in corpora_paths:
-        fname = os.path.basename(corpus)
-        save_path = os.path.join(save_dir, fname)
-        
-        with open(corpus, 'r', encoding='utf-8') as raw, open(save_path, 'w', encoding='utf-8') as tokenized:
-            text = raw.readline()
-            
+def pretrain_job():
+    print('train job begin')
+    # [timetag]
+    from datetime import datetime
+    now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
+
+    # /workspace/logs/[proj_name]/train_log_[timetag].txt
+    train_log_path = os.path.join( log_dir, f'train_log_{now_minute}.txt' )
+
+    # /workspace/model/[proj_name]/saved_params[timetag].params
+    saved_params_path = os.path.join(model_dir, f'saved_params_{now_minute}.pth')
+
+    tok_path = os.path.join(tokenizer_dir, 'mt.tok')
+    data_path = os.path.join(data_dir, 'mt_data.pt')
+
+    if not os.path.exists(data_path):
+        tokenize_corpus(configs['train_data'], tok_path, data_path)
+
+    trainset = mtDataset(data_path, configs['seq_len'])
+
+    # design net & loss
+    gpt2_config = gpt2Config(
+        embd_size = 64,
+        vocab_size = 30257,
+        embd_p_drop = 0.1,
+        num_head = 4,
+        use_bias = False,
+        max_context_size = 64,
+        attn_p_drop = 0.1,
+        resid_p_drop = 0.1,
+        use_cached_casual_mask = True,
+        use_rope = True,
+        num_block = 2
+    )
+    net = gpt2(gpt2_config)
+    loss = gpt2_pretrain_loss()
+
+    # init trainer
+    trainer = gpt2Trainer(net, loss, num_epochs, batch_size)
+
+    trainer.set_device(torch.device('cuda')) # set the device
+    trainer.set_data_iter(trainset) # set the data iters
+    trainer.set_optimizer(lr) # set the optimizer
+    trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
+
+    # fit model
+    evaluator = gpt2EpochEvaluator(num_epochs, train_log_path, verbose=True)
+    trainer.fit(evaluator)
+    
+    # save
+    trainer.save_model(saved_params_path)
+
+    print('pretrain job complete')
+    return saved_params_path

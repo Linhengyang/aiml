@@ -47,7 +47,7 @@ from torch import Tensor
 class gpt2_pretrain_loss(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.loss = MaskedCrossEntropyLoss(*args, **kwargs)
+        self.loss = MaskedCrossEntropyLoss(reduction='none')
     
     def forward(self, logits: Tensor, input_segs: None|Tensor, labels: Tensor, label_segs: None|Tensor) -> Tensor:
         # logits: [B, L_q, vocab_size]float
@@ -59,4 +59,4 @@ class gpt2_pretrain_loss(nn.Module):
         else:
             label_mask = None
         
-        return self.loss(logits.transpose(1, 2), labels, label_mask) #[B, L_q] if reduction = None; scala if reduction = mean/sum
+        return self.loss(logits.transpose(1, 2), labels, label_mask) #[B, L_q]

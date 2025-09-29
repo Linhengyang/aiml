@@ -177,7 +177,7 @@ class vitTrainer(easyTrainer):
             self.net.train()
 
             # evaluator determine if this epoch to reveal train situation /  evaluate current network
-            self.epoch_evaluator.epoch_judge(epoch)
+            self.epoch_evaluator.judge_epoch(epoch)
 
 
             for X, y in self.train_iter:
@@ -196,12 +196,12 @@ class vitTrainer(easyTrainer):
                 self.optimizer.step()
 
                 with torch.no_grad():
-                    self.epoch_evaluator.batch_record(X, y, Y_hat, l)
+                    self.epoch_evaluator.record_batch(X, y, Y_hat, l)
 
             with torch.no_grad():
                 # 如果 valid_iter 非 None, 那么在确定要 evaluate model 的 epoch, 将遍历 部分 valid_iter 的batch 得到 validation loss
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter, num_batches=10)
                 # cast metric summary
-                self.epoch_evaluator.epoch_metric_cast()
+                self.epoch_evaluator.cast_metric()
         
         print('Fitting finished successfully')
