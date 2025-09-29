@@ -72,5 +72,5 @@ class mtDataset(torch.utils.data.Dataset):
         return self.input_seqs[index], self.input_segs[index], self.labels[index], self.label_segs[index]
     
     def __len__(self):
-        self._size
+        return self._size
     

@@ -40,14 +40,14 @@ class gpt2Trainer(easyTrainer):
             f"Device not set. Please set trainer's device before setting data iterators"
         
         def move_to_cuda(batch_list):
-            input_seqs, input_segs, labels, label_segs = default_collate(batch_list)
+            (input_seqs, input_segs, labels, label_segs) = default_collate(batch_list)
 
             input_seqs = input_seqs.to(self.device)
             input_segs = input_segs.to(self.device)
             labels = labels.to(self.device)
             label_segs = label_segs.to(self.device)
 
-            return input_seqs, input_segs, labels, label_segs
+            return (input_seqs, input_segs, labels, label_segs)
         
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=move_to_cuda)
 

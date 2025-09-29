@@ -10,7 +10,7 @@ class gpt2EpochEvaluator(epochEvaluator):
 
     reveal_cnts = configs['reveal_cnt_in_train'] # 披露train情况次数, 从train过程中收集
 
-    def __init__(self, num_epochs, logfile_path):
+    def __init__(self, num_epochs, logfile_path, verbose):
         assert num_epochs >= self.reveal_cnts
         super().__init__()
         self.num_epochs = num_epochs
@@ -19,6 +19,7 @@ class gpt2EpochEvaluator(epochEvaluator):
         self.log_file = logfile_path
         with open(self.log_file, 'w') as f:
             print('train begin', file=f)
+        self.verbose = verbose
 
     def judge_epoch(self, epoch):
         self.reveal_flag = (self.reveal_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.reveal_cnts) == 0 or epoch == 0 )
@@ -50,5 +51,8 @@ class gpt2EpochEvaluator(epochEvaluator):
             
             with open(self.log_file, 'a+') as f:
                 f.write(reveal_log+'\n')
+            
+            if self.verbose:
+                print(reveal_log)
             
             self.reveal_accumulator.reset()
