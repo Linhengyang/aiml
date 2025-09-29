@@ -128,7 +128,8 @@ def patchify(img_batch, patch_size, pad_mode="constant", pad_value=0):
 
 
 # tensor.unfold(dimension, size, step) 方法
-# 一个 tensor的存储: 1 meta-data, 一维连续的内存存储
+# 一个 tensor的存储:
+# 1 meta-data, 一维连续的内存存储
 # 2 shape, 定义 tensor 的维度大小, 比如 (4, 3, 2) 代表在维度 (0, 1, 2) 的大小: 
 #   维度0上有4个元素, 
 #   给定维度0, 每个元素在维度1上有3个子元素
