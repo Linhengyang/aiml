@@ -36,7 +36,7 @@ model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 20, 512, 0.00015
+num_epochs, batch_size, lr = 20, 128, 0.00015
 
 
 def env_set():
@@ -127,17 +127,17 @@ def pretrain_job():
 
     # design net & loss
     gpt2_config = gpt2Config(
-        embd_size = 128,
+        embd_size = 64,
         vocab_size = 30257,
         embd_p_drop = 0.1,
-        num_head = 8,
-        use_bias = True,
+        num_head = 4,
+        use_bias = False,
         max_context_size = 64,
         attn_p_drop = 0.1,
         resid_p_drop = 0.1,
         use_cached_casual_mask = True,
         use_rope = True,
-        num_block = 4
+        num_block = 2
     )
     net = gpt2(gpt2_config)
     loss = gpt2_pretrain_loss()
@@ -151,7 +151,7 @@ def pretrain_job():
     trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
 
     # fit model
-    evaluator = gpt2EpochEvaluator(num_epochs, train_log_path)
+    evaluator = gpt2EpochEvaluator(num_epochs, train_log_path, verbose=True)
     trainer.fit(evaluator)
     
     # save
