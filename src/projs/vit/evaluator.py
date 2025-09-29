@@ -47,7 +47,7 @@ class vitEpochEvaluator(epochEvaluator):
 
 
     # 确定当前 epcoh 要不要作 reveal train situation 或 evaluate current validation situation
-    def epoch_judge(self, epoch):
+    def judge_epoch(self, epoch):
         '''
         训练起始(epoch=0)时要 reveal train situation, 也要 evaluate validation situation
         在训练过程中, 要满足 reveal 总次数 接近设定好的 reveal_cnts, eval 总次数 接近设定好的 eval_cnts
@@ -61,7 +61,7 @@ class vitEpochEvaluator(epochEvaluator):
             self.timer = Timer()
     
     # @train: record values for scalars
-    def batch_record(self, X, y, Y_hat, l):
+    def record_batch(self, X, y, Y_hat, l):
         # X: (batch_size, num_channels, height, width)
         # y: (batch_size,)
         # Y_hat: (batch_size, num_classes)
@@ -84,7 +84,7 @@ class vitEpochEvaluator(epochEvaluator):
                 self.eval_accumulator.add(l.sum(), accuracy(Y_hat, y), y.numel())
 
 
-    def epoch_metric_cast(self):
+    def cast_metric(self):
         
         loss_avg, acc_avg, eval_loss_avg, eval_acc_avg = None, None, None, None
 

@@ -53,7 +53,7 @@ class bertEpochEvaluator(epochEvaluator):
 
 
     # 确定当前 epcoh 要不要作 reveal train situation 或 evaluate current validation situation
-    def epoch_judge(self, epoch):
+    def judge_epoch(self, epoch):
         '''
         训练起始(epoch=0)时要 reveal train situation, 也要 evaluate validation situation
         在训练过程中, 要满足 reveal 总次数 接近设定好的 reveal_cnts, eval 总次数 接近设定好的 eval_cnts
@@ -68,7 +68,7 @@ class bertEpochEvaluator(epochEvaluator):
 
 
     # @train: record values for scalars
-    def batch_record(self, net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l):
+    def record_batch(self, net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l):
         # net_inputs_batch        
         # tokens: (batch_size, seq_len)int64 ot token ID. 已包含<cls>和<sep>
         # valid_lens: (batch_size,)
@@ -112,7 +112,7 @@ class bertEpochEvaluator(epochEvaluator):
     
 
 
-    def epoch_metric_cast(self):
+    def cast_metric(self):
 
         # 若当前 epoch 需要 reveal train, 停止计时, reveal累加器4位( mlm loss, nsp loss, valid masked tokens 总数量, size)
         if self.reveal_flag:

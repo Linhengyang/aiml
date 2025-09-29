@@ -213,7 +213,7 @@ class bertPreTrainer(easyTrainer):
             self.net.train()
 
             # evaluator determine if this epoch to reveal train situation /  evaluate current network
-            self.epoch_evaluator.epoch_judge(epoch)
+            self.epoch_evaluator.judge_epoch(epoch)
 
 
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
@@ -232,12 +232,12 @@ class bertPreTrainer(easyTrainer):
                 self.optimizer.step()
 
                 with torch.no_grad():
-                    self.epoch_evaluator.batch_record(net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l)
+                    self.epoch_evaluator.record_batch(net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l)
 
             with torch.no_grad():
                 # 如果 valid_iter 非 None, 那么在确定要 evaluate model 的 epoch, 将遍历 整个 valid_iter 得到 validation loss
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter, self.FP_step)
                 # cast metric summary
-                self.epoch_evaluator.epoch_metric_cast()
+                self.epoch_evaluator.cast_metric()
         
         print('Fitting finished successfully')

@@ -57,27 +57,19 @@ class Accumulator:  #@save
 
 
 class epochEvaluator(object):
-    '''
-    train过程中的epoch评价器, 记录每一个epoch的:
-        1. train loss(sum of loss among train batch/valid hat nums among train batch) 
-        2. train accuracy(sum of correct preds among train batch/nums among train batch)
-        3. valid loss(sum of loss among valid batch/valid hat nums among valid batch)(可选)
-        4. valid accuracy(sum of correct preds among valid batch/nums among valid batch)
-    其中前两个train的指标, 在batch内部记录得到; 后两个valid的指标, 在当前epoch对valid_data作用net得到
-    '''
     def __init__(self, *args, **kwargs):
         super().__init__()
 
-    def epoch_judge(self, *args, **kwargs):
+    def judge_epoch(self, *args, **kwargs):
         raise NotImplementedError
 
-    def batch_record(self, *args, **kwargs):
+    def record_batch(self, *args, **kwargs):
         raise NotImplementedError
 
     def evaluate_model(self, *args, **kwargs):
         raise NotImplementedError
 
-    def epoch_metric_cast(self, *args, **kwargs):
+    def cast_metric(self, *args, **kwargs):
         raise NotImplementedError
 
 
