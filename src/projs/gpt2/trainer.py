@@ -34,35 +34,22 @@ class gpt2Trainer(easyTrainer):
         print(f'Using {device} as train device')
         
         
-    def set_data_iter(self, train_set, valid_set=None, test_set=None):
+    def set_data_iter(self, train_set):
 
         assert hasattr(self, 'device'), \
             f"Device not set. Please set trainer's device before setting data iterators"
         
         def move_to_cuda(batch_list):
-            (X_batch, Y_frontshift1_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch) = default_collate(batch_list)
+            input_seqs, input_segs, labels, label_segs = default_collate(batch_list)
 
-            X_batch = X_batch.to(self.device)
-            Y_frontshift1_batch = Y_frontshift1_batch.to(self.device)
-            X_valid_lens_batch = X_valid_lens_batch.to(self.device)
-            Y_batch = Y_batch.to(self.device)
-            Y_valid_lens_batch = Y_valid_lens_batch.to(self.device)
+            input_seqs = input_seqs.to(self.device)
+            input_segs = input_segs.to(self.device)
+            labels = labels.to(self.device)
+            label_segs = label_segs.to(self.device)
 
-            return (X_batch, Y_frontshift1_batch, X_valid_lens_batch), (Y_batch, Y_valid_lens_batch)
+            return input_seqs, input_segs, labels, label_segs
         
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=move_to_cuda)
-
-        # 是否输入 validate dataset
-        if valid_set:
-            self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False, collate_fn=move_to_cuda)
-        else:
-            self.valid_iter = None
-
-        # 是否输入 test dataset
-        if test_set:
-            self.test_iter = torch.utils.data.DataLoader(test_set, self.batch_size, False, collate_fn=move_to_cuda)
-        else:
-            self.test_iter = None
 
 
     def set_optimizer(self, lr: float, w_decay: float|None = None):
@@ -119,7 +106,7 @@ class gpt2Trainer(easyTrainer):
                 self.optimizer.step()
 
                 if epoch_evaluator is not None:
-                    epoch_evaluator.record_batch(l)
+                    epoch_evaluator.record_batch(l.cpu())
 
             if epoch_evaluator is not None:
                 epoch_evaluator.cast_metric()

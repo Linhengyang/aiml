@@ -53,23 +53,9 @@ from ...core.utils.common.seq_operation import pack_seq_to_batch_slide
 
 
 class mtDataset(torch.utils.data.Dataset):
-    def __init__(self, mt_text_path, tok_path, seq_len, overlap=0, pad_value=0):
+    def __init__(self, data_path, seq_len, overlap=0, pad_value=0):
         super().__init__()
-        with open(mt_text_path, 'r', encoding='utf-8') as f:
-            raw_text = f.read()
-
-        tok = boostBBPETokenizer(name='.', buffer_dir='.')
-        tok.load(tok_path)
-
-        lines = raw_text.split('\n')
-        data = torch.empty(2,0, dtype=torch.long) # 2 for tokens/segments
-
-        for i, line in enumerate(lines):
-            line += ENDOFTEXT # str append
-            tokens = tok.encode(line, allowed_special=set([ENDOFTEXT])) # str tokenize to list of ints
-            segments = [i+1]*len(tokens)
-            datapoint = torch.tensor([tokens, segments], dtype=torch.long) # [2, l]
-            data = torch.concat([data, datapoint], dim=-1) # [2, L + l]
+        data = torch.load(data_path)
 
         input_seq_seg = pack_seq_to_batch_slide(data[:, :-1], seq_len, overlap, pad_value) # [B, 2, seq_len]
         label_seq_seg = pack_seq_to_batch_slide(data[:, 1:], seq_len, overlap, pad_value) # [B, 2, seq_len]
@@ -80,7 +66,7 @@ class mtDataset(torch.utils.data.Dataset):
         self.labels = label_seq_seg[:, 0, :] # [B, seq_len]
         self.label_segs = label_seq_seg[:, 1, :] # [B, seq_len]
 
-        self._size = self.input.size(0)
+        self._size = self.input_seqs.size(0)
 
     def __getitem__(self, index):
         return self.input_seqs[index], self.input_segs[index], self.labels[index], self.label_segs[index]

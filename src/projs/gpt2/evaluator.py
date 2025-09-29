@@ -27,11 +27,11 @@ class gpt2EpochEvaluator(epochEvaluator):
         if self.reveal_flag:
             self.timer = Timer()
     
+    @torch.no_grad()
     def record_batch(self, l):
         if self.reveal_flag:
-            with torch.no_grad():
-                # 记录 batch loss 和 token 数量
-                self.reveal_accumulator.add(l.sum(), l.numel())
+            # 记录 batch loss 和 token 数量
+            self.reveal_accumulator.add(l.sum(), l.numel())
 
     def cast_metric(self):
         # 若当前 epoch 需要 reveal train, 停止计时, reveal 累加器二位(train loss, num_tokens)

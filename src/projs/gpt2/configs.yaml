@@ -19,15 +19,13 @@ tmp_dir: '../tmp'
 ######################## 数据、外部资源地址和项目信息 ######################## 
 proj_name: 'gpt2' # /log /model /tmp /cache /artifact 的项目目录
 reveal_cnt_in_train: 5 # 训练过程中披露次数, train loss/train accuracy等
-eval_cnt_in_train: 5 # 训练过程中模型衡量次数, valid loss/valid accuracy等
 
 
 # data-params
 train_data: '../../data/WMT14/en-fr/167130.txt'
-valid_data: '../../data/WMT14/en-fr/8356.txt'
+tokenizer: ''
 
-
-max_len: 64
+seq_len: 64
 
 
 
