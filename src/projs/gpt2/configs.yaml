@@ -23,8 +23,6 @@ reveal_cnt_in_train: 5 # 训练过程中披露次数, train loss/train accuracy�
 
 # data-params
 train_data: '../../data/WMT14/en-fr/167130.txt'
-tokenizer: ''
-
 seq_len: 64
 
 
@@ -34,3 +32,15 @@ resource_dir: '../../resource'
 
 
 # network-params
+gpt2config:
+  embd_size: 64
+  vocab_size: 30257
+  embd_p_drop: 0.0
+  num_head: 4
+  use_bias: False
+  max_context_size: 64
+  attn_p_drop: 0.1
+  resid_p_drop: 0.1
+  use_cached_casual_mask: True
+  use_rope: True
+  num_block: 2

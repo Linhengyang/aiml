@@ -46,8 +46,6 @@
 
 import torch
 import typing as t
-import math
-from ...core.utils.text.tokenizer import boostBBPETokenizer, ENDOFTEXT
 from ...core.utils.common.seq_operation import pack_seq_to_batch_slide
 
 
