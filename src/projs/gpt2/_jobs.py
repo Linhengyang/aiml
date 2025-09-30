@@ -12,7 +12,7 @@ from .dataset import mtDataset
 from .trainer import gpt2Trainer
 from .evaluator import gpt2EpochEvaluator
 
-configs = yaml.load(open('src/projs/gpt2/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.safe_load(open('src/projs/gpt2/configs.yaml', 'rb'))
 
 ################## directories ##################
 # set train log file path / network resolve output path / params save path / source&targe vocabs path
@@ -29,7 +29,7 @@ vocab_dir = os.path.join( configs['tmp_dir'], configs['proj_name'], 'vocab' )
 ################## buffer directory for BPE in workspace/cache ##################
 buffer_dir = os.path.join( configs['cache_dir'], configs['proj_name'], 'buffer')
 
-################## params saved in workspace/model ##################
+################## model params saved in workspace/model ##################
 model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 
 ################## log file in workspace/logs ##################
@@ -126,20 +126,8 @@ def pretrain_job():
     trainset = mtDataset(data_path, configs['seq_len'])
 
     # design net & loss
-    gpt2_config = gpt2Config(
-        embd_size = 64,
-        vocab_size = 30257,
-        embd_p_drop = 0.1,
-        num_head = 4,
-        use_bias = False,
-        max_context_size = 64,
-        attn_p_drop = 0.1,
-        resid_p_drop = 0.1,
-        use_cached_casual_mask = True,
-        use_rope = True,
-        num_block = 2
-    )
-    net = gpt2(gpt2_config)
+    net_config = gpt2Config(**configs['gpt2config'])
+    net = gpt2(net_config)
     loss = gpt2_pretrain_loss()
 
     # init trainer
@@ -159,3 +147,26 @@ def pretrain_job():
 
     print('pretrain job complete')
     return saved_params_path
+
+
+def generate_job():
+    device = torch.device('cuda')
+    saved_params_path = os.path.join(model_dir, f'saved_params_2025-09-30_12:04.pth')
+    net_config = gpt2Config(**configs['gpt2config'])
+    net = gpt2(net_config).to(device)
+
+    net.load_state_dict(torch.load(saved_params_path, map_location=device))
+
+    tok_path = os.path.join(tokenizer_dir, 'mt.tok')
+    tok = boostBBPETokenizer(name='.', buffer_dir='.')
+    tok.load(tok_path)
+
+    prompt = tok.encode("I don't mind it.	")
+    segments = [1]*len(prompt)
+
+    prompt_ts = torch.tensor(prompt, dtype=torch.long, device=device).unsqueeze(0)
+    init_segs_ts = torch.tensor(segments, dtype=torch.long, device=device).unsqueeze(0)
+
+    answer = net.generate(prompt_ts, init_segs_ts, 10).squeeze(0) # [10, ]
+
+    print(tok.decode(answer.tolist()))
