@@ -158,7 +158,7 @@ def infer_job(saved_params_fpath):
     device = torch.device('cuda')
 
     ## construct model
-    net = ViTEncoder(img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens)
+    net = ViTEncoder(img_shape, patch_size, num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens).to(device)
     net.load_state_dict(torch.load(saved_params_fpath, map_location=device))
     net.eval()
 

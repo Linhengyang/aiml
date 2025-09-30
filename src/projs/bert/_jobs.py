@@ -203,7 +203,7 @@ def embed_job(saved_params_fpath, vocab_path):
     net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout, "seq_len":max_len,
                 "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blks":num_blks}
     
-    net = BERT(vocab_size=len(vocab), **net_args)
+    net = BERT(vocab_size=len(vocab), **net_args).to(device)
 
     # load params
     net.load_state_dict(torch.load(saved_params_fpath, map_location=device))

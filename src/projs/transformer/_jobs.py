@@ -225,7 +225,7 @@ def infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path):
     
     transenc = TransformerEncoder(vocab_size=len(src_vocab), **net_args)
     transdec = TransformerDecoder(vocab_size=len(tgt_vocab), **net_args)
-    net = Transformer(transenc, transdec)
+    net = Transformer(transenc, transdec).to(device)
 
     # load params
     net.load_state_dict(torch.load(saved_params_fpath, map_location=device))
