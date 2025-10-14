@@ -164,9 +164,9 @@ def pack_seq_to_batch_pow2(data: t.Dict[int, torch.Tensor], tgt_L: int, min_L: i
 
 def pack_seq_to_batch_slide(seq: torch.Tensor, tgt_L: int, overlap: int = 0, pad_value: int = 0):
     '''
-    seq: tensor of [n, cat_L] 或 [cat_L,]. n或1 条 长度为 cat_L 的序列. cat_L 是指该序列可能是 concated sequence
+    seq: tensor of [n, cat_L] 或 [cat_L,]  即 n或1 条 长度为 cat_L 的序列. cat_L 是指该序列可能是 concated sequence
     tgt_L: 目标 seq batch [B, n, tgt_L] 的长度. 从 cat_L 上以 tgt_L-overlap 为步距, tgt_L 为滑动窗口, 滑动得到 batch
-    overlap: 在 cat_L 上滑动时的重叠长度, tgt_L - overlap = 滑动步距. 默认为 0 即滑动不重叠
+    overlap: 在 cat_L 上滑动时的重叠长度, tgt_L - overlap = 滑动步距. 默认为 0 即默认前后滑动窗口没有重叠
     pad_value: 
     '''
     assert overlap < tgt_L, f'overlap must smaller than tgt_L'
