@@ -14,5 +14,6 @@ from src.kits.tokenizer_kit.gpt_style import gpt2Tokenizer
 
 
 if __name__ == "__main__":
-    pass
+    BTU = gpt2Tokenizer.bytes_to_unicode()
+    print(BTU)
 
