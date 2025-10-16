@@ -66,11 +66,6 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_compl
 from ..common.seq_operation import check_monotonic
 
 
-# deprecated split-pattern for GPT2. use GPT4 version
-GPT2_TOKENIZER_REGEX = \
-    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-
-
 GPT4_TOKENIZER_REGEX = \
     r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 
@@ -84,12 +79,13 @@ ENDOFPROMPT = '<|endofprompt|>'
 
 
 
-def get_pair_counts(tokens:t.List[int], p_counts:t.Dict[tuple[int, int], int]|None = None):
+def get_pair_counts(tokens:t.List[int|str], p_counts:t.Dict[tuple[int|str, int|str], int]|None = None):
     '''
     p_counts 如果是 None: init a p_counts and return
         给定 tokens list, 计算它的 pair-tokens counts, 返回一个 pair counts dict
     p_counts 如果不是 None: in-place update p_counts
         给定 tokens list, 计算它的 pair-tokens counts, 更新 到 输入的 p_counts 里
+    输入的 tokens 可以是 list of int, 也可以是 list of str. 因为 token 可以由 int / str 两种方式表示.
     '''
     if p_counts is None:
         p_counts = {}
@@ -105,7 +101,7 @@ def get_pair_counts(tokens:t.List[int], p_counts:t.Dict[tuple[int, int], int]|No
 
 
 
-def merge_pair(tokens:t.List[int], pair:tuple[int, int], new_token:int) -> t.List[int]:
+def merge_pair(tokens:t.List[int|str], pair:tuple[int|str, int|str], new_token:int|str) -> t.List[int|str]:
     new_tokens = [] # 返回一个 new_tokens, 而不是对 tokens 作 in-place 更新
     i = 0
     if len(tokens) == 1: # 如果只剩下 一个 token, 那么就没有 merge pair 的必要
@@ -196,7 +192,7 @@ class baseBBPETokenizer(Tokenizer):
         self._merge_ranks = merge_ranks
         self._special_marks = special_marks
         # special marks 必须都能被 pat_str 切开，不然可能会导致 merge-regenerate-special_mark in BPE, 导致混淆
-        assert all([ len(re.findall(pat_str, mark)) > 1 for mark in special_marks ])
+        assert all([ len(re.findall(pat_str, mark)) > 1 for mark in special_marks ]) # special_marks 可以为 []
 
         if merge_ranks: # 如果输入了非空的 merge_ranks
             # merge_ranks 的 RANK 应该是 256 至 MAX_RANK 的连续正整数: 递增 且 len(merge_ranks) = MAX_RANK - 255 且 首元素 = 256
@@ -385,10 +381,9 @@ class baseBBPETokenizer(Tokenizer):
         '''
         while len(tokens) > 1: # 在循环体内不断更新 tokens
             p_counts: t.Dict[tuple[int, int], int] = get_pair_counts(tokens)
-
+            # 取出 合并 rank 最小的 pair. 当无可合并时, 即 pairs 中无一存在于 _merge_ranks, 那么 min_rank_pair 不存在于 _merge_ranks, 该跳出合并循环
             min_rank_pair: tuple[int, int] = min(p_counts, key=lambda p: self._merge_ranks.get(p, float('inf')))
-
-            if min_rank_pair not in self._merge_ranks: # 如果 求出 的 min_rank_pair 不在 _merge_ranks 里
+            if min_rank_pair not in self._merge_ranks:
                 break
             # 更新 tokens
             tokens = merge_pair(tokens, min_rank_pair, self._merge_ranks[min_rank_pair])
@@ -409,7 +404,7 @@ class baseBBPETokenizer(Tokenizer):
         chunks_tokens: t.List[list[int]] = [list( chunk.encode('utf-8') ) for chunk in chunks_str] # list of int(0..255)_list
 
         encoded_output: t.List[int] = []
-        for tokens in chunks_tokens:
+        for tokens in chunks_tokens: # tokens: list of 0-255(int)
             encoded_output.extend( self._encode_chunk(tokens) )
         
         return encoded_output
@@ -492,7 +487,7 @@ class baseBBPETokenizer(Tokenizer):
 
     
     def decode(self, tokens:t.List[int], errors: str = "replace") -> str:
-        assert hasattr(self, '_vocab')
+        assert hasattr(self, '_vocab') # special_tokens / invers_special_tokens 会随着 _vocab build 而生成
 
         parts = []
         for idx in tokens:
