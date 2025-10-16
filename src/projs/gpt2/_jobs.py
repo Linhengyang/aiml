@@ -5,7 +5,7 @@ import torch
 import typing as t
 import pandas as pd
 import yaml
-from ...core.utils.text.tokenizer import ENDOFTEXT, boostBBPETokenizer, CharacterTokenizer
+from ...core.utils.text.tokenizer import ENDOFTEXT, boostBBPETokenizer
 from .network import gpt2Config, gpt2
 from .loss import gpt2_pretrain_loss
 from .dataset import mtDataset
