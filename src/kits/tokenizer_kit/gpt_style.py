@@ -1,6 +1,6 @@
 # functions to transfer vanilla BPE tokenizer to GPT-style adapted tokenizer
 
-from ...core.utils.text.tokenizer import re, boostBBPETokenizer, merge_pair
+from ...core.utils.text.tokenizer import boostBBPETokenizer, merge_pair
 import json
 import typing as t
 
