@@ -11,27 +11,24 @@ gpt2_resource_dir = '../../resource/llm/gpt/gpt2/'
 
 
 from src.kits.huggingface.tokenizer_adapt import gpt2Tokenizer
+from src.kits.huggingface.state_dict_adapt import gpt2_state_dict_adaptor
 from src.projs.gpt2.network import gpt2, gpt2Config
 
 
 if __name__ == "__main__":
-    ## 测试 tokenizer
-    # tokenizer_path = os.path.join(gpt2_resource_dir, 'tokenizer.json')
+    # 测试 tokenizer
+    tokenizer_path = os.path.join(gpt2_resource_dir, 'tokenizer.json')
 
-    # tok = gpt2Tokenizer()
-    # tok.from_doc(tokenizer_path)
+    tok = gpt2Tokenizer()
+    tok.from_doc(tokenizer_path)
 
-    # text = '! hello I am linhengyang<|endoftext|>haha Iam back again..'
-    # encoded = tok.encode(text, allowed_special='all')
-    # text_ = tok.decode(encoded)
-    # print(encoded)
-    # assert text_ == text
+    prompt = 'how to say hello in french'
 
     # 测试加载 模型(pure-torch)
     model_path = os.path.join(gpt2_resource_dir, 'gpt2.bin')
-    net_state_dict = torch.load(model_path, map_location='cpu')
-    print(type(net_state_dict))
-    # 删除 
+    hf_state_dict = torch.load(model_path, map_location='cpu')
+
+    adapted_state_dict = gpt2_state_dict_adaptor(hf_state_dict)
 
     config = gpt2Config(
         embd_size = 768,
@@ -44,8 +41,18 @@ if __name__ == "__main__":
         resid_p_drop = 0.1,
         use_cached_casual_mask = True,
         use_rope = False,
-        num_block = 1
+        num_block = 12
         )
-    net_init = gpt2(config)
-    # print(net_init.state_dict().keys())
-    print(type(net_init.state_dict()))
+    net = gpt2(config)
+    net.load_state_dict(adapted_state_dict, strict=True)
+
+    device = torch.device('cuda')
+
+    tokens = tok.encode(prompt)
+    input_ids = torch.tensor(tokens, dtype=torch.long).unsqueeze(0) # [1, L_q]
+
+    net = net.to(device)
+    input_ids = input_ids.to(device)
+    output_ids = net.generate(input_ids, None, 50, top_k=1, eos_id=50257)
+
+    print(tok.decode(output_ids.squeeze(0).tolist()))
