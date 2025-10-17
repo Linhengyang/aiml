@@ -10,17 +10,21 @@ gpt2_resource_dir = '../../resource/llm/gpt/gpt2/'
 
 
 
-from src.kits.tokenizer_kit.gpt_style import gpt2Tokenizer
+from src.kits.tokenizer_kit.gpt import gpt2Tokenizer
 
 
 if __name__ == "__main__":
+    # 测试 tokenizer
     tokenizer_path = os.path.join(gpt2_resource_dir, 'tokenizer.json')
 
     tok = gpt2Tokenizer()
     tok.from_doc(tokenizer_path)
 
-    text = '!<|endoftext|>'
+    text = '! hello I am linhengyang<|endoftext|>'
     encoded = tok.encode(text, allowed_special='all')
     text_ = tok.decode(encoded)
     print(encoded)
-    print(text_ == text)
+    assert text_ == text
+
+    # 测试加载 模型(pure-torch)
+    
