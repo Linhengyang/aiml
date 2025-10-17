@@ -54,5 +54,6 @@ if __name__ == "__main__":
     net = net.to(device)
     input_ids = input_ids.to(device)
     output_ids = net.generate(input_ids, None, 50, top_k=1, eos_id=50257)
+    output = tok.decode(output_ids.squeeze(0).tolist())
 
-    print(tok.decode(output_ids.squeeze(0).tolist()))
+    print(output)
