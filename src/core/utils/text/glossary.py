@@ -184,7 +184,7 @@ def get_maxfreq_token_pair(
         freq: the max frequency
     explains:
         计算 adjacent token pair 的 frequency, 并返回 max freq 的 adjacent token pairs, 同时返回这个 maxfreq
-    """ 
+    """
     token_pair_freq = collections.defaultdict(int)
     
     if isinstance(tokcombo_freqs, dict):
