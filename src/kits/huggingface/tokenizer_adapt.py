@@ -1,4 +1,4 @@
-# functions to transfer vanilla BPE tokenizer to GPT-style adapted tokenizer
+# tokenizer_adapt 里修改 自有tokenizer, 以加载 huggingface/tokenizer 库标准的 tokenizer.json, 实现 custom tokenizer 对齐 huggingface/tokenizer
 
 from ...core.utils.text.tokenizer import boostBBPETokenizer, merge_pair
 import json
