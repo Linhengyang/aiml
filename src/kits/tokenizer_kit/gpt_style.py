@@ -60,12 +60,31 @@ class gpt2Tokenizer(boostBBPETokenizer):
     def __init__(self):
         super().__init__(name='gpt2_tok', buffer_dir='.', pat_str=self.GPT2_TOKENIZER_REGEX, special_marks=[])
     
-    def to_json(self, fpath, mode='gpt2'):
-        if mode == 'gpt2':
-            raise NotImplementedError(f'not implemented')
+
+    def to_doc(self, fpath, mode='json'):
+        if mode == 'json':
+            entity: dict = {}
+            entity['version'] = '1.0'
+            entity['truncation'] = None
+            entity['padding'] = None
+            entity['added_tokens'] = [] #TODO
+            entity['normalizer'] = None
+            entity['pre_tokenizer'] = {'type': 'ByteLevel', 'add_prefix_space': False, 'trim_offsets': True}
+            entity['post_processor'] = {'type': 'ByteLevel', 'add_prefix_space': True, 'trim_offsets': False}
+            entity['decoder'] = {'type': 'ByteLevel', 'add_prefix_space': True, 'trim_offsets': True}
+            entity['model'] = {}
+            entity['model']['dropout'] = None
+            entity['model']['unk_token'] = None
+            entity['model']['continuing_subword_prefix'] = ''
+            entity['model']['dropoend_of_word_suffixut'] = ''
+            entity['model']['fuse_unk'] = False
+            entity['model']['vocab'] = {} #TODO
+            entity['model']['merges'] = [] #TODO
+
     
-    def from_json(self, fpath, mode='gpt2'):
-        if mode == 'gpt2':
+
+    def from_doc(self, fpath, mode='json'):
+        if mode == 'json':
             with open(fpath) as f:
                 entity = json.load(f)
 
