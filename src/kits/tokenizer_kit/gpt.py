@@ -50,11 +50,6 @@ class gpt2Tokenizer(boostBBPETokenizer):
     original 的 _merge_ranks / gpt 的 merges 是等价的: 都是 bytes merge by frequency 的结果. 故 _vocab+special_tokens / encoder 在 ID >= 256 部分也等价
     但是 _vocab+special_tokens / encoder 在 ID 0-255 部分不等价: 前者在 ID 0-255 是原始 byte_integer <--> byte, 而后者在 ID 0-255 有重排序, 具体举例:
     对于 ID = 0, _vocab 对应 byte chr(0), 而 encoder 对应 char !
-
-    不同的 ID-bytes(chars)映射关系, 对应了不同的 tokenize 结果. 既然本class是 gpt2tokenizer, 那么 tokenize 结果肯定要看齐 gpt2 而不是 original
-    方案一: load gpt2_tokenizer, 转换 merges / encoder 到 original 的 _merge_ranks / _vocab, 然后使用 original 的 编解码 方法, 然后再将结果中 ID
-            0-255 部分按照 gpt2 encoder 的顺序重新映射.
-    方案二(采用): load gpt2_tokenizer 后, 改写 新的 编解码 方法, 使用 merges / encoder 直接生成结果.
     '''
 
     def __init__(self):
@@ -82,7 +77,6 @@ class gpt2Tokenizer(boostBBPETokenizer):
             entity['model']['merges'] = [] #TODO
 
     
-
     def from_doc(self, fpath, mode='json'):
         if mode == 'json':
             with open(fpath) as f:
