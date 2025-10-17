@@ -88,7 +88,7 @@ def get_segs_pos_attnmask_prefill(
 
 
 
-# infer.prefill mode 下, 从 input 的 input_segs(可以为None) 和 kv_cache 的 past_segs(可以为None) 按以下标准生成对应的 positions 和 attention mask
+# infer.decode mode 下, 从 input 的 input_segs(可以为None) 和 kv_cache 的 past_segs(可以为None) 按以下标准生成对应的 positions 和 attention mask
 # step1: 确定 segments: 包含 past + input 的 segments
 #        若 二者都为 None, 则 segments = None; 若二者有其一不为None, 则视另外一个为全1(即非PAD单一序列); 若二者皆存在, 则OK
 

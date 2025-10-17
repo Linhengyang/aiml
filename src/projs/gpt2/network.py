@@ -161,7 +161,7 @@ class gpt2(DecoderOnly):
         1. prefill: input_ids [B, S]
         此时, forward 输入:
             input_seqs = input_ids [B, S]
-            input_segs 根据 input_seqs 的实际 PAD/TEXT 情况输入, None/[B, S]
+            input_segs 根据 input_seqs 的实际 PAD/TEXT 情况输入, None/[B, S]. 实际中 infer 中不再屏蔽跨文档相关性, 仅屏蔽PAD
             past_kv = None 因为此时没有 past
             past_segs = None 因为此时没有 past
             if_cache_kv = True 因为在 generate 时, 总需要把该次 so-far kv 作为下一次 infer 的 past_kv 输入
