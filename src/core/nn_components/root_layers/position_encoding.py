@@ -35,7 +35,7 @@ class TrigonoAbsPosEnc(nn.Module):
         except:
             PosEnc[:, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx=num_hiddens-1是偶数时,去掉X的最后一列再填入
 
-        self.register_buffer('weight', PosEnc)
+        self.register_buffer('weight', PosEnc, persistent=False)
 
     def forward(self, position_ids: torch.Tensor):
         '''
