@@ -37,6 +37,8 @@
     * functions
     * configs
     * _jobs
+* kits:  
+    * huggingface:  &nbsp;&nbsp;utilities to adapt huggingface objects to custom-style
 
 ## Work Note:
 
@@ -79,6 +81,8 @@ export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
     │   │       ├── image
     │   │       ├── system
     │   │       └── text
+    │   ├── kits
+    │   │   └── huggingface
     │   ├── lib
     │   │   ├── share
     │   │   └── tokenizer
