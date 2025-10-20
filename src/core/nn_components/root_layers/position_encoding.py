@@ -35,7 +35,7 @@ class TrigonoAbsPosEnc(nn.Module):
         except:
             PosEnc[:, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx=num_hiddens-1是偶数时,去掉X的最后一列再填入
 
-        self.register_buffer('PosEnc', PosEnc)
+        self.register_buffer('weight', PosEnc, persistent=False)
 
     def forward(self, position_ids: torch.Tensor):
         '''
@@ -44,7 +44,7 @@ class TrigonoAbsPosEnc(nn.Module):
         values 是 position index starting from 0. shall be inside [0, max_len-1]
         '''
 
-        return self.PosEnc[position_ids, :] # (B, seq_len, num_hiddens)/(seq_len, num_hiddens)
+        return self.weight[position_ids, :] # (B, seq_len, num_hiddens)/(seq_len, num_hiddens)
 
 
 
@@ -70,7 +70,7 @@ class LearnAbsPosEnc(nn.Module):
     '''
     def __init__(self, max_possible_posNum, num_hiddens):
         super().__init__()
-        self.register_parameter('PosEnc', nn.Parameter(torch.zeros(max_possible_posNum, num_hiddens)))
+        self.register_parameter('weight', nn.Parameter(torch.zeros(max_possible_posNum, num_hiddens)))
 
     def forward(self, position_ids: torch.Tensor):
         '''
@@ -79,7 +79,7 @@ class LearnAbsPosEnc(nn.Module):
         values 是 position index starting from 0. shall be inside [0, max_possible_posNum-1]
         '''
         
-        return self.PosEnc[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens) / (len(position_ids), num_hiddens)
+        return self.weight[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens) / (len(position_ids), num_hiddens)
 
 
 

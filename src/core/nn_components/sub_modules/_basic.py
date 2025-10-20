@@ -110,7 +110,7 @@ class Dropout(nn.Module):
 
 
 # layernorm: x [..., (x1 ... xn)] norm on last n dims
-# calculate mean [...,] and std [...,], normalize --> x_ = (x - mean)/std [..., (x1 ... xn)]
+# calculate with keepdim: mean [...,(x1 ... xn)] an& std [...,(x1 ... xn)], normalize --> x_ = (x - mean)/std as shape [...,(x1 ... xn)]
 # elementwise_affine --> x_ [..., (x1 ... xn)] * w [x1 ... xn] + b [x1 ... xn]
 class LayerNorm(nn.Module):
     def __init__(self,

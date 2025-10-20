@@ -1,4 +1,4 @@
-# functions to transfer vanilla BPE tokenizer to GPT-style adapted tokenizer
+# tokenizer_adapt 里修改 自有tokenizer, 以加载 huggingface/tokenizer 库标准的 tokenizer.json, 实现 custom tokenizer 对齐 huggingface/tokenizer
 
 from ...core.utils.text.tokenizer import boostBBPETokenizer, merge_pair
 import json
@@ -50,22 +50,35 @@ class gpt2Tokenizer(boostBBPETokenizer):
     original 的 _merge_ranks / gpt 的 merges 是等价的: 都是 bytes merge by frequency 的结果. 故 _vocab+special_tokens / encoder 在 ID >= 256 部分也等价
     但是 _vocab+special_tokens / encoder 在 ID 0-255 部分不等价: 前者在 ID 0-255 是原始 byte_integer <--> byte, 而后者在 ID 0-255 有重排序, 具体举例:
     对于 ID = 0, _vocab 对应 byte chr(0), 而 encoder 对应 char !
-
-    不同的 ID-bytes(chars)映射关系, 对应了不同的 tokenize 结果. 既然本class是 gpt2tokenizer, 那么 tokenize 结果肯定要看齐 gpt2 而不是 original
-    方案一: load gpt2_tokenizer, 转换 merges / encoder 到 original 的 _merge_ranks / _vocab, 然后使用 original 的 编解码 方法, 然后再将结果中 ID
-            0-255 部分按照 gpt2 encoder 的顺序重新映射.
-    方案二(采用): load gpt2_tokenizer 后, 改写 新的 编解码 方法, 使用 merges / encoder 直接生成结果.
     '''
 
     def __init__(self):
         super().__init__(name='gpt2_tok', buffer_dir='.', pat_str=self.GPT2_TOKENIZER_REGEX, special_marks=[])
     
-    def to_json(self, fpath, mode='gpt2'):
-        if mode == 'gpt2':
-            raise NotImplementedError(f'not implemented')
+
+    def to_doc(self, fpath, mode='json'):
+        if mode == 'json':
+            entity: dict = {}
+            entity['version'] = '1.0'
+            entity['truncation'] = None
+            entity['padding'] = None
+            entity['added_tokens'] = [] #TODO
+            entity['normalizer'] = None
+            entity['pre_tokenizer'] = {'type': 'ByteLevel', 'add_prefix_space': False, 'trim_offsets': True}
+            entity['post_processor'] = {'type': 'ByteLevel', 'add_prefix_space': True, 'trim_offsets': False}
+            entity['decoder'] = {'type': 'ByteLevel', 'add_prefix_space': True, 'trim_offsets': True}
+            entity['model'] = {}
+            entity['model']['dropout'] = None
+            entity['model']['unk_token'] = None
+            entity['model']['continuing_subword_prefix'] = ''
+            entity['model']['dropoend_of_word_suffixut'] = ''
+            entity['model']['fuse_unk'] = False
+            entity['model']['vocab'] = {} #TODO
+            entity['model']['merges'] = [] #TODO
+
     
-    def from_json(self, fpath, mode='gpt2'):
-        if mode == 'gpt2':
+    def from_doc(self, fpath, mode='json'):
+        if mode == 'json':
             with open(fpath) as f:
                 entity = json.load(f)
 
