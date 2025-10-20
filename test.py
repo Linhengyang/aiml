@@ -6,7 +6,7 @@ import math
 import json
 
 temp = '../cache/temp/'
-gpt2_resource_dir = '../../resource/llm/gpt/gpt2/'
+gpt2_resource_dir = '../../resource/llm/gpt/gpt2'
 
 
 
