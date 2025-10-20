@@ -57,12 +57,17 @@ class gpt2Tokenizer(boostBBPETokenizer):
     
 
     def to_doc(self, fpath, mode='json'):
+        assert hasattr(self, '_vocab') and hasattr(self, '_merge_ranks')
         if mode == 'json':
             entity: dict = {}
             entity['version'] = '1.0'
             entity['truncation'] = None
             entity['padding'] = None
-            entity['added_tokens'] = [] #TODO
+            entity['added_tokens'] = []
+            for content, idx in self.special_tokens.items():
+                entity['added_tokens'].append(
+                    {'id': idx, 'special': True, 'content': content, 'single_word': False, 'lstrip': False, 'rstrip': False, 'normalized': True}
+                )
             entity['normalizer'] = None
             entity['pre_tokenizer'] = {'type': 'ByteLevel', 'add_prefix_space': False, 'trim_offsets': True}
             entity['post_processor'] = {'type': 'ByteLevel', 'add_prefix_space': True, 'trim_offsets': False}
@@ -73,8 +78,18 @@ class gpt2Tokenizer(boostBBPETokenizer):
             entity['model']['continuing_subword_prefix'] = ''
             entity['model']['dropoend_of_word_suffixut'] = ''
             entity['model']['fuse_unk'] = False
-            entity['model']['vocab'] = {} #TODO
-            entity['model']['merges'] = [] #TODO
+            entity['model']['merges'] = []
+            entity['model']['vocab'] = {}
+            for idx, token in enumerate(self.B2U): # 0-255 部分, B2U 的 uchar 按序
+                entity['model']['vocab'][token] = idx
+            for (L_int, R_int), merged_int in self._merge_ranks.items():
+                L_token = ''.join( [self.B2U[b_int] for b_int in list(self._vocab[L_int])] )
+                R_token = ''.join( [self.B2U[b_int] for b_int in list(self._vocab[R_int])] )
+
+                entity['model']['merges'].append(' '.join((L_token, R_token)))
+                entity['model']['vocab'][''.join((L_token, R_token))] = merged_int
+            with open(fpath, 'w', encoding='utf-8') as f:
+                json.dump(entity, f, ensure_ascii=False)
 
     
     def from_doc(self, fpath, mode='json'):
