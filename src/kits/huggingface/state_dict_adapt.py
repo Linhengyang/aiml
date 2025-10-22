@@ -18,7 +18,7 @@ def gpt2_state_dict_adaptor(hf_state_dict: OrderedDict[str, Tensor]) -> OrderedD
         new_k = new_k.replace('mlp.c_fc.', 'gelu_ffn.W_in.').replace('mlp.c_proj.', 'gelu_ffn.W_out.')
         new_k = new_k.replace('ln_f.', 'layer_norm_final.')
 
-        # c_ 开头的陈年旧设计
+        # c_ 开头的陈年旧设计是使用 conv1D 来实现 Linear 映射的, conv1D 权重(in_dim, out_dim)要转置成 linear 权重(out_dim, in_dim)
         if names[-2] in ('c_attn', 'c_proj', 'c_fc') and v.ndim == 2:
             v = v.t().contiguous()
         
