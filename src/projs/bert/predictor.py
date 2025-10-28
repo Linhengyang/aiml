@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from ...core.design.dl_outline import easyPredictor
-from ...core.utils.data.bachify import truncate_pad
+from ...core.utils.data.batchify import truncate_pad
 
 
 
