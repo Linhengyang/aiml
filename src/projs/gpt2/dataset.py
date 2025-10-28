@@ -46,7 +46,7 @@
 
 import torch
 import typing as t
-from ...core.utils.common.seq_operation import pack_seq_to_batch_slide
+from ...core.utils.data.bachify import pack_seq_to_batch_slide
 
 
 

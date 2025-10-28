@@ -1,6 +1,6 @@
 from ...core.utils.text.text_preprocess import preprocess_space
 from ...core.utils.text.vocabulize import Vocab
-from ...core.utils.common.seq_operation import truncate_pad
+from ...core.utils.data.bachify import truncate_pad
 from ...core.utils.text.string_segment import sentence_segment_greedy
 import torch
 import typing as t

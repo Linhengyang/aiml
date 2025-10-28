@@ -8,7 +8,7 @@ from ...core.design.dl_outline import easyPredictor
 from ...core.base.compute.evaluate_tools import bleu
 from ...core.utils.text.text_preprocess import preprocess_space
 from ...core.utils.text.string_segment import sentence_segment_greedy
-from ...core.utils.common.seq_operation import truncate_pad
+from ...core.utils.data.bachify import truncate_pad
 
 
 
