@@ -1,7 +1,7 @@
 # shared functions for GPT
 import torch
 from typing import Tuple
-from ...core.base.functions.sequence import segments_to_positions
+from ...core.utils.data.transform import segments_to_positions
 
 # train mode 下, 从 input 的 segments(可以为None) 按以下标准生成对应的 positions 和 attention mask
 # 若 input_segs = None, 默认 input 属于同一个text且没有PAD, 则 segments = None, positions = 从0开始总长度为L_q的位置编码 [1, L_q], attention_mask = None
