@@ -4,7 +4,7 @@ import copy
 import pandas as pd
 from ...core.utils.text.vocabulize import Vocab
 from ...core.utils.text.string_segment import sentence_segment_greedy
-from ...core.utils.common.seq_operation import truncate_pad
+from ...core.utils.data.batchify import truncate_pad
 
 
 

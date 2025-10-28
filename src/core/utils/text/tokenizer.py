@@ -63,7 +63,7 @@ import regex as re
 import os
 import functools
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed, Future
-from ..common.seq_operation import check_monotonic
+from ..system.math import check_monotonic
 
 
 GPT4_TOKENIZER_REGEX = \

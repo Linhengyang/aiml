@@ -16,6 +16,7 @@
         * meta_frames:&nbsp;&nbsp;frameworks  
         * root_layers:&nbsp;&nbsp;nn layers  
         * sub_modules:&nbsp;&nbsp;customized module blocks/bulks for projs
+    * optim:&nbsp;&nbsp;customized optimizers 
     * utils:&nbsp;&nbsp;data & algo & preprocess  
 * lib:  
     * share: &nbsp;&nbsp;shared cpp headers & files  
@@ -74,6 +75,8 @@ export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
     │   │   │   ├── meta_frames
     │   │   │   ├── root_layers
     │   │   │   └── submodules
+    │   │   ├── optim
+    │   │   │   └── torch_optim
     │   │   └── utils
     │   │       ├── common
     │   │       ├── data
