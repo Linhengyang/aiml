@@ -85,7 +85,8 @@ def metric_summary(
 
     names = [metric + "(" + unit + "): " for metric, unit in zip(metric_names, unit_names)]
 
-    vals = [round(value, round_ndigit) if round_ndigit is not None else value for value, round_ndigit in zip(values, round_ndigits)]
+    vals = [round(value, round_ndigit) if round_ndigit is not None else value \
+            for value, round_ndigit in zip(values, round_ndigits)]
 
     name_value_pairs = [name+str(val) for name, val in zip(names, vals)]
 
