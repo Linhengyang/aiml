@@ -465,9 +465,10 @@ class CasualMHA(nn.Module):
         qkv = self.W_qkv(x)
         q, k, v = qkv.split(self.D, dim=-1) # q/k/v [B, L_q, D]
         # [B, L_q, D] -> [B, L_q, H, d] -> [B, H, L_q, d]
+        # q/k/v 都是 H head, 此为 MHA算法. 算法 GQA/MQA 中, q和kv 有不同的 H head数量
         q = q.view(-1, L_q, self.H, self.d).transpose(1, 2) # [B, H, L_q, d]
-        k = k.view(-1, L_q, self.H, self.d).transpose(1, 2)
-        v = v.view(-1, L_q, self.H, self.d).transpose(1, 2)
+        k = k.view(-1, L_q, self.H, self.d).transpose(1, 2) # [B, H, L_q, d]
+        v = v.view(-1, L_q, self.H, self.d).transpose(1, 2) # [B, H, L_q, d]
 
         # only for infer.decode 阶段. 此时 L_q = 1
         if kv_cache:
