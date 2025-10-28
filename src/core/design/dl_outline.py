@@ -55,3 +55,42 @@ class easyTrainer(object):
 
     def fit(self, *args, **kwargs):
         raise NotImplementedError
+    
+
+
+class easyPredictor(object):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        pass
+
+    def set_device(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def predict(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    def evaluate(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    @property
+    def pred_scores(self):
+        pass
+
+
+
+class epochEvaluator(object):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def judge_epoch(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def record_batch(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def evaluate_model(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def cast_metric(self, *args, **kwargs):
+        raise NotImplementedError
+    

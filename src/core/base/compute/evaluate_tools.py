@@ -56,24 +56,6 @@ class Accumulator:  #@save
 
 
 
-class epochEvaluator(object):
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-
-    def judge_epoch(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def record_batch(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def evaluate_model(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def cast_metric(self, *args, **kwargs):
-        raise NotImplementedError
-
-
-
 
 def metric_summary(
         values, 
