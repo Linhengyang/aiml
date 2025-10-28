@@ -4,7 +4,7 @@ import math
 import re
 from operator import itemgetter
 import typing as t
-from ...core.design.predict_tools import easyPredictor
+from ...core.design.predictor_outline import easyPredictor
 from ...core.base.compute.evaluate_tools import bleu
 from ...core.utils.text.text_preprocess import preprocess_space
 from ...core.utils.text.string_segment import sentence_segment_greedy

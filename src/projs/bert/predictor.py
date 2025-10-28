@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from ...core.design.predict_tools import easyPredictor
+from ...core.design.predictor_outline import easyPredictor
 from ...core.utils.common.seq_operation import truncate_pad
 
 
