@@ -2,7 +2,7 @@ import torch
 from torch import nn as nn
 import typing as t
 from torch.utils.data.dataloader import default_collate
-from ...core.design.dl_outline import easyTrainer
+from ...core.design.dl_interface import easyTrainer
 
 
 
