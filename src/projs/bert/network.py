@@ -76,7 +76,7 @@ class MLM(nn.Module):
     # 指定 在 第 i 维收集, 是指 输出output 在 某位置 position [ind_0, ind_i, ..., ind_i, ..., ind_N] 的值是这样确定的:
     # 首先从 index 得到 第 i 维的查找位置: index[position] = I, 然后从 input 的该位置 [ind_0, ind_i, ..., I, ..., ind_N] 找到 值
     def forward(self, token_embd, mask_positions):
-        # token_embd shape: (batch_size, seq_len, d_dim) embed后的 sequence
+        # token_embd: (batch_size, seq_len, d_dim) embed后的 sequence
         # mask_positions: (batch_size, num_masktks)int64 of 0-seq_len-1, 需要在 sequence 相应位置里 作pred 的 位置的 index值.
         # num_masktks 代表需要pred的token个数
 
@@ -94,7 +94,7 @@ class MLM(nn.Module):
         return self.mlp(mask_tokens_embd) # (batch_size, num_masktks, vocab_size)
     
         # 实际上 mask_positions 里, 0 代表 pad, 它会从 token_embd 中抽取 序列位置为 0 的token tensor 作预测, 而这个位置都是 <cls>
-        # pad 过程中, position pad 0时, label 也会被 pad 一个tokenID. 但这部分的预测没有意义, 应该在loss中忽略
+        # pad 过程中, position pad 0时, label 也会被 pad 一个tokenID. 但这部分的预测没有意义, 应该在loss中忽略, 所以mlm任务的loss要用masked ce loss
 
 
 
