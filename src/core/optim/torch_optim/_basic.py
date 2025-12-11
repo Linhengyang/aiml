@@ -78,7 +78,11 @@ class SGD(Optimizer):
         return loss
     
 
-
+# Adam 优化器: 
+# 1. grad <-- adj_velocity / sqrt(adj_variance)
+# 1.5 if weight_decay: grad <-- grad + wd * param
+# 2. param <-- param - lr * grad
+# 3. update velocity & variance & step
 class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False):
         if lr < 0: raise ValueError(f'learning rate must be positive. now {lr}')
@@ -156,6 +160,11 @@ class Adam(Optimizer):
     
 
 
+# AdamW 优化器: 
+# 1. grad <-- adj_velocity / sqrt(adj_variance)
+# 2. param <-- param - lr * grad
+# 2.5 if weight_decay: param <-- param * (1-wd)
+# 3. update velocity & variance & step
 
 # AdamW 和 Adam 的区别在于: AdamW 的 weight_decay 与 grad 解耦, 即
 #   AdamW 在用 真实 grad 更新完 weight 之后, 再按比例衰减 weight: weight <- weight * (1 - lr*wd)
@@ -189,7 +198,7 @@ class AdamW(Optimizer):
             lr = group['lr']
             wd = group['weight_decay']
             eps = group['eps']
-            amsgrad = group['amsgrad']
+            amsgrad: bool = group['amsgrad']
 
             for p in group['params']: # 取出权重 weight as p
                 if p.grad is None:
@@ -201,8 +210,10 @@ class AdamW(Optimizer):
                 # Adam中, 涉及三个状态值: velocity(momentum_buffer) & 梯度方差(variance_buffer) & 优化迭代次数(step)
                 # if amsgrad = True, 还需要一个额外状态值: (历史最大梯度方差)max_variance_buffer
                 state = self.state[p]
-                # lazy initialization
+                # lazy initialization1: 当 state(即 momentum/variance/step) 未初始化时
                 if len(state) == 0:
+                    # 参数 memory_format = torch.preserve_format 是使得新生成的 0-tensor, 其内存布局与 p 保持一致
+                    # 在创建 0-tensor 时, 若内存布局与 p 不一致, 那么后续当 p 和 0-tensor 发生运算时, torch 可能会被迫进行内存copy/reorder
                     state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['variance_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['step'] = 0
@@ -213,7 +224,7 @@ class AdamW(Optimizer):
                 state['step'] += 1
                 step = state['step']
 
-                # update velocity: velocity <- b1 * velocit + (1-b1)*grad
+                # update velocity: velocity <- b1 * velocity + (1-b1)*grad
                 velocity = state['momentum_buffer']
                 velocity.mul_(beta1).add_(grad, alpha=1-beta1)
 
