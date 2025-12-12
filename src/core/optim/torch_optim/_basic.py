@@ -80,11 +80,11 @@ class SGD(Optimizer):
 
 # Adam 优化器:
 # 1. 反向 backward 得到 grad
-# 1.5 if weight_decay: grad <-- grad + wd * param
-# 1.5 if DDP 训练: 通信 reduce 确保每一块 GPU 都得到一致的 grad
+# 1.1 if DDP 训练: 通信 reduce mean 确保每一块 GPU 都得到一致的 grad
+# 1.5 if weight_decay: grad <-- grad + wd * param (也就是说 weight decay是基于grad实现的, 二者耦合了)
 # 2. 合成更新 状态 velocity & variance & step, 并用 step 对 velocity & variance 作矫正
-# 3. incre <-- adj_velocity / sqrt(adj_variance)
-# 4. param <-- param - lr * incre
+# 3. update <-- adj_velocity / sqrt(adj_variance)
+# 4. param <-- param - lr * update
 class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False):
         if lr < 0: raise ValueError(f'learning rate must be positive. now {lr}')
@@ -162,13 +162,13 @@ class Adam(Optimizer):
     
 
 
-# Adam 优化器:
+# AdamW 优化器:
+# 0. 权重衰减 weight_decay: param <- param * (1 - lr*wd)
 # 1. 反向 backward 得到 grad
-# 1.5 if DDP 训练: 通信 reduce 确保每一块 GPU 都得到一致的 grad
+# 1.5 if DDP 训练: 通信 reduce mean 确保每一块 GPU 都得到一致的 grad
 # 2. 合成更新 状态 velocity & variance & step, 并用 step 对 velocity & variance 作矫正
-# 3. incre <-- adj_velocity / sqrt(adj_variance)
-# 4. param <-- param - lr * incre
-# 4.5 if weight_decay: param <- param * (1 - lr*wd)
+# 3. update <-- adj_velocity / sqrt(adj_variance)
+# 4. param <-- param - lr * update
 
 # AdamW 和 Adam 的区别在于: AdamW 的 weight_decay 与 grad 解耦, 即
 #   AdamW 在用 真实 grad 更新完 weight 之后, 再按比例衰减 weight: weight <- weight * (1 - lr*wd)
