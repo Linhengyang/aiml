@@ -7,7 +7,7 @@ import json
 
 temp = '../cache/temp/'
 gpt2_resource_dir = '../../resource/llm/gpt/gpt2'
-
+    
 
 
 from src.kits.huggingface.tokenizer_adapt import gpt2Tokenizer
