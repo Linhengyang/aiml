@@ -1522,7 +1522,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             # 一个 read 任务即可
             read_task = asyncio.create_task(async_queue_get(data_gen, queue1))
 
-            # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行fc_merge_pair_batch
+            # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行 fc_merge_pair_batch
             # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
             queue2 = asyncio.Queue(cls._MAX_QUEUE_SIZE)
             async def compute_collector(result):
