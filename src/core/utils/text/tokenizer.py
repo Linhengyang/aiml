@@ -1006,7 +1006,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         '''
         buffer the pair-counts for the batch with 'order'
         '''
-        b_pcounts, b_order = pcounts_order # b_pcounts: tuple of 3arrays(L,R,counts), (uint16, uint16, uint64)dtypes
+        b_pcounts, b_order = pcounts_order # b_pcounts: tuple of 3 same-length arrays(L/uint16,R/uint16,counts/uint64)
 
         data = {
             cls.p_counts_schema[0].name: b_pcounts[0], # L: L_tokens
@@ -1022,7 +1022,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
         pq.write_table(table, save_path)
 
-        del b_pcounts # 已经落盘了就可以删了
+        del b_pcounts # 已经落盘了就可以从内存中去除以节省内存
         collector.append(save_path)
     
 
@@ -1246,15 +1246,15 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     def train_bpe(self,
-                  num_merges:int|None = None, # global num merges fir the tokenizer
+                  num_merges:int|None = None, # global_total num_merges for the tokenizer
                   *,
                   corpora:t.List[str]|str|None,
                   colnames:t.List[str|None]|None = None,
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 172470436, # max num of token-chunks in memory for each core. 0.16GB
-                  keep_window:int = 3, # max reserved tokens_pq file in disk
-                  fc_count_pair_batch:t.Callable = count_pair_batch,
-                  fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous,
+                  buffer_size:int = 172470436, # max num of token-chunks in memory for each core. default 0.16GB
+                  keep_window:int = 3, # max reserved tokens_pq file on disk
+                  fc_count_pair_batch:t.Callable = count_pair_batch, # function to count pair
+                  fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous, # function to merge pair
                   verbose:bool = False
                   ):
         
