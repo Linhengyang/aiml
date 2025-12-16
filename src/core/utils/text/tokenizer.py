@@ -229,6 +229,7 @@ class baseBBPETokenizer(Tokenizer):
         # vocab: token_ID --> bytes
         assert hasattr(self, "_merge_ranks")
         self._vocab = {i: bytes([i]) for i in range(256)} # initialize 0 - 255 --> bytes
+        # _merge_ranks 必须是按 BPE 生成序(即256开始递增) 插入字典的. .item() 方法能保证插入序返回 key 和 value
         for (L_int, R_int), merged_int in self._merge_ranks.items():
             self._vocab[merged_int] = self._vocab[L_int] + self._vocab[R_int] # two bytes concatenate
 
@@ -1028,6 +1029,19 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     def _write_pcounts(self, tokens_pq, executor) -> list:
+        '''
+        input args:
+            tokens_pq: 单个 parquet 文件, 存储了来自自然语料的 tokens(巨量), 每个 tokens 是 list of int
+            executor: 持久化的 进程池/线程池
+        
+        tokens parquet 文件用生成器逐一生成 batch(批数据限定了size, 且是 flattened ints 和 offsets 的两个array紧凑表达方式, 以及 批order), 即:
+            generator of batch as (tokens_flat, offsets), i
+        batch as b_data=(tokens_flat, offsets), b_order=i 经过 process_fn(func_count_pair_batch) 处理后, 返回 batch result as (pcounts, b_order),
+        最后 result_handler 将 batch result 独立写入到 pcounts_save_dir, 并记录 pcounts 文件路径 到 pcounts_paths
+
+        output:
+            pcounts_paths: pcounts 文件路径们. 每个文件是从一个 batch 内统计出来的 pcounts
+        '''
         # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
         rank, tokens_fname = tokens_pq.split('/')[-2:]
 
@@ -1116,7 +1130,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         '''
         given tokens parquet file `tokens_pq`,
         merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
-        then save result tokens chunks into a same-file-name parquet file to `save_dir`
+        then save result tokens chunks into a single same-file-name parquet file to `save_dir`
 
         读(yield_tokens)
         算(_thrd_process_tokens_batch)
@@ -1133,7 +1147,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
 
         merged_save_path_collector = []
-        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入-统一合并处理
+        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入(各batch独立落盘), 再统一合并处理
         stream_parallel_process_with_pending(
             executor,
             data_gen, # data_gen: (tokens_flat, offsets), i
