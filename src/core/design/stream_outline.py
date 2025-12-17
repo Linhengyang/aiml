@@ -31,8 +31,8 @@ def stream_parallel_process_with_pending(
     Args:
         executor: ProcessPoolExecutor / ThreadPoolExecutor
         data_gen: generator, 逐批生成任务数据
-        process_fn: 对每一批的处理函数(子进程中执行), 必须可以pickle
-        result_handler: 对任务结果的处理(在主线程中执行), 对pickle没有要求
+        process_fn: 对每一批的处理任务(进程池/线程池中执行)
+        result_handler: 对任务结果的处理(在主线程中执行)
         max_pending: 最大挂起任务数(根据内存控制)
     '''
     futures = set()
@@ -45,7 +45,8 @@ def stream_parallel_process_with_pending(
         # 当任务队列长度达到 max_pending 时, 暂停提交任务, 等到部分已提交的任务完成并处理
         if len(futures) >= max_pending:
             # wait会返回已经处理好的 futures(作为done) 和 尚未处理好的 futures(作为futures)
-            done, futures = wait(futures, return_when=FIRST_COMPLETED)
+            # wait 阻塞主线程, 等待至少一个future完成
+            done, futures = wait(futures, return_when=FIRST_COMPLETED) # 直接更新 futures, 从而已经完成的不再在内
             for f in done:
                 result = f.result()
                 result_handler(result, *result_handler_args)
