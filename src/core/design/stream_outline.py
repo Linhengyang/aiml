@@ -46,7 +46,7 @@ def stream_parallel_process_with_pending(
         if len(futures) >= max_pending:
             # wait会返回已经处理好的 futures(作为done) 和 尚未处理好的 futures(作为futures)
             # wait 阻塞主线程, 等待至少一个future完成
-            done, futures = wait(futures, return_when=FIRST_COMPLETED) # 直接更新 futures, 从而已经完成的不再在内
+            done, futures = wait(futures, return_when=FIRST_COMPLETED) # 直接更新 futures, 从而已经完成的 future 不再在内
             for f in done:
                 result = f.result()
                 result_handler(result, *result_handler_args)
