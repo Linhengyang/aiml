@@ -684,8 +684,8 @@ def merge_pair_batch_memcontiguous(
         pair_R:np.uint16,
         new_token:np.uint16,
         ) -> tuple[np.ndarray, np.ndarray]:
-    # tokens_flat:np.ndarray, # np.ndarray of uint16
-    # offsets:np.ndarray, # np.ndarray of int64
+    # tokens_flat:np.ndarray of uint16
+    # offsets:np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
     (tokens_flat, offsets), b_order = tokens_offsets_border
@@ -1436,9 +1436,8 @@ class asyncBBPETokenizer(boostBBPETokenizer):
     
     def _write_pcounts(self, tokens_pq, executor) -> list:
         '''
-        异步版本的 _write_pcounts
-
-        tokens parquet 文件用生成器逐一生成 batch(批数据限定了size, 且是 flattened ints 和 offsets 的两个array紧凑表达方式, 以及 批order), 即:
+        异步版本的 _write_pcounts:
+        读取 tokens parquet 文件用生成器逐一生成 batch(批数据限定了size, 且是 flattened ints 和 offsets 的两个array紧凑表达方式, 以及 批order), 即:
             generator of batch as (tokens_flat, offsets), i
         batch as b_data=(tokens_flat, offsets), b_order=i 经过 process_fn(func_count_pair_batch) 处理后, 返回 batch result as (b_pcounts, b_order),
         最后 result_handler 将 batch result 独立写入到 pcounts_save_dir, 并记录 pcounts 文件路径 到 pcounts_paths
@@ -1466,12 +1465,12 @@ class asyncBBPETokenizer(boostBBPETokenizer):
                     pcounts_paths.append(None)
             
             await pipeline_producer_consumer(
-                data_gen, # yield (tokens_flat, offsets), b_order
-                self._func_count_pair_batch, # arg1:(tokens_flat, offsets), b_order;arg2: token_dtype --> (pcounts, b_order)
-                executor,
-                self._MAX_QUEUE_SIZE,
+                data_gen, # 读取 parquet 文件, 不断生成 batch as (tokens_flat, offsets), b_order 到 异步队列 里
+                self._func_count_pair_batch, # (tokens_flat, offsets), b_order --> (b_pcounts, b_order) 
+                executor, # _func_count_pair_batch 的执行 进程池/线程池
+                self._MAX_QUEUE_SIZE, # 
                 1,
-                collector, # arg: (pcounts, b_order) --> in-place change pcounts_paths
+                collector, # arg: (b_pcounts, b_order) --> in-place change pcounts_paths
                 )
             
             return pcounts_paths
