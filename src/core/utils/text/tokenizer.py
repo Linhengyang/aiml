@@ -1440,7 +1440,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
 
         tokens parquet 文件用生成器逐一生成 batch(批数据限定了size, 且是 flattened ints 和 offsets 的两个array紧凑表达方式, 以及 批order), 即:
             generator of batch as (tokens_flat, offsets), i
-        batch as b_data=(tokens_flat, offsets), b_order=i 经过 process_fn(func_count_pair_batch) 处理后, 返回 batch result as (pcounts, b_order),
+        batch as b_data=(tokens_flat, offsets), b_order=i 经过 process_fn(func_count_pair_batch) 处理后, 返回 batch result as (b_pcounts, b_order),
         最后 result_handler 将 batch result 独立写入到 pcounts_save_dir, 并记录 pcounts 文件路径 到 pcounts_paths
         '''
         # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
@@ -1454,6 +1454,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
         
+        # 同步版本的 _write_pcounts 使用的是 带背压设计的 stream_parallel_process_with_pending
         async def main():
             # 一个in-place改变状态的收集函数.
             pcounts_paths = []
