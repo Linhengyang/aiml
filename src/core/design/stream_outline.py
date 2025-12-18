@@ -29,11 +29,22 @@ def stream_parallel_process_with_pending(
     流式并发处理生成器中的任务, 控制内存占用
 
     Args:
-        executor: ProcessPoolExecutor / ThreadPoolExecutor
-        data_gen: generator, 逐批生成任务数据
+        executor: 进程池 or 线程池
+        data_gen: generator, 在主线程中 逐批生成任务数据 item
         process_fn: 对每一批的处理任务(进程池/线程池中执行)
-        result_handler: 对任务结果的处理(在主线程中执行)
+        result_handler: 对任务结果的处理(在主线程中执行), 要求return None, 即一个副作用函数(修改某个容器而不是返回值)
         max_pending: 最大挂起任务数(根据内存控制)
+        process_args: 可被 result = process_fn(item, *process_args) 的方式调用
+        result_handler_args: 可被 result_handler(result, *result_handler_args)  的方式调用. 其中应该包括一个容器, 以记录副作用
+    
+    当 executor 为 线程池 时, item 由 data_gen 在主线程生成, 可共享给工作线程, 所以 item 没有序列化要求. process_args 也一样, 会由
+    主线程共享给工作线程, 所以 process_args 也不需要序列化.
+    process_fn 也不需要序列化, 同时由于可以从 主线程 共享, 所以它还可以是 lambda, 嵌套函数, 闭包
+    但它必须符合以下:
+        1. 线程安全. 若 process_fn 涉及 写共享资源, 那么必须要加线程锁; 更推荐的做法是 process_fn 只读参数、只返回结果、无外部副作用
+        2. 若希望得到加速效果, 那么 process_fn 应该有效绕开 GIL, 否则 GIL 会有效限制 py解释器的多线程并发
+    
+    当 executor 为 进程池 时, item 由 data_gen 在主线程生成, 必须要
     '''
     futures = set()
 
