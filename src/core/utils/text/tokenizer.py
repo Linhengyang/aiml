@@ -1017,8 +1017,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         table = pa.Table.from_pydict(data, cls.p_counts_schema)
 
-        if not table: # 如果是空table, 直接返回None不用写入
-            return None
+        if not table: # 如果是空table, 直接返回None不用记录 pcount file path, 即无副作用：collector 不会增加 None
+            return None # return None 和 return 和 无return 等价 --> 都会返回 None
         
         save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
         pq.write_table(table, save_path)
@@ -1267,8 +1267,6 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                   backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
                   buffer_size:int = 172470436, # max num of token-chunks in memory for each core. default 0.16GB
                   keep_window:int = 3, # max reserved tokens_pq file on disk
-                  fc_count_pair_batch:t.Callable = count_pair_batch, # function to count pair
-                  fc_merge_pair_batch:t.Callable = merge_pair_batch_memcontiguous, # function to merge pair
                   verbose:bool = False
                   ):
         
@@ -1277,7 +1275,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             corpora = [corpora]
             colnames = [None]
 
-        self._set_config(buffer_size, fc_count_pair_batch, fc_merge_pair_batch)
+        self._set_config(
+            buffer_size = buffer_size,
+            fc_count_pair_batch = count_pair_batch, # function to count pair
+            fc_merge_pair_batch = merge_pair_batch_memcontiguous) # function to merge pair
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
