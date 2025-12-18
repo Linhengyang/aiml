@@ -1111,6 +1111,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
         
         merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
+
+        # pq.write_table 是线程安全的(并发写入不同 parquet 文件), 内部创建独属的文件句柄和缓冲区, 不依赖全局状态
+        # pq.write_table 底层使用 C++ API, 所以它能绕开 GIL, 故多线程是可以得到 加速的
         pq.write_table(table, merged_save_path)
 
         return merged_save_path
@@ -1291,7 +1294,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         else:
             self._build_vocab()
 
-        with ProcessPoolExecutor(os.cpu_count()) as executor:
+        with ThreadPoolExecutor(os.cpu_count()) as executor:
             # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
             # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
             tokens_dir_start = self._prepare_train(num_merges, executor)
