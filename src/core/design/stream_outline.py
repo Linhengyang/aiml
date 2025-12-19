@@ -44,7 +44,11 @@ def stream_parallel_process_with_pending(
         1. 线程安全. 若 process_fn 涉及 写共享资源, 那么必须要加线程锁; 更推荐的做法是 process_fn 只读参数、只返回结果、无外部副作用
         2. 若希望得到加速效果, 那么 process_fn 应该有效绕开 GIL, 否则 GIL 会有效限制 py解释器的多线程并发
     
-    当 executor 为 进程池 时, item 由 data_gen 在 父进程主线程 生成, 必须要
+    当 executor 为 进程池 时, item 由 data_gen 在 父进程主线程 生成, 必须要 序列化pickle给子进程. process_args 也一样, 需要从父进程
+    序列化给子进程. 同时 process_fn 返回的结果 result 也需要 pickle 序列化到 父进程, 再由 result_handler 收集. 总而言之,
+    process_fn 需要满足:
+        1. 自身可序列化, 即必须是顶层函数, 不可以是 lambda、嵌套函数
+        2. process_fn 所需 数据 item(data_gen) 和 参数 process_args, 以及 返回的结果 result 都必须 可序列化
     '''
     futures = set()
 
