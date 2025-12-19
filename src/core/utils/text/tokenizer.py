@@ -1032,7 +1032,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
 
 
-    def _write_pcounts(self, tokens_pq, executor) -> list:
+    def _write_pcounts(self, tokens_pq, executor) -> t.List[str]:
         '''
         input args:
             tokens_pq: 单个 parquet 文件, 存储了来自自然语料的 tokens(巨量), 每个 tokens 是 list of int
