@@ -1245,6 +1245,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         for rank in range(start, end):
             print(f'merge rank {rank} / {start} to {end-1}')
             try:
+                # _get_merge_info 的副作用: 
                 top_pair, max_occurence = self._get_merge_info(tokens_dir_this, executor)
                 new_token, occurence = rank + 256, max_occurence if verbose else None
 
