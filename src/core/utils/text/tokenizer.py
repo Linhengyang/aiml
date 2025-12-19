@@ -635,8 +635,12 @@ def count_pair_batch(tokens_offsets_border):
     对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
     3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是uint16 确定. counts dtype uint64
 
-    Args:
+    input:
         tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
+
+    return:
+        pcounts:tuple of 3 arrays (L,R,counts), dtype(uint16, uint16, uint64)
+        b_order: int
     '''
     (tokens_flat, offsets), b_order = tokens_offsets_border
 
