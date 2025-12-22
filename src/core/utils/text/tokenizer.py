@@ -644,7 +644,7 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 # 要注意: 无论是 count_pair_batch 还是 merge_pair_batch 的 result 落盘, 都直接在工作进程里完成, 不要把 result IPC回到主进程再 落盘减少一次 IPC 成本.
 # TODO: 多线程版本的 count_pair_batch/merge_pair_batch 是效率更高的 并行 办法
 
-# 此count pair batch 函数的 python 部分无法绕开 GIL, 所以加速效果不如 全numpy处理
+
 def count_pair_batch(tokens_offsets_border):
     '''
     对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
