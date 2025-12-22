@@ -84,6 +84,10 @@ def build_pa_table(data:t.List|t.Dict, schema):
 
 
 def concate_parquet_files(files, concat_path, clean=True):
+    # 当 files 为空时, concate 取消, 直接返回
+    if not files:
+        return
+    
     tables = [pq.read_table(f) for f in files]
     concatenation = pa.concat_tables(tables)
     pq.write_table(concatenation, concat_path)
