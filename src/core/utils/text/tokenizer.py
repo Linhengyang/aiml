@@ -1020,11 +1020,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
 
     @classmethod
-    def _write_pcounts_batch(cls, pcounts_order, save_dir, src_tokens_fname, collector:list):
-        '''
-        buffer the pair-counts for the batch with 'order'
-        '''
-        b_pcounts, b_order = pcounts_order # b_pcounts: tuple of 3 same-length arrays(L/uint16,R/uint16,counts/uint64)
+    def _write_count_batch(cls, tokens_offsets_border, count_func, save_dir, src_tokens_fname):
+        # tokens_offsets: tuple of tokens_flat: uint16 ndarray, offsets: int64 ndarray
+        # b_order: 批次batch的序号
+        # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
+        # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
+
+        b_pcounts, b_order = count_func(tokens_offsets_border) # b_pcounts: tuple of 3 same-length arrays(L/uint16,R/uint16,counts/uint64)
 
         data = {
             cls.p_counts_schema[0].name: b_pcounts[0], # L: L_tokens
@@ -1034,14 +1036,16 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         table = pa.Table.from_pydict(data, cls.p_counts_schema)
 
-        if not table: # 如果是空table, 直接返回None不用记录 pcount file path, 即无副作用：collector 不会增加 None
+        if not table: # 如果是空table, 直接返回None
             return None # return None 和 return 和 无return 等价 --> 都会返回 None
         
-        save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
-        pq.write_table(table, save_path)
+        pcnts_save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
 
-        del b_pcounts # 已经落盘了就可以从内存中去除以节省内存
-        collector.append(save_path)
+        # pq.write_table 是线程安全的(并发写入不同 parquet 文件), 内部创建独属的文件句柄和缓冲区, 不依赖全局状态
+        # pq.write_table 底层使用 C++ API, 所以它能绕开 GIL, 故多线程是可以得到 加速的
+        pq.write_table(table, pcnts_save_path)
+
+        return pcnts_save_path
     
 
 
@@ -1053,7 +1057,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         tokens parquet 文件用生成器逐一生成 batch(批数据限定了size, 且是 flattened ints 和 offsets 的两个array紧凑表达方式, 以及 批order), 即:
             generator of batch as (tokens_flat, offsets), i
-        batch as b_data=(tokens_flat, offsets), b_order=i 经过 process_fn(func_count_pair_batch) 处理后, 返回 batch result as (pcounts, b_order),
+        batch as b_data=(tokens_flat, offsets), b_order=i 经过 fc_count(func_count_pair_batch) 处理后, 返回 batch result as (pcounts, b_order),
         最后 result_handler 将 batch result 独立写入到 pcounts_save_dir, 并记录 pcounts 文件路径 到 pcounts_paths
 
         output:
@@ -1074,10 +1078,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         stream_parallel_process_with_pending(
             executor,
             data_gen, # data_gen: (tokens_flat, offsets), i
-            process_fn = self._func_count_pair_batch, # return (pcounts, b_order)
+            process_fn = self._write_count_batch, # return None or pcnts_save_path
             result_handler = self._write_pcounts_batch, 
             max_pending = 8,
-            result_handler_args = (pcounts_save_dir, tokens_fname, pcounts_paths)
+            process_args = (pcounts_save_dir, tokens_fname, pcounts_paths)
         )
 
         return pcounts_paths
@@ -1118,7 +1122,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
         # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
 
-        # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens
+        # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens. 可以为 空 array, 这样 written pq table 也是空的
         (valid_merged_tokens_flat, valid_merged_offsets), b_order = merge_func(
             tokens_offsets_border,
             L, R, new_token)
