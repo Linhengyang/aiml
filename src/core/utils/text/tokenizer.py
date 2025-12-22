@@ -1232,7 +1232,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     def _train_loop(self, tokens_dir_start:str, start:int, end:int, executor, keep_window:int, verbose:bool):
         '''
         merge_rank 遍历 start --> end(不含) 地 BPE train 循环.
-        tokens_dir_start 是起始 tokens 文件夹, buffer_dir_tokens/tokens/start
+        tokens_dir_start 是起始 tokens 文件夹, buffer_dir/tokens/start
         
         merge_rank 是此次merge相对第1次merge的偏移, 比如第1次merge的merge_rank=0
         merge_rank + 256是此次merge生成的new_token. 
@@ -1246,16 +1246,23 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             print(f'merge rank {rank} / {start} to {end-1}')
             try:
                 # _get_merge_info 的副作用: 
-                top_pair, max_occurence = self._get_merge_info(tokens_dir_this, executor)
-                new_token, occurence = rank + 256, max_occurence if verbose else None
+                #   遍历 buffer_dir/tokens/this 所有 tokens 的pq文件 tokens_pq:
+                #   由 _write_pcounts 函数, 对 this/tokens_pq 生成 batch 生成器, 然后并行执行如下:
+                #       由 注册的 self._func_count_pair_batch 函数统计出 每个batch 的 pair_counts
+                #       由 _write_pcounts_batch 函数, 将 每个batch 的 pair_counts 写成 pq 文件落盘: buffer_dir/p_counts/this/tokens_pq-part-{b_id}.pq
+                #   由 _aggregate_pcounts 合并上述所有 buffer_dir/p_counts/this/tokens_pq-part-{b_id}.pq 成一个 agg_pcounts 的 pyarrow table
+                #   由 get_occur_most_info 作用在 agg_pcounts pa table 上, 得到 occur_most_pair (int, int), 以及 max_occurrence
+                top_pair, max_occurrence = self._get_merge_info(tokens_dir_this, executor)
+                new_token, occurrence = rank + 256, max_occurrence if verbose else None
 
                 # update tokenizer: len(self._merge_rank) += 1
-                self._update_tokenizer(top_pair, new_token, occurence)
+                self._update_tokenizer(top_pair, new_token, occurrence)
 
                 # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
                 if rank == end - 1:
                     break
 
+                # _next_tokens_dir 的副作用: TODO
                 tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
                 
             finally:
