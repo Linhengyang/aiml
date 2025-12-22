@@ -1024,7 +1024,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # tokens_offsets: tuple of tokens_flat: uint16 ndarray, offsets: int64 ndarray
         # b_order: 批次batch的序号
         # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
-        # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
+        # save_dir: 保存的目录, src_tokens_fname: 批次batch的来源文件名
 
         b_pcounts, b_order = count_func(tokens_offsets_border) # b_pcounts: tuple of 3 same-length arrays(L/uint16,R/uint16,counts/uint64)
 
@@ -1036,8 +1036,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
 
         table = pa.Table.from_pydict(data, cls.p_counts_schema)
 
-        if not table: # 如果是空table, 直接返回None
-            return None # return None 和 return 和 无return 等价 --> 都会返回 None
+        if not table: # 如果是空table, 直接返回None. 当 batch 全部为 length 1 chunk 时, table 为空
+            return None
         
         pcnts_save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
 
@@ -1070,7 +1070,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, rank)
         os.makedirs(pcounts_save_dir, exist_ok=True) 
 
-        pcounts_paths = []
+        pcounts_path_collector = []
         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
         # data_gen: (tokens_flat, offsets), i
         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
@@ -1079,12 +1079,12 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             executor,
             data_gen, # data_gen: (tokens_flat, offsets), i
             process_fn = self._write_count_batch, # return None or pcnts_save_path
-            result_handler = self._write_pcounts_batch, 
+            result_handler = lambda pcnts_save_path: pcnts_save_path is not None and pcounts_path_collector.append(pcnts_save_path),
             max_pending = 8,
-            process_args = (pcounts_save_dir, tokens_fname, pcounts_paths)
+            process_args = (self._func_count_pair_batch, pcounts_save_dir, tokens_fname)
         )
 
-        return pcounts_paths
+        return pcounts_path_collector
     
 
     @classmethod
@@ -1123,6 +1123,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
 
         # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens. 可以为 空 array, 这样 written pq table 也是空的
+        # 有些 merge_func 并不剔除 merge 之后长度为 1 的chunk. 这样 written pq table 永远不会是 空的.
+        # 但是这些 length 1 chunks 从次之后既无法贡献 pair counts, 也无法发生 merge.(count_pair/merge_pair都兼容此情况)
         (valid_merged_tokens_flat, valid_merged_offsets), b_order = merge_func(
             tokens_offsets_border,
             L, R, new_token)
@@ -1131,6 +1133,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
         table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
         
+        # 如果 valid_merged_tokens_flat/valid_merged_offsets 为空, 即merge后本batch全部都是length 1 chunks
+        if not table: # 此时 table 为空. 放弃 write table 直接返回
+            return None
+
         merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
 
         # pq.write_table 是线程安全的(并发写入不同 parquet 文件), 内部创建独属的文件句柄和缓冲区, 不依赖全局状态
@@ -1175,13 +1181,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         stream_parallel_process_with_pending(
             executor,
             data_gen, # data_gen: (tokens_flat, offsets), i
-            process_fn = cls._write_merge_batch, # return merged_save_path
-            result_handler = lambda merged_save_path: merged_save_path_collector.append(merged_save_path), 
+            process_fn = cls._write_merge_batch, # return merged_save_path or None
+            result_handler = lambda merged_save_path: merged_save_path is not None and merged_save_path_collector.append(merged_save_path), 
             max_pending = 8,
             process_args = (fc_merge, L, R, new_token, save_dir, src_fname)
             )
         
-        concate_parquet_files(merged_save_path_collector, os.path.join(save_dir, src_fname), clean=True)
+        concate_parquet_files(merged_save_path_collector, os.path.join(save_dir, src_fname), clean=True) # 支持 空list
 
 
     def _next_tokens_dir(
@@ -1232,8 +1238,9 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                     f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
                     )
             b_pcounts_pqs.extend( self._write_pcounts(tokens_pq, executor) )
-        
-        if not any(b_pcounts_pqs):
+
+        # 当 所有 tokens pq files 的所有 batch 都是 length 1 chunks 时, 说明一个 pair 都找不出来了. 此时 b_pcounts_pqs 为空
+        if not b_pcounts_pqs:
             # 在raise error前先保存已经train好的tokenizer
             self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
 
