@@ -627,9 +627,20 @@ from ..file.parquet_io import yield_parquet_batch, concate_parquet_files
 from ..file.folder_op import clean_folder
 from ...design.stream_outline import stream_parallel_process_with_pending
 
+# count_pair_batch 和 merge_pair_batch 分别是完成 统计batch的token-pair occurrence信息/合并batch的token-pair到new_token 的核心函数.
+# 接口设计:
+# count_pair_batch: 
+#   输入一个 python 结构体 tokens_offsets_border, 其中 index_0 是 tuple(np array of tokens_flat, np array of offsets), index_1 是 batch_order
+#   输出一个 python 结构体,其中 index_0 是 tuple(np array of left_token, np array of right_token, np array of counts), index_1 是 batch_order
 
+# merge_pair_batch:
+#   输入一个 python 结构体 tokens_offsets_border, 其中 index_0 是 tuple(np array of tokens_flat, np array of offsets), index_1 是 batch_order
+#   输入 pair_L as left_token, pair_R as right_token, new_token as merged_token of left+right
+#   输出一个 python 结构体,其中 index_0 是 tuple(np array of tokens_flat, np array of offsets), index_1 是 batch_order
 
+# count_pair_batch 和 merge_pair_batch 都是没有副作用、没有竞态风险(不存在对共享状态的修改) 的纯计算逻辑, 多进程/多线程的对比里, 多线程应该是更好的选择.
 
+# 此count pair batch 函数
 def count_pair_batch(tokens_offsets_border):
     '''
     对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
@@ -686,8 +697,7 @@ def merge_pair_batch_memcontiguous(
         tokens_offsets_border: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
-        new_token:np.uint16,
-        ) -> tuple[np.ndarray, np.ndarray]:
+        new_token:np.uint16):
     # tokens_flat:np.ndarray of uint16
     # offsets:np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
@@ -726,8 +736,7 @@ def merge_pair_batch_parallel(
         tokens_offsets_border: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
-        new_token:np.uint16,
-        ) -> tuple[np.ndarray, np.ndarray]:
+        new_token:np.uint16):
     # tokens_flat:np.ndarray, # np.ndarray of uint16
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
@@ -1247,7 +1256,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             try:
                 # _get_merge_info 的副作用: 
                 #   遍历 buffer_dir/tokens/this 所有 tokens 的pq文件 tokens_pq:
-                #   由 _write_pcounts 函数, 对 this/tokens_pq 生成 batch 生成器, 然后并行执行如下:
+                #   由 _write_pcounts 函数, 对 this/tokens_pq 生成 batch 生成器: tokens_flat: uint16, offsets: int64, b_order: int, 然后并行执行如下:
                 #       由 注册的 self._func_count_pair_batch 函数统计出 每个batch 的 pair_counts
                 #       由 _write_pcounts_batch 函数, 将 每个batch 的 pair_counts 写成 pq 文件落盘: buffer_dir/p_counts/this/tokens_pq-part-{b_id}.pq
                 #   由 _aggregate_pcounts 合并上述所有 buffer_dir/p_counts/this/tokens_pq-part-{b_id}.pq 成一个 agg_pcounts 的 pyarrow table
@@ -1262,7 +1271,12 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 if rank == end - 1:
                     break
 
-                # _next_tokens_dir 的副作用: TODO
+                # _next_tokens_dir 返回 buffer_dir/tokens/next 的路径:
+                #   遍历 buffer_dir/tokens/this 所有 tokens 的pq文件 tokens_pq:
+                #   由 _merge_tokens_save 函数, 目标 buffer_dir/tokens/next, 基于 tokens_pq 的 batch 生成器: tokens_flat, offsets, b_order, 然后并行执行如下:
+                #       由 _write_merge_batch 函数, 调用注册的 self._func_merge_pair_batch, 得到 merged tokens_flat/offsets 后, 落盘成 pa table for batch
+                #       收集 _write_merge_batch 返回的 pa table for batch 的 paths, 添加到 一个 list 里
+                #   由 concate_parquet_files 把 list 中所有 new tokens_batch pa table 拼接成一个 大 pa table, 作为 next tokens_pq, 并保存到 buffer_dir/tokens/next
                 tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
                 
             finally:
@@ -1306,7 +1320,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         else:
             self._build_vocab()
 
-        with ThreadPoolExecutor(os.cpu_count()) as executor:
+        with ThreadPoolExecutor(os.cpu_count()) as executor: # 
             # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
             # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
             tokens_dir_start = self._prepare_train(num_merges, executor)
