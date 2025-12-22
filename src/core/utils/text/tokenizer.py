@@ -639,8 +639,12 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 #   输出一个 python 结构体,其中 index_0 是 tuple(np array of tokens_flat, np array of offsets), index_1 是 batch_order
 
 # count_pair_batch 和 merge_pair_batch 都是没有副作用、没有竞态风险(不存在对共享状态的修改) 的纯计算逻辑, 多进程/多线程的对比里, 多线程应该是更好的选择.
+# 但是多线程的 count_pair_batch/merge_pair_batch 必须做到 release GIL, 不然无法得到有效加速. 不管是 Cython-extend, 还是 numpy, 都需要 no-gil 处理.
+# 故本项目暂时全面使用 多进程处理: 虽然多了一次 data 从主进程 IPC 到 进程池 的通信成本, 但是主逻辑的编写清晰很多(无论是cython/numpy).
+# 要注意: 无论是 count_pair_batch 还是 merge_pair_batch 的 result 落盘, 都直接在工作进程里完成, 不要把 result IPC回到主进程再 落盘减少一次 IPC 成本.
+# TODO: 多线程版本的 count_pair_batch/merge_pair_batch 是效率更高的 并行 办法
 
-# 此count pair batch 函数
+# 此count pair batch 函数的 python 部分无法绕开 GIL, 所以加速效果不如 全numpy处理
 def count_pair_batch(tokens_offsets_border):
     '''
     对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
@@ -1320,7 +1324,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         else:
             self._build_vocab()
 
-        with ThreadPoolExecutor(os.cpu_count()) as executor: # 
+        with ProcessPoolExecutor(os.cpu_count()) as executor: # 
             # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
             # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
             tokens_dir_start = self._prepare_train(num_merges, executor)
