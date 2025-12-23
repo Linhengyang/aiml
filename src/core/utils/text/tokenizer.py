@@ -788,38 +788,55 @@ def raise_continue_num_merges_conflict(num_merged, num_total_merges, continue_nu
         )
 
 
+# get_pair_counts 和 merge_pair 两个 work on tokens(list of integers) 的原子操作, 在超长的 chunks of tokens 上并发执行
+# 的收益非常低。由于 tokens 一般被切得很小, 故 这两个原子操作的计算密度不大, 而超长的 chunks of tokens 的并发数量太大，并发
+# 带来的开销完全抵消了其提升。
+# 真正的瓶颈在于 stored_tokens(暂存的tokens以merge top pair) 导致的内存瓶颈。超长的 stored_tokens 是 list of tokens, 长
+# 度非常长，单机内存很可能放不下。 应该首先处理这个内存瓶颈。-----> buffer it
+
+# 由于有中间结果可以和 merge_ranks 相互校对, 所以buffer之后存在一个"续训"的概念: 从init/load到的tok, 检查它的merge_ranks状
+# 态是否符合buffer_tokens文件。若符合, 则从buffer_tokens续train
+
+# 最大的中间结果: 全局 pair-counts, 一张形状为(N, 3)的表格. 每行三个元素分别是L_token, R_token, counts
+# 首先分析一行占用空间:
+# 考虑一个大小为 x GB的parquet语料文件, pq压缩率大概在2-10, 那么算它是一个 10x GB左右的文本文件.
+# 也即最多 10x G个token(单字节一个token). 从而pair-counts的counts(出现频数)最多就是10x G= x 100亿 左右. uint32(最大值43亿)
+# 很可能存不下, 所以存储 counts 统一用 uint64就好. 正好聚合计算后, 一般都用 uint64 表示聚合计算的结果.
+# tokens ID而言, uint16值范围是0-65536, 足够覆盖小的tokenizer了。2个bytes最多覆盖65535(uint16上限).
+#     经典例子, GPT2的词表大小(不包含special marks)是5W+256=50256. 
+# vocab_size(不包含special marks)不超过65535的tok, 其token用2个字节(uint16)就可以表达.
+# 总结一下:
+#     一个counts占据 8(uint64)字节.
+#     两个tokens占据 4(uint16, for 6W 词表大小以下) 或 8(uint32, for 6W 词表大小以上)字节.
+# 小词表 --> 每行12字节.   大词表 --> 每行16字节
+    
+# 然后分析总行数N for merge epoch e:
+# 考虑 e 时刻状态下的语料: 长度为L(个tokens), 词表大小为V(e=V-256), 它生成的 pair-tokens counts总行数, 有两个上限1: L, 上限2: V^2
+# 两个上限共同起作用:
+#     初期V^2小, L大, N 主要由 V^2 限制
+#     随着merge进行, L逐渐降低(以衰减的速率), V^2逐渐增大(以2次的速率增大), 后期 N 主要由 L 限制
+
+# 对于小词表而言, pair-count的 V^2 上限大概是 6W^2 = 36亿行, 每行12字节 ----> 40GB
 
 class bufferBBPETokenizer(baseBBPETokenizer):
     '''
-    get_pair_counts 和 merge_pair 两个 work on tokens(list of integers) 的原子操作, 在超长的 chunks of tokens 上并发执行
-    的收益非常低。由于 tokens 一般被切得很小, 故 这两个原子操作的计算密度不大, 而超长的 chunks of tokens 的并发数量太大，并发
-    带来的开销完全抵消了其提升。
-    真正的瓶颈在于 stored_tokens(暂存的tokens以merge top pair) 导致的内存瓶颈。超长的 stored_tokens 是 list of tokens, 长
-    度非常长，单机内存很可能放不下。 应该首先处理这个内存瓶颈。-----> buffer it
-
-    由于有中间结果可以和 merge_ranks 相互校对, 所以buffer之后存在一个"续训"的概念: 从init/load到的tok, 检查它的merge_ranks状
-    态是否符合buffer_tokens文件。若符合, 则从buffer_tokens续train
+    BBPE buffer-train 的每一 epoch, 可分为以下几个步骤
+    步骤1 count:
+        1. 读取 batch of tokens chunks 从磁盘
+        2. 计算 pair-counts
+        3. 写入 pcounts for batch 到磁盘
+    步骤2 reduce:
+        1. 聚合所有 pcounts for batch, 并得到 max-occur pair.
+           如果没有 max-occur pair, 即极端情况下没有 pair 了(所有tokens chunks都是单一token), 那么说明语料耗尽
+        2. 生成 new token
+    步骤3 merge:
+        1. 读取 batch of tokens chunks 从磁盘
+        2. 合并 max-occur pair to new token, 得到 new batch of tokens chunks
+        3. 写入 new batch of tokens chunks 到磁盘
     
-    最大的中间结果: 全局 pair-counts, 一张形状为(N, 3)的表格. 每行三个元素分别是L_token, R_token, counts
-    首先分析一行占用空间:
-    考虑一个大小为 x GB的parquet语料文件, pq压缩率大概在2-10, 那么算它是一个 10x GB左右的文本文件.
-    也即最多 10x G个token(单字节一个token). 从而pair-counts的counts(出现频数)最多就是10x G= x 100亿 左右. uint32(最大值43亿)
-    很可能存不下, 所以存储 counts 统一用 uint64就好. 正好聚合计算后, 一般都用 uint64 表示聚合计算的结果.
-    tokens ID而言, uint16值范围是0-65536, 足够覆盖小的tokenizer了。2个bytes最多覆盖65535(uint16上限).
-        经典例子, GPT2的词表大小(不包含special marks)是5W+256=50256. 
-    vocab_size(不包含special marks)不超过65535的tok, 其token用2个字节(uint16)就可以表达.
-    总结一下:
-        一个counts占据 8(uint64)字节.
-        两个tokens占据 4(uint16, for 6W 词表大小以下) 或 8(uint32, for 6W 词表大小以上)字节.
-    小词表 --> 每行12字节.   大词表 --> 每行16字节
-        
-    然后分析总行数N for merge epoch e:
-    考虑 e 时刻状态下的语料: 长度为L(个tokens), 词表大小为V(e=V-256), 它生成的 pair-tokens counts总行数, 有两个上限1: L, 上限2: V^2
-    两个上限共同起作用:
-        初期V^2小, L大, N 主要由 V^2 限制
-        随着merge进行, L逐渐降低(以衰减的速率), V^2逐渐增大(以2次的速率增大), 后期 N 主要由 L 限制
-    
-    对于小词表而言, pair-count的 V^2 上限大概是 6W^2 = 36亿行, 每行12字节 ----> 40GB
+    步骤2 reduce 在主进程完成, 所以步骤1 和步骤3必然分开执行. 关于这两个步骤, 同步流程可以是:
+    版本1: 主进程 read batch, IPC到工作进程完成 pair-count/pair-merge, 且在工作进程完成写入
+    版本2: 在工作进程完成读取(分片按row-group), 然后在工作进程完成 pair-count/pair-merge, 且在工作进程完成写入 --> 全程没有IPC
     '''
     token_dtype = pa.uint16()
 
@@ -1471,8 +1488,22 @@ import asyncio
 
 class asyncBBPETokenizer(boostBBPETokenizer):
     '''
-    异步的生产者-消费这模式, 是通过一个queue连接, 但解耦了 生产数据 和 消费数据 两个步骤之间的依赖关系，使得
-    生产和消费两个异步task可以自顾自运行.
+    BBPE buffer-train 的每一 epoch, 可分为以下几个步骤
+    步骤1 count:
+        1. 读取 batch of tokens chunks 从磁盘
+        2. 计算 pair-counts
+        3. 写入 pcounts for batch 到磁盘
+    步骤2 reduce:
+        1. 聚合所有 pcounts for batch, 并得到 max-occur pair.
+           如果没有 max-occur pair, 即极端情况下没有 pair 了(所有tokens chunks都是单一token), 那么说明语料耗尽
+        2. 生成 new token
+    步骤3 merge:
+        1. 读取 batch of tokens chunks 从磁盘
+        2. 合并 max-occur pair to new token, 得到 new batch of tokens chunks
+        3. 写入 new batch of tokens chunks 到磁盘
+    
+    步骤2 reduce 在主进程完成, 所以步骤1 和步骤3必然分开执行. 关于这两个步骤, 异步流程可以是:
+    版本1: 读取batch、算pair-count/pair-merge、写入pcount/new_batch TODO
     '''
     _MAX_QUEUE_SIZE = 10
     _NUM_COMPUTERS = 8
