@@ -1540,20 +1540,22 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         async def main():
             # 一个in-place改变状态的收集函数.
             pcounts_paths = []
-            async def collector(pcounts_order):
-                # 把落盘写到 collector 步骤中. 安全因为它 await 拿到process_fc 计算结果, 以及collector都在主线程中
-                if pcounts_order is not None:
-                    self._write_pcounts_batch(pcounts_order, pcounts_save_dir, tokens_fname, pcounts_paths)
-                else:
-                    pcounts_paths.append(None)
+            async def path_collector(pcounts_file_path):
+                # 原版: 把落盘写到 collector 步骤中. 安全因为它 await 拿到process_fc 计算结果, 以及collector都在主线程中
+                # 改进: 把落盘写道 proces_fc 中. 安全是因为 pq.write_table 是线程安全的(分片写入)
+                if pcounts_file_path is not None:
+                    pcounts_paths.append(pcounts_file_path)
             
             await pipeline_producer_consumer(
                 data_gen, # 读取 parquet 文件, 不断生成 batch as (tokens_flat, offsets), b_order 到 异步队列 里
-                self._func_count_pair_batch, # (tokens_flat, offsets), b_order --> (b_pcounts, b_order)
+                self._write_count_batch, # (tokens_flat, offsets), b_order --IPC/count --> (b_pcounts, b_order) --> 落盘到 b_pcounts_file_path
                 executor, # _func_count_pair_batch 的执行 进程池/线程池
                 self._MAX_QUEUE_SIZE, # 
                 1,
-                collector, # arg: (b_pcounts, b_order) --> in-place change pcounts_paths
+                path_collector, # b_pcounts_file_path --> in-place change pcounts_paths
+                self._func_count_pair_batch, # arg count_func
+                pcounts_save_dir, # arg save_dir
+                tokens_fname # arg src_tokens_fname
                 )
             
             return pcounts_paths
