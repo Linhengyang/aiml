@@ -888,7 +888,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         self._func_count_pair_batch = fc_count_pair_batch
 
 
-    def _init_tokens(self, corpora:str|t.List[str], text_colnames:t.List[None|str], extra_save_dir:str|None):
+    def _init_tokens(self, corpora:str|t.List[str], text_colnames:t.List[None|str], extra_save_dir:str|None, row_group_size=None):
         '''
         如果 extra_save_dir 是path str, 且目录不为空, 那么copy extra_save_dir里的文件到 _buffer_dir/tokens/0
         如果 extra_save_dir 是None,
@@ -976,7 +976,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                     text = ENDOFTEXT.join( batch[text_col].to_pylist() )
                     # 创建 pa table
                     batch_table = self.text_to_tokens_pa_table(self.pat_str, text)
-                    writer.write_table(batch_table) # TODO: row_group_size set to buffer_size 改造 tokens_pq file 使之支持 分片=batch读取
+                    writer.write_table(batch_table, row_group_size)
         
         # clean corpus parquet file from string input
         clean_folder(self._buffer_dir, method='only_file')
