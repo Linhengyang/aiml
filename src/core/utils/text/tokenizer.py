@@ -1503,7 +1503,17 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         3. 写入 new batch of tokens chunks 到磁盘
     
     步骤2 reduce 在主进程完成, 所以步骤1 和步骤3必然分开执行. 关于这两个步骤, 异步流程可以是:
-    版本1: 读取batch、算pair-count/pair-merge、写入pcount/new_batch TODO
+    版本1: [读取batch(主进程)] --IPC--> [算pair-count/merge(进程池)] --IPC--> [写入pcount/new_batch], 用两个queue解耦三个步骤(理想情况)
+    实际情况:
+        pair-count部分: 一个生产者协程 <queue解耦> 一个消费者协程, 其中协程:
+            生产者只有 读取batch 并put到 queue
+            消费者有 1. 从 queue 读取, 2. 异步IPC到进程池等待 result 再IPC result到主进程, 3. 在主进程对result执行collector(写入+记录路径)
+        pair-merge部分: 一个生产者协程 <queue1解耦> 一个中游者协程 <queue2解耦> 一个下游者协程
+            生产者只有 读取batch 并put到 queue1
+            中游者有包含两个前后依赖部分:
+                部分1: 1. 从 queue1 读取, 2. 异步IPC到进程池等到 result 再IPC result到主进程, 3. 在主进程把result put 进入 queue2
+                部分2: 在部分1全部结束后, 往 queue2 put 一个 None 信号
+            下游者有 1. 从 queue2 读取result, 2. 异步IPC到进程池把result写入磁盘path, 3. 在主进程对path执行collector(记录)
     '''
     _MAX_QUEUE_SIZE = 10
     _NUM_COMPUTERS = 8
@@ -1538,7 +1548,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
             
             await pipeline_producer_consumer(
                 data_gen, # 读取 parquet 文件, 不断生成 batch as (tokens_flat, offsets), b_order 到 异步队列 里
-                self._func_count_pair_batch, # (tokens_flat, offsets), b_order --> (b_pcounts, b_order) 
+                self._func_count_pair_batch, # (tokens_flat, offsets), b_order --> (b_pcounts, b_order)
                 executor, # _func_count_pair_batch 的执行 进程池/线程池
                 self._MAX_QUEUE_SIZE, # 
                 1,
