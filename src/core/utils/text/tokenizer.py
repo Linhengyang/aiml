@@ -976,7 +976,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                     text = ENDOFTEXT.join( batch[text_col].to_pylist() )
                     # 创建 pa table
                     batch_table = self.text_to_tokens_pa_table(self.pat_str, text)
-                    writer.write_table(batch_table) # TODO: row_group_size 改造 tokens_pq file 使之支持 分片读取
+                    writer.write_table(batch_table) # TODO: row_group_size set to buffer_size 改造 tokens_pq file 使之支持 分片=batch读取
         
         # clean corpus parquet file from string input
         clean_folder(self._buffer_dir, method='only_file')
