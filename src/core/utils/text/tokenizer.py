@@ -836,7 +836,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
     步骤2 reduce 在主进程完成, 所以步骤1 和步骤3必然分开执行. 关于这两个步骤, 同步流程可以是:
     版本1: 主进程 read batch, IPC到工作进程完成 pair-count/pair-merge, 且在工作进程完成写入
-    版本2: 在工作进程完成读取(分片按row-group), 然后在工作进程完成 pair-count/pair-merge, 且在工作进程完成写入 --> 全程没有IPC
+    版本2(TODO): 在工作进程完成读取(分片按row-group), 然后在工作进程完成 pair-count/pair-merge, 且在工作进程完成写入 --> 全程没有IPC
     '''
     token_dtype = pa.uint16()
 
@@ -976,7 +976,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                     text = ENDOFTEXT.join( batch[text_col].to_pylist() )
                     # 创建 pa table
                     batch_table = self.text_to_tokens_pa_table(self.pat_str, text)
-                    writer.write_table(batch_table)
+                    writer.write_table(batch_table) # TODO: row_group_size 改造 tokens_pq file 使之支持 分片读取
         
         # clean corpus parquet file from string input
         clean_folder(self._buffer_dir, method='only_file')
