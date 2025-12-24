@@ -1508,6 +1508,7 @@ class asyncBBPETokenizer(boostBBPETokenizer):
         pair-count部分: 一个生产者协程 <queue解耦> 一个消费者协程, 其中协程:
             生产者只有 读取batch 并put到 queue
             消费者有 1. 从 queue 读取, 2. 异步IPC到进程池等待 result 再IPC result到主进程, 3. 在主进程对result执行collector(写入+记录路径)
+            -->改进: 2. 异步IPC到进程池等待 result 并写入路径, 再IPC 路径到主进程, 3. 在主进程对路径执行collector(记录)
         pair-merge部分: 一个生产者协程 <queue1解耦> 一个中游者协程 <queue2解耦> 一个下游者协程
             生产者只有 读取batch 并put到 queue1
             中游者有包含两个前后依赖部分:
