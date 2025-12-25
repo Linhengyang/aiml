@@ -1315,8 +1315,8 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 # keep the init and `keep_window` tokens/p_counts parquet file
                 to_remove = rank - keep_window
                 if to_remove > 0:
-                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}') )
-                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}') )
+                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}'), keep = False)
+                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}'), keep = False)
 
 
 
@@ -1473,180 +1473,34 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 
+# 多进程BBPE-train: 工作进程独立完成 分片读row_group / 并行算count&merge / 独立写pcounts&merged
+# count 之后有一个reduce过程: aggregate --> find max-occurrence pair
+# merge 之后也有一个reduce过程: concate all batches of merged tokens
 
-
-
-
-
-# from ...design.async_outline import async_queue_get, async_queue_process, pipeline_producer_consumer
-# import asyncio
-
-
-
-
-
-
-# class asyncBBPETokenizer(boostBBPETokenizer):
-#     '''
-#     BBPE buffer-train 的每一 epoch, 可分为以下几个步骤
-#     步骤1 count:
-#         1. 读取 batch of tokens chunks 从磁盘
-#         2. 计算 pair-counts
-#         3. 写入 pcounts for batch 到磁盘
-#     步骤2 reduce:
-#         1. 聚合所有 pcounts for batch, 并得到 max-occur pair.
-#            如果没有 max-occur pair, 即极端情况下没有 pair 了(所有tokens chunks都是单一token), 那么说明语料耗尽
-#         2. 生成 new token
-#     步骤3 merge:
-#         1. 读取 batch of tokens chunks 从磁盘
-#         2. 合并 max-occur pair to new token, 得到 new batch of tokens chunks
-#         3. 写入 new batch of tokens chunks 到磁盘
+class mpBBPETokenizer(bufferBBPETokenizer):
+    '''
+    以 map-reduce 风格重写 多进程 BBPE train
+    train_bpe 提供两种模式:
+        1. corpora != None, 从头train模式: 初始化tokenizer状态, 初始化 tokens parquet file at 0 merge
+           初始化 tokens parquet file at 0 merge 有两种方式:
+           一是从corpora生产到 _buffer_tokens_dir/0, 二是从 backup_init_tokens_dir 复制到 _buffer_tokens_dir/0
+        1. corpora = None, 续train模式: 
+           _prepare_train 检查 num_merges 和 explicit_n_vocabs/merge_ranks size 之家的冲突, 返回 训练起点的 tokens file
+           <_buffer_tokens_dir/start>, 用来执行 merge_rank = start(即第start+1次merge), 此时 merge_rank size = start
+    多进程分片读取只能 分片读取 row group(多个), 故 buffer_size(batch_size) 应该是 row_group_size 的整数倍, 手动sharding
+    以保证 每个工作进程 每次读取多个row groups(总行数正好 batch_size)作为batch 以控制 batch文件总数
     
-#     步骤2 reduce 在主进程完成, 所以步骤1 和步骤3必然分开执行. 关于这两个步骤, 异步流程可以是:
-#     版本1: [读取batch(主进程)] --IPC--> [算pair-count/merge(进程池)] --IPC--> [写入pcount/new_batch], 用两个queue解耦三个步骤(理想情况)
-#     实际情况:
-#         pair-count部分: 一个生产者协程 <queue解耦> 一个消费者协程, 其中协程:
-#             生产者只有 读取batch 并put到 queue
-#             消费者有 1. 从 queue 读取, 2. 异步IPC到进程池等待 result 再IPC result到主进程, 3. 在主进程对result执行collector(写入+记录路径)
-#             -->改进: 2. 异步IPC到进程池等待 result 并写入路径, 再IPC 路径到主进程, 3. 在主进程对路径执行collector(记录)
-#         pair-merge部分: 一个生产者协程 <queue1解耦> 一个中游者协程 <queue2解耦> 一个下游者协程
-#             生产者只有 读取batch 并put到 queue1
-#             中游者有包含两个前后依赖部分:
-#                 部分1: 1. 从 queue1 读取, 2. 异步IPC到进程池等到 result 再IPC result到主进程, 3. 在主进程把result put 进入 queue2
-#                 部分2: 在部分1全部结束后, 往 queue2 put 一个 None 信号
-#             下游者有 1. 从 queue2 读取result, 2. 异步IPC到进程池把result写入磁盘path, 3. 在主进程对path执行collector(记录)
-#     '''
-#     _MAX_QUEUE_SIZE = 10
-#     _NUM_COMPUTERS = 8
-#     _NUM_WRITERS = 1
+    在生成 tokens_pq 文件时, write_table 的 row_group_size (目前看set to maximum 67108864), 包括初始化 tokens parquet file at 0 merge
 
-    
-#     def _write_pcounts(self, tokens_pq, executor) -> list:
-#         '''
-#         异步版本的 _write_pcounts: 把 背压设计的 stram_parallel_process_with_pending 换成 异步queue
-#         '''
-#         # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
-#         rank, tokens_fname = tokens_pq.split('/')[-2:]
+    故 map过程中:
+        read读取: sharding 不重叠读取 row groups 组成 batch
+        write写入 write table of tokens_pq 时, row_group_size 是buffer_size因数 即可, 保证下一epoch 在read 时可以sharding读取row groups
 
-#         # 创建 本次 rank 的 buffer_pcounts_dir
-#         pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, rank)
-#         os.makedirs(pcounts_save_dir, exist_ok=True) 
+        续train模式, 或 init_tokens_pq 来自 backup 时, tokens_pq file 无法控制 row_group_size, 按 row group 分片读取即可因为下一个
+        epoch就不会有问题了. 总结: 手动 sharding 分片 row groups 以控制 batch 总数
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-#         yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-#         # data_gen: (tokens_flat, offsets), i
-#         data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
-        
-#         # 同步版本的 _write_pcounts 使用的是 带背压设计的 stream_parallel_process_with_pending
-#         async def main():
-#             # 一个in-place改变状态的收集函数.
-#             pcounts_paths = []
-#             async def path_collector(pcounts_file_path):
-#                 # 原版: 把落盘写到 collector 步骤中. 安全因为它 await 拿到process_fc 计算结果, 以及collector都在主线程中
-#                 # 改进: 把落盘写道 proces_fc 中. 安全是因为 pq.write_table 是线程安全的(分片写入)
-#                 if pcounts_file_path is not None:
-#                     pcounts_paths.append(pcounts_file_path)
-            
-#             await pipeline_producer_consumer(
-#                 data_gen, # 读取 parquet 文件, 不断生成 batch as (tokens_flat, offsets), b_order 到 异步队列 里
-#                 self._write_count_batch, # (tokens_flat, offsets), b_order --IPC/count --> (b_pcounts, b_order) --> 落盘到 b_pcounts_file_path
-#                 executor, # _func_count_pair_batch 的执行 进程池/线程池
-#                 self._MAX_QUEUE_SIZE, # 
-#                 1,
-#                 path_collector, # b_pcounts_file_path --> in-place change pcounts_paths
-#                 self._func_count_pair_batch, # arg count_func
-#                 pcounts_save_dir, # arg save_dir
-#                 tokens_fname # arg src_tokens_fname
-#                 )
-            
-#             return pcounts_paths
-        
-#         pcounts_paths = asyncio.run(main())
-#         return [path for path in pcounts_paths if path] # collector会收集None作为结束信号
-
-
-#     @classmethod
-#     def _write_merge_batch(cls, merged_tokens_offsets_order, save_dir, src_fname):
-#         (merged_tokens, merged_offsets), b_order = merged_tokens_offsets_order
-
-#         merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens)
-#         batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
-#         table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
-
-#         merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
-#         pq.write_table(table, merged_save_path)
-
-#         return merged_save_path
-
-
-#     @classmethod
-#     def _merge_tokens_save(
-#             cls,
-#             save_dir,
-#             to_merge_pair,
-#             new_token,
-#             tokens_pq,
-#             fc_merge:t.Callable,
-#             buffer_size,
-#             executor,
-#             ):
-#         '''
-#         given tokens parquet file `tokens_pq`,
-#         merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
-#         then save result tokens chunks into a same-file-name parquet file to `save_dir`
-
-#         batches(buffer_size确定batch大小)
-#         异步:
-#         读(yield_tokens) as 生产者 ---> 队列1
-#         算(_thrd_process_tokens_batch) as 队列1 消费者, 队列2 生产者 ---> 队列2
-#         写(writer.write_batch to save_dir) as 队列2消费者
-#         '''
-#         fname = os.path.basename(tokens_pq)
-#         L, R = map(cls.token_dtype.to_pandas_dtype(), to_merge_pair)
-#         new_token = cls.token_dtype.to_pandas_dtype()(new_token)
-
-#         yield_batch:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-#         # batch --> (tokens, offsets), order
-#         data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_batch)
-
-#         async def main():
-#             # 在主线程接收 "读" 的result（tokens_offsets, b_order）到 queue1
-#             queue1 = asyncio.Queue(cls._MAX_QUEUE_SIZE)
-
-#             # 一个 read 任务即可
-#             read_task = asyncio.create_task(async_queue_get(data_gen, queue1))
-
-#             # 从queue1获取素材, 主线程跨进程pickle发送素材到进程池执行 fc_merge_pair_batch
-#             # 然后在主线程跨进程pickle接收进程池"算"的result（merged_tokens_offsets, b_order），collector到queue2.
-#             queue2 = asyncio.Queue(cls._MAX_QUEUE_SIZE)
-#             async def compute_collector(result):
-#                 await queue2.put(result)
-            
-#             compute_tasks = [
-#                 asyncio.create_task(
-#                     async_queue_process(queue1, executor, fc_merge, compute_collector, L, R, new_token)
-#                     )
-#                 for _ in range(cls._NUM_COMPUTERS)]
-            
-#             # 计算任务全部执行完之后, 要加一个None作为结束信号到queue2
-#             async def compute_end_tasks():
-#                 await asyncio.gather(*compute_tasks)
-#                 await compute_collector(None)
-
-#             # 在主线程接收 "写" 的result（path）到 written_parts. 只有主线程改变 written_parts，所以它安全
-#             written_parts = []
-#             async def write_collector(result):
-#                 written_parts.append(result)
-            
-#             # 单个 write 任务: 从 queue2 中得到素材, 送入进程池执行 cls._write_merge_batch，
-#             write_tasks = [
-#                 asyncio.create_task(
-#                     async_queue_process(queue2, executor, cls._write_merge_batch, write_collector, save_dir, fname)
-#                     )
-#                 for _ in range(cls._NUM_WRITERS)]
-
-#             await asyncio.gather(read_task, asyncio.create_task(compute_end_tasks()), *write_tasks)
-#             return written_parts
-            
-#         written_parts = asyncio.run(main())
-
-#         concate_parquet_files(written_parts, os.path.join(save_dir, fname), clean=True)
+    def _sharding():
+        pass
