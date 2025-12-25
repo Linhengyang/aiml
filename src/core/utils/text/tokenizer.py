@@ -1371,7 +1371,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'
         if not self._merge_ranks:
             raise RuntimeError(f'merge_ranks empty. should run `train_bpe`.')
-        #TODO    
+        #TODO
         raise NotImplementedError(f'tokenizer extend not implemented')
 
 
@@ -1502,5 +1502,12 @@ class mpBBPETokenizer(bufferBBPETokenizer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def _sharding():
+
+    def _sharding(num_batches, num_workers, ):
+        '''
+        1. 单个工作进程 单次读取 num_groups_per_batch 个 row group 以组成 1 个 batch, 以控制 全流程batch总数 num_batches
+        2. num_workers 个工作进程 单次共处理 num_workers 个 batch 时, 要控制 总内存耗用低于 系统总内存
+        3. row_group_size 应该是 batch_size 的因子, 且越大越好, 使得 num_groups_per_batch 小
+        '''
         pass
+    
