@@ -1509,5 +1509,92 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         2. num_workers 个工作进程 单次共处理 num_workers 个 batch 时, 要控制 总内存耗用低于 系统总内存
         3. row_group_size 应该是 batch_size 的因子, 且越大越好, 使得 num_groups_per_batch 小
         '''
+        pass
+
+
+    classmethod
+    def _map_task_read_count_write(cls, tokens_pq_path, row_groups, count_func, save_dir, src_fname):
+        '''
+        MAP 工作之 count:
+            每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 count_func, 
+            把生成的 pair-count-table 写入目标路径(由save_dir/src_fname/row_groups确定)
+        '''
+        # 读取数据, 解析成 pair count function 的输入
+        pq_f = pq.ParquetFile(tokens_pq_path)
+        b_table = pq_f.read_row_groups(row_groups)
+        # b_table['tokens'] --> pa.LargeListArray
+        # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
+        tokens_flat = b_table[cls.tokens_schema[0].name].values.to_numpy()
+        offsets = b_table[cls.tokens_schema[0].name].offsets.to_numpy()
+        b_order = tuple(row_groups)
+
+        tokens_offsets_border = (tokens_flat, offsets), b_order
+
+        # 计算 pair count
+        b_pcounts, b_order = count_func(tokens_offsets_border)
         
+        data = {
+            cls.p_counts_schema[0].name: b_pcounts[0], # L: L_tokens
+            cls.p_counts_schema[1].name: b_pcounts[1], # R: R_tokens
+            cls.p_counts_schema[2].name: b_pcounts[2], # counts: counts
+        }
+
+        table = pa.Tbale.from_pydict(data, cls.p_counts_schema)
+
+        if not table:
+            return None
+        
+        pcnts_save_path = os.path.join(save_dir, f'{src_fname}-part-{'-'.join(list(map(str, b_order)))}.parquet')
+
+        pq.write_table(table, pcnts_save_path)
+        return pcnts_save_path
+
+
+
+    classmethod
+    def _map_task_read_merge_write(cls, tokens_pq_path, row_groups, merge_func, L, R, new_token, save_dir, src_fname):
+        '''
+        MAP 工作之 merge:
+            每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 merge_func, 
+            把生成的 merged-tokens-table 写入目标路径(由save_dir/src_fname/row_groups确定)
+        '''
+        # 读取数据, 解析成 pair merge function 的输入
+        pq_f = pq.ParquetFile(tokens_pq_path)
+        b_table = pq_f.read_row_groups(row_groups)
+        # b_table['tokens'] --> pa.LargeListArray
+        # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
+        tokens_flat = b_table[cls.tokens_schema[0].name].values.to_numpy()
+        offsets = b_table[cls.tokens_schema[0].name].offsets.to_numpy()
+        b_order = tuple(row_groups)
+
+        tokens_offsets_border = (tokens_flat, offsets), b_order
+
+        # 计算 pair merge
+        (merged_tokens_flat, merged_offsets), b_order = merge_func(tokens_offsets_border, L, R, new_token)
+        merged_tokens = pa.ListArray.from_arrays(merged_tokens_flat, merged_offsets)
+
+        data = {
+            cls.tokens_schema[0].name: merged_tokens, # tokens: chunks of tokens
+        }
+
+        table = pa.Tbale.from_pydict(data, cls.tokens_schema)
+
+        if not table:
+            return None
+        
+        merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{'-'.join(list(map(str, b_order)))}.parquet')
+
+        pq.write_table(table, merged_save_path)
+        return merged_save_path
     
+
+    @classmethod
+    def _reduce_task_count(cls, part_pair_counts_pq_files):
+        pass
+
+    
+    @classmethod
+    def _reduce_task_merge(cls, part_merged_tokens_pq_files, save_dir, src_fname):
+        pass
+
+
