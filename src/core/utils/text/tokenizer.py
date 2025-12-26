@@ -1591,11 +1591,43 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
     @classmethod
     def _reduce_task_count(cls, part_pair_counts_pq_files):
-        pass
+        '''
+        REDUCE 工作之 count:
+            收集所有 pair-count table, 按列 L, R 计数并累加, 返回 累加值最大的 pair(L, R) 及其 累加值
+        这部分工作可以 跨文档: 即对所有不同 parquet 文件的 所有 part_pcounts, 一次性 reduce 得到 max_occur_pair
+        本身这部分 reduce 就必须要 对所有 parquet 文件的所有 part_pcounts 执行
+        '''
+        tables = [pq.read_table(f) for f in part_pair_counts_pq_files]
+        concatenation = pa.concat_tables(tables)
+
+        L, R, counts = cls.p_counts_schema[0].name, cls.p_counts_schema[1].name, cls.p_counts_schema[2].name
+        
+        # group sum 会提升精度防止溢出, counts_sum dtype=uint64
+        agg_pcounts = concatenation.group_by([L, R]).aggregate([(counts, 'sum')]) # counts 列 --> counts_sum 列
+        agg_colname = '_'.join([counts, 'sum'])
+
+        max_occur = pc.max(agg_pcounts[agg_colname]).as_py()
+        filter_mask = pc.equal(agg_pcounts[agg_colname], max_occur)
+
+        _row = agg_pcounts.filter(filter_mask).slice(0, 1)
+
+        occur_most_pair: tuple[int, int] = (_row[L][0].as_py(), _row[R][0].as_py())
+        return occur_most_pair, max_occur
+    
+
+
+    @classmethod
+    def _reduce_task_merge(cls, part_merged_tokens_pq_files, concat_path, row_group_size):
+        '''
+        REDUCE 工作之 merge:
+            收集所有 pair-merge table, 拼接列 tokens, 落盘合并后的 table, 并删除 part pq files
+        这部分工作不可以 跨文档: 即对所有不同 parquet 文件的 merged tokens, 还是要 concatenate 回各不同的 merged parquet 文件
+        因为希望保持文档之间的结构, 不希望所有文档拼接成一个
+        '''
+        concate_parquet_files(part_merged_tokens_pq_files, concat_path, True, row_group_size)
+
 
     
-    @classmethod
-    def _reduce_task_merge(cls, part_merged_tokens_pq_files, save_dir, src_fname):
-        pass
+    
 
 
