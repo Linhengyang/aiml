@@ -941,7 +941,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         assert len(corpora) == len(text_colnames), f"length of corpora must match with length of columns"
         corpus_col_pair = []
         for i, corpus in enumerate(corpora):
-            if not corpus.endswith('.parquet'):
+            if not corpus.endswith('.parquet'): # 若此 corpus 是纯文本, 那么在 buffer_dir 给它创建一个 corpus_X.parquet 文件: 列名 text
                 corpus_pq_schema = pa.schema([ pa.field('text', pa.string()) ])
                 # overwrite if exists
                 corpus_pq = os.path.join(self._buffer_dir, f'corpus_{i}.parquet')
@@ -950,7 +950,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                         pa.Table.from_pydict({"text":[corpus]}, corpus_pq_schema)
                         )
                 corpus_col_pair.append( (corpus_pq, 'text') )
-            elif os.path.exists(corpus) and text_colnames[i]:
+            elif os.path.exists(corpus) and text_colnames[i]: # 若此 corpus 是parquet文件路径, 那么在配对一个合理列名即可
                 corpus_col_pair.append( (corpus, text_colnames[i]) )
             else:
                 raise FileNotFoundError(
@@ -969,12 +969,13 @@ class bufferBBPETokenizer(baseBBPETokenizer):
             else:
                 init_tokens_pqs.append(init_tokens_pq)
         
+        # 遍历每个 text parquet file, 分批 转换成 tokens(uint16) parquet file 于 buffer_dir/tokens
         for (corpus_pq, text_col), init_tokens_pq in zip(corpus_col_pair, init_tokens_pqs):
             corpus_batch_iter = yield_parquet_batch(corpus_pq, 8192*32, [text_col])
             with pq.ParquetWriter(init_tokens_pq, self.tokens_schema) as writer:
                 for k, batch in enumerate(corpus_batch_iter):
                     text = ENDOFTEXT.join( batch[text_col].to_pylist() )
-                    # 创建 pa table
+                    # 创建 pa table of tokens(not text)
                     batch_table = self.text_to_tokens_pa_table(self.pat_str, text)
                     writer.write_table(batch_table, row_group_size)
         
