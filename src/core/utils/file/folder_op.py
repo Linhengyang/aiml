@@ -37,6 +37,6 @@ def clean_folder(folder_path: str, method:t.Literal['all', 'only_file', 'only_fo
         except Exception as e:
             raise Exception(f"clean folder error: {e}")
     
-    # keep = True --> 保存 folder_path; keep = False --> 不保存 folder_path
-    if not keep:
+    # keep = True 且删光了内部所有 --> 保存 folder_path; keep = False --> 不保存 folder_path
+    if method == 'all' and not keep:
         shutil.rmtree(folder_path)
