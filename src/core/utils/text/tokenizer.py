@@ -1509,5 +1509,5 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         2. num_workers 个工作进程 单次共处理 num_workers 个 batch 时, 要控制 总内存耗用低于 系统总内存
         3. row_group_size 应该是 batch_size 的因子, 且越大越好, 使得 num_groups_per_batch 小
         '''
-        pass
+        
     
