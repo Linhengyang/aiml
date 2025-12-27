@@ -1472,7 +1472,7 @@ class boostBBPETokenizer(bufferBBPETokenizer):
 
 
 
-
+import itertools
 
 # 多进程BBPE-train: 工作进程独立完成 分片读row_group / 并行算count&merge / 独立写pcounts&merged
 # count 之后有一个reduce过程: aggregate --> find max-occurrence pair
@@ -1628,6 +1628,38 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
 
     
-    
+    def _get_merge_info(self, tokens_dir, executor):
+        # 从当前 tokens_dir, 统计得到 next merge pair 和 new token
+        num_merged_epochs = len(self._merge_ranks)
+        assert num_merged_epochs == int(os.path.basename(tokens_dir))
 
+        # compute pair_counts for every batch of tokens parquet into p_counts parquet, and collect them
+        b_pcounts_pqs = []
+        for f in os.listdir(tokens_dir):
+            tokens_pq = os.path.join(tokens_dir, f)
+
+            if not os.path.exists(tokens_pq):
+                raise FileNotFoundError(
+                    f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
+                    )
+            # b_pcounts_pqs.extend( self._write_pcounts(tokens_pq, executor) )
+            # MAP task:
+            
+            for row_groups in itertools.batched()
+            self._map_task_read_count_write(tokens_pq, row_groups, count_func, save_dir, src_fname)
+
+
+
+        # 当 所有 tokens pq files 的所有 batch 都是 length 1 chunks 时, 说明一个 pair 都找不出来了. 此时 b_pcounts_pqs 为空
+        if not b_pcounts_pqs:
+            # 在raise error前先保存已经train好的tokenizer
+            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
+
+            raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
+
+        # aggregate pair counts to agg_p_counts(pa.Tabel)
+        # obtain the pair with most occurrence
+        occur_most_pair, max_occurence = self.get_occur_most_info(*self._aggregate_pcounts(b_pcounts_pqs))
+
+        return occur_most_pair, max_occurence
 
