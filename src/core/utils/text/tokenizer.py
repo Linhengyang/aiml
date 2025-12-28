@@ -1504,13 +1504,34 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         super().__init__(*args, **kwargs)
 
 
-    def _sharding(num_batches, num_workers, ):
+    def _set_config(self, num_workers, ):
         '''
         1. 单个工作进程 单次读取 num_groups_per_batch 个 row group 以组成 1 个 batch, 以控制 全流程batch总数 num_batches
         2. num_workers 个工作进程 单次共处理 num_workers 个 batch 时, 要控制 总内存耗用低于 系统总内存
         3. row_group_size 应该是 batch_size 的因子, 且越大越好, 使得 num_groups_per_batch 小
         '''
-        pass
+
+        os.makedirs(self._buffer_dir, exist_ok=True)
+        
+        buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
+        os.makedirs(buffer_tokens_dir, exist_ok=True)
+        
+        buffer_pcounts_dir = os.path.join(self._buffer_dir, 'p_counts')
+        os.makedirs(buffer_pcounts_dir, exist_ok=True)
+
+        self._buffer_tokens_dir = buffer_tokens_dir
+        self._buffer_pcounts_dir = buffer_pcounts_dir
+
+        self._num_workers = num_workers
+        # buffer_size * 128(en) or 1024(zh) * num_workers = total_memory_size
+        self._buffer_size = int(64*0.8*1024**3) // num_workers // 128 # 只占用8成总内存, 只考虑英文语料 TODO
+        self._func_count_pair_batch = pair_count_merge.count_pair_batch
+        self._func_merge_pair_batch = pair_count_merge.merge_pair_batch
+
+        # parquet 参数以保证高效多进程读取/写入. row_group_size 最大值为 64*1024*1024, 且必须小于 buffer_size
+        self._ROW_GROUP_SIZE = 64*1024*1024 #TODO
+        self._NUM_ROW_GROUPS_PER_BATCH = self._buffer_size // self._ROW_GROUP_SIZE
+        assert self._NUM_ROW_GROUPS_PER_BATCH >= 1, f'buffer_size(batch_size) must be larger than row_group_size'
 
 
     classmethod
@@ -1642,6 +1663,9 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             tokens_pq = os.path.join(tokens_dir, src_fname)
             num_row_groups = pq.ParquetFile(tokens_pq).num_row_groups
 
+            if num_row_groups // self._NUM_ROW_GROUPS_PER_BATCH >= 200:
+                raise RuntimeError(f'Num of Batches {num_row_groups // self._NUM_ROW_GROUPS_PER_BATCH} exceeds 200.')
+
             if not os.path.exists(tokens_pq):
                 raise FileNotFoundError(
                     f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
@@ -1705,3 +1729,67 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             self._reduce_task_merge(b_merged_tokens_pqs, os.path.join(tokens_dir_next, src_fname), self._ROW_GROUP_SIZE)
 
         return tokens_dir_next # update
+    
+
+    def train_bpe(self,
+                  num_merges:int|None = None,               # global num merges for the tokenizer
+                  *,
+                  corpora:t.List[str]|str|None,             # None 代表从 buffer_dir 续train; 可以是直接输入文本str; 可以是parquet路径; 可以混合
+                  colnames:t.List[str|None]|None = None,    # 和 corpora 对应, 指定 parquet 文件里 文本 列名
+                  backup_init_tokens_dir:str|None = None,   # backup the init tokens files of corpus
+                  buffer_size:int = 172470436,              # max num of token-chunks in memory for each core. 0.16GB
+                  keep_window:int = 3,                      # max reserved tokens_pq file in disk
+                  verbose:bool = False
+                  ):
+        
+        assert keep_window >= 0
+        if isinstance(corpora, str):
+            corpora = [corpora]
+            colnames = [None]
+        
+        self._set_config(
+            buffer_size = buffer_size,
+            
+            )
+
+        # corpora 为 t.List[str], 模式是 从头train
+        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
+        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
+        if corpora is not None:
+            self._clear()
+            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
+        # corpora 为 None 时, 模式是 续train.
+        # 续train需要满足的条件会由 _prepair_train 检查或满足. 
+        else:
+            self._build_vocab()
+
+        ctx = mp.get_context('fork') # spawn方法使得 跨平台一致
+
+        # 使得最大块的内存需求落在同一个 block. 避免多次申请block: memblock_size 内存块大小, 字节数量
+        # buffer_size 是批次大小(单批次的行数/tokens-chunks数量), 一行(1 chunk of tokens)大概(平均)5-10个英文字母, 或20+个中文汉字
+        # 因为 GPT4 的 预切分正则能把 英文单词 和 中文单句(因为中文里没有空格) 和 英文标点 和 中文标点 大概切分开.
+        # 考虑 中文, 意味着 一行为 60+ 字节(一个中文汉字3字节), 一个字节作为一个token, 即在初始tokens 的parquet文件里, 一行有至少 60+ token
+        # merge部分内存池需要: merged_tokens_lens: batch_size个int64, filter: num_tokens个bool, merged_tokens_flat: num_tokens个uint16
+        # count部分内存池需要: 令 L = num_tokens-num_chunks, keys需要L个uint32, L/R uniqs分别需要L个uint16, counts需要L个uint64
+        # 总结: merge部分内存池需要 8*batch_size+4*num_tokens, count部分内存池需要 16*(num_tokens-batch_size)
+        # 可复用->只需考虑更大部分, 故内存池只需要 16*num_tokens = 16*(P-1)*batch_size, 这里P=num_tokens_per_chunk, 英文约为5-10, 中文约为60
+        # 中文语料 memory need = 1024*batch_size；英文语料 memory need = 128*batch_size
+        memblock_size = 40 * self._buffer_size
+
+        with ProcessPoolExecutor(
+            max_workers=self._num_workers,
+            mp_context=ctx,
+            initializer=_worker_init,
+            initargs=(memblock_size,)
+        ) as executor:
+            # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
+            # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
+            tokens_dir_start = self._prepare_train(num_merges, executor)
+            
+            start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
+
+            self._train_loop(tokens_dir_start, start, end, executor, keep_window, verbose)
+
+        # set down others
+        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
+        self._register_special_tokens()
