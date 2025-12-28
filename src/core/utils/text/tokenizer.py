@@ -1514,7 +1514,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
 
     classmethod
-    def _map_task_read_count_write(cls, tokens_pq_path, row_groups, count_func, save_dir, src_fname):
+    def _map_task_read_count_write(cls, row_groups, tokens_pq_path, count_func, save_dir, src_fname):
         '''
         MAP 工作之 count:
             每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 count_func, 
@@ -1553,7 +1553,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
 
     classmethod
-    def _map_task_read_merge_write(cls, tokens_pq_path, row_groups, merge_func, L, R, new_token, save_dir, src_fname):
+    def _map_task_read_merge_write(cls, row_groups, tokens_pq_path, merge_func, L, R, new_token, save_dir, src_fname):
         '''
         MAP 工作之 merge:
             每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 merge_func, 
@@ -1637,16 +1637,24 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         b_pcounts_pqs = []
         for f in os.listdir(tokens_dir):
             tokens_pq = os.path.join(tokens_dir, f)
+            num_row_groups = pq.ParquetFile(tokens_pq).num_row_groups
 
             if not os.path.exists(tokens_pq):
                 raise FileNotFoundError(
                     f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
                     )
-            # b_pcounts_pqs.extend( self._write_pcounts(tokens_pq, executor) )
+            b_pcounts_pqs.extend( self._write_pcounts(tokens_pq, executor) )
             # MAP task:
             
-            for row_groups in itertools.batched()
-            self._map_task_read_count_write(tokens_pq, row_groups, count_func, save_dir, src_fname)
+            stream_parallel_process_with_pending(
+                executor = executor,
+                data_gen = itertools.batched(range(num_row_groups), self._NUM_ROW_GROUPS_PER_BATCH),
+                process_fn = self._map_task_read_count_write,
+                result_handler = lambda b_pcounts_path: b_pcounts_pqs is not None and b_pcounts_pqs.append(b_pcounts_pqs),
+                max_pending = 16,
+                process_args = (tokens_pq, self._func_count_pair_batch, )
+            )
+            # self._map_task_read_count_write(tokens_pq, row_groups, count_func, save_dir, src_fname)
 
 
 
