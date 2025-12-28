@@ -1626,37 +1626,36 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         '''
         concate_parquet_files(part_merged_tokens_pq_files, concat_path, True, row_group_size)
 
-
     
     def _get_merge_info(self, tokens_dir, executor):
         # 从当前 tokens_dir, 统计得到 next merge pair 和 new token
         num_merged_epochs = len(self._merge_ranks)
         assert num_merged_epochs == int(os.path.basename(tokens_dir))
 
+        # 创建 本次 rank 的 buffer_pcounts_dir
+        pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, num_merged_epochs)
+        os.makedirs(pcounts_save_dir, exist_ok=True)
+
         # compute pair_counts for every batch of tokens parquet into p_counts parquet, and collect them
         b_pcounts_pqs = []
-        for f in os.listdir(tokens_dir):
-            tokens_pq = os.path.join(tokens_dir, f)
+        for src_fname in os.listdir(tokens_dir):
+            tokens_pq = os.path.join(tokens_dir, src_fname)
             num_row_groups = pq.ParquetFile(tokens_pq).num_row_groups
 
             if not os.path.exists(tokens_pq):
                 raise FileNotFoundError(
                     f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
                     )
-            b_pcounts_pqs.extend( self._write_pcounts(tokens_pq, executor) )
-            # MAP task:
             
+            # MAP task:
             stream_parallel_process_with_pending(
                 executor = executor,
                 data_gen = itertools.batched(range(num_row_groups), self._NUM_ROW_GROUPS_PER_BATCH),
                 process_fn = self._map_task_read_count_write,
-                result_handler = lambda b_pcounts_path: b_pcounts_pqs is not None and b_pcounts_pqs.append(b_pcounts_pqs),
+                result_handler = lambda b_pcounts_path: b_pcounts_path is not None and b_pcounts_pqs.append(b_pcounts_path),
                 max_pending = 16,
-                process_args = (tokens_pq, self._func_count_pair_batch, )
+                process_args = (tokens_pq, self._func_count_pair_batch, pcounts_save_dir, src_fname)
             )
-            # self._map_task_read_count_write(tokens_pq, row_groups, count_func, save_dir, src_fname)
-
-
 
         # 当 所有 tokens pq files 的所有 batch 都是 length 1 chunks 时, 说明一个 pair 都找不出来了. 此时 b_pcounts_pqs 为空
         if not b_pcounts_pqs:
@@ -1665,9 +1664,44 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
             raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
 
-        # aggregate pair counts to agg_p_counts(pa.Tabel)
-        # obtain the pair with most occurrence
-        occur_most_pair, max_occurence = self.get_occur_most_info(*self._aggregate_pcounts(b_pcounts_pqs))
+        # REDUCE task:
+        occur_most_pair, max_occurence = self._reduce_task_count(b_pcounts_pqs)
 
         return occur_most_pair, max_occurence
 
+
+    def _next_tokens_dir(
+            self,
+            tokens_dir_this:str,
+            occur_most_pair:t.Tuple,
+            new_token:int,
+            executor
+            ):
+        next_rank = len(self._merge_ranks)
+        assert next_rank == int( os.path.basename(tokens_dir_this) ) + 1
+        
+        tokens_dir_next = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
+        os.makedirs(tokens_dir_next, exist_ok=True)
+
+        L, R = map(self.token_dtype.to_pandas_dtype(), occur_most_pair)
+        new_token = self.token_dtype.to_pandas_dtype()(new_token)
+
+        for src_fname in os.listdir(tokens_dir_this):
+            tokens_pq = os.path.join(tokens_dir_this, src_fname)
+            num_row_groups = pq.ParquetFile(tokens_pq).num_row_groups
+
+            # MAP task:
+            b_merged_tokens_pqs = []
+            stream_parallel_process_with_pending(
+                executor = executor,
+                data_gen = itertools.batched(range(num_row_groups), self._NUM_ROW_GROUPS_PER_BATCH),
+                process_fn = self._map_task_read_merge_write,
+                result_handler = lambda b_merged_path: b_merged_path is not None and b_merged_tokens_pqs.append(b_merged_path),
+                max_pending = 16,
+                process_args = (tokens_pq, self._func_merge_pair_batch, L, R, new_token, tokens_dir_next, src_fname)
+            )
+
+            # REDUCE task:
+            self._reduce_task_merge(b_merged_tokens_pqs, os.path.join(tokens_dir_next, src_fname), self._ROW_GROUP_SIZE)
+
+        return tokens_dir_next # update
