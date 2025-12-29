@@ -836,7 +836,7 @@ class bufferBBPETokenizer(baseBBPETokenizer):
     
     步骤2 reduce 在主进程完成, 所以步骤1 和步骤3必然分开执行. 关于这两个步骤, 同步流程可以是:
     版本1: 主进程 read batch, IPC到工作进程完成 pair-count/pair-merge, 且在工作进程完成写入
-    版本2(TODO): 在工作进程完成读取(分片按row-group), 然后在工作进程完成 pair-count/pair-merge, 且在工作进程完成写入 --> 全程没有IPC
+    版本2(mpBBPE): 在工作进程完成读取(分片按row-group), 然后在工作进程完成 pair-count/pair-merge, 且在工作进程完成写入 --> 全程没有IPC
     '''
     token_dtype = pa.uint16()
 
