@@ -1788,7 +1788,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             tokens_dir_start = self._prepare_train(num_merges, executor)
             
             start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
-
+            
             self._train_loop(tokens_dir_start, start, end, executor, keep_window, verbose)
 
         # set down others
