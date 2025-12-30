@@ -1547,7 +1547,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 count_func, 
             把生成的 pair-count-table 写入目标路径(由save_dir/src_fname/row_groups确定)
         '''
-        # 读取数据, 解析成 pair count function 的输入: 用 iter_batches 一次读完所有row_group为一个RecordBatch
+        # 读取数据, 解析成 pair count function 的输入: 把所有 RG 一次读成 recordBatch
         pq_f = pq.ParquetFile(tokens_pq_path)
         batch = next(pq_f.reader.iter_batches(batch_size=pq_f.metadata.num_rows, row_groups=row_groups))
 
@@ -1587,7 +1587,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 merge_func, 
             把生成的 merged-tokens-table 写入目标路径(由save_dir/src_fname/row_groups确定)
         '''
-        # 读取数据, 解析成 pair merge function 的输入
+        # 读取数据, 解析成 pair merge function 的输入: 把所有 RG 一次读成 recordBatch
         pq_f = pq.ParquetFile(tokens_pq_path)
         batch = next(pq_f.reader.iter_batches(batch_size=pq_f.metadata.num_rows, row_groups=row_groups))
         
@@ -1767,7 +1767,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         else:
             self._build_vocab()
 
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context('spawn') # pyarrow not fork-safe: 当涉及子进程 读/写 时, spawn 更稳定
 
         # 使得最大块的内存需求落在同一个 block. 避免多次申请block: memblock_size 内存块大小, 字节数量
         # buffer_size 是批次大小(单批次的行数/tokens-chunks数量), 一行(1 chunk of tokens)大概(平均)5-10个英文字母, 或20+个中文汉字
@@ -1777,7 +1777,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         # count部分内存池需要: 令 L = num_tokens-num_chunks, keys需要L个uint32, L/R uniqs分别需要L个uint16, counts需要L个uint64
         # 总结: merge部分内存池需要 8*batch_size+4*num_tokens, count部分内存池需要 16*(num_tokens-batch_size)
         # 可复用->只需考虑更大部分, 故内存池只需要 16*num_tokens = 16*(P-1)*batch_size, 这里P=num_tokens_per_chunk, 英文约为5-10, 中文约为60
-        # 中文语料 memory need = 1024*batch_size；英文语料 memory need = 128*batch_size
+        # 中文语料取P=65, 这样单进程 memory need = 1024*batch_size；英文语料取P=9, 这样单进程 memory need = 128*batch_size
         memblock_size = 64 * self._buffer_size # 英文corpus -> 2个block; 中文corpus -> 16个block
 
         with ProcessPoolExecutor(
