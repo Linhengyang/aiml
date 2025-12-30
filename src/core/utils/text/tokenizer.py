@@ -1601,7 +1601,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
         # 计算 pair merge
         (merged_tokens_flat, merged_offsets), b_order = merge_func(tokens_offsets_border, L, R, new_token)
-        merged_tokens = pa.ListArray.from_arrays(merged_tokens_flat, merged_offsets)
+        merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
         
         data = {
             cls.tokens_schema[0].name: merged_tokens, # tokens: chunks of tokens
