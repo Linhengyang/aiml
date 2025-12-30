@@ -1590,7 +1590,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         # 读取数据, 解析成 pair merge function 的输入
         pq_f = pq.ParquetFile(tokens_pq_path)
         batch = next(pq_f.reader.iter_batches(batch_size=pq_f.metadata.num_rows, row_groups=row_groups))
-
+        
         # b_table['tokens'] --> pa.LargeListArray
         # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
         tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
@@ -1602,7 +1602,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         # 计算 pair merge
         (merged_tokens_flat, merged_offsets), b_order = merge_func(tokens_offsets_border, L, R, new_token)
         merged_tokens = pa.ListArray.from_arrays(merged_tokens_flat, merged_offsets)
-
+        
         data = {
             cls.tokens_schema[0].name: merged_tokens, # tokens: chunks of tokens
         }
@@ -1721,7 +1721,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         for src_fname in os.listdir(tokens_dir_this):
             tokens_pq = os.path.join(tokens_dir_this, src_fname)
             num_row_groups = pq.ParquetFile(tokens_pq).num_row_groups
-
+            
             # MAP task:
             b_merged_tokens_pqs = []
             stream_parallel_process_with_pending(
@@ -1767,7 +1767,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         else:
             self._build_vocab()
 
-        ctx = mp.get_context('fork')
+        ctx = mp.get_context('spawn')
 
         # 使得最大块的内存需求落在同一个 block. 避免多次申请block: memblock_size 内存块大小, 字节数量
         # buffer_size 是批次大小(单批次的行数/tokens-chunks数量), 一行(1 chunk of tokens)大概(平均)5-10个英文字母, 或20+个中文汉字
