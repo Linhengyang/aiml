@@ -1295,11 +1295,12 @@ class bufferBBPETokenizer(baseBBPETokenizer):
                 #   由 _aggregate_pcounts 合并上述所有 buffer_dir/p_counts/this/tokens_pq-part-{b_id}.pq 成一个 agg_pcounts 的 pyarrow table
                 #   由 get_occur_most_info 作用在 agg_pcounts pa table 上, 得到 occur_most_pair (int, int), 以及 max_occurrence
                 top_pair, max_occurrence = self._get_merge_info(tokens_dir_this, executor)
+                
                 new_token, occurrence = rank + 256, max_occurrence if verbose else None
 
                 # update tokenizer: len(self._merge_rank) += 1
                 self._update_tokenizer(top_pair, new_token, occurrence)
-
+                
                 # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
                 if rank == end - 1:
                     break
@@ -1567,7 +1568,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             cls.p_counts_schema[2].name: b_pcounts[2], # counts: counts
         }
 
-        table = pa.Tbale.from_pydict(data, cls.p_counts_schema)
+        table = pa.Table.from_pydict(data, cls.p_counts_schema)
 
         if not table:
             return None
@@ -1606,13 +1607,13 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             cls.tokens_schema[0].name: merged_tokens, # tokens: chunks of tokens
         }
 
-        table = pa.Tbale.from_pydict(data, cls.tokens_schema)
+        table = pa.Table.from_pydict(data, cls.tokens_schema)
 
         if not table:
             return None
         
         merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{'-'.join(list(map(str, b_order)))}.parquet')
-
+        
         pq.write_table(table, merged_save_path)
         return merged_save_path
     
@@ -1796,3 +1797,22 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
+
+
+    def _train_loop(self, tokens_dir_start:str, start:int, end:int, executor, keep_window:int, verbose:bool):
+        tokens_dir_this = tokens_dir_start
+        for rank in range(start, end):
+            print(f'merge rank {rank} / {start} to {end-1}')
+            try:
+                top_pair, max_occurrence = self._get_merge_info(tokens_dir_this, executor)
+                new_token, occurrence = rank + 256, max_occurrence if verbose else None
+                self._update_tokenizer(top_pair, new_token, occurrence)
+                if rank == end - 1:
+                    break
+                tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
+                
+            finally:
+                to_remove = rank - keep_window
+                if to_remove > 0:
+                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}'), keep = False)
+                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}'), keep = False)
