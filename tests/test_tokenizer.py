@@ -2,7 +2,7 @@ import pytest
 import os
 import shutil
 from src.core.utils.file.folder_op import clean_folder
-from src.core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer, boostBBPETokenizer, asyncBBPETokenizer
+from src.core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer, boostBBPETokenizer, mpBBPETokenizer
 
 # -----------------------------------------------------------------------------
 # common test data
@@ -61,9 +61,10 @@ clean_folder(buffer, method='all')
 
 # -----------------------------------------------------------------------------
 # tests
+to_test = mpBBPETokenizer
 
 # test encode/decode identity for a few different strings
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [to_test,])
 @pytest.mark.parametrize("text", test_strings)
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
@@ -76,7 +77,7 @@ def test_encode_decode_identity(tokenizer_factory, text):
 
 
 # test bpe basic logic
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [to_test,])
 def test_wikipedia_example(tokenizer_factory):
     """
     Quick unit test, following along the Wikipedia example:
@@ -108,7 +109,7 @@ def test_wikipedia_example(tokenizer_factory):
 
 
 # test save/load/view
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [to_test,])
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_save_load(tokenizer_factory, special_marks):
     num_specials = len(special_marks)
@@ -136,7 +137,7 @@ def test_save_load(tokenizer_factory, special_marks):
 
 
 # test save/load
-@pytest.mark.parametrize("tokenizer_factory", [boostBBPETokenizer])
+@pytest.mark.parametrize("tokenizer_factory", [to_test,])
 @pytest.mark.parametrize("text", [llama_text, ])
 @pytest.mark.parametrize("special_marks", [  list(special_tokens.keys()) ])
 def test_complicated_text(tokenizer_factory, text, special_marks):

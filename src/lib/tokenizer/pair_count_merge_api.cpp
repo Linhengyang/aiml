@@ -70,7 +70,7 @@ void reset_process() {
 }
 
 
-// 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
+// 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
 void release_process() {
     // 先销毁 计数器. delete 后必须要置空指针，以防止UAF / 二次delete
     if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }

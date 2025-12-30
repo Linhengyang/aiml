@@ -162,7 +162,7 @@ cpdef count_pair_batch(
     py_counts_ptr = ctypes.cast(counts_addr, ctypes.POINTER(ctypes.c_uint64))
     output_counts_np = pynp.ctypeslib.as_array(py_counts_ptr, shape=(size,))
 
-    # 打包, pack 3 output np arrays with batch order
+    # 打包, tuple-pack 3 output np arrays with batch order
     return (output_L_tokens_np, output_R_tokens_np, output_counts_np), tokens_offsets_border[1]
 
 

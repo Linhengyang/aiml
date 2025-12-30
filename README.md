@@ -9,8 +9,9 @@
 ## src:
 * core:  
     * base: 
-        * compute:&nbsp;&nbsp;performance & tools & hardware-sensitive  
+        * tool:&nbsp;&nbsp;wrapped objects for specific purpose  
         * functions:&nbsp;&nbsp;fundamental functions  
+    * design:&nbsp;&nbsp;macro designed pipeline   
     * loss:&nbsp;&nbsp;customized useful loss functions  
     * nn_components:  
         * meta_frames:&nbsp;&nbsp;frameworks  
@@ -18,9 +19,11 @@
         * sub_modules:&nbsp;&nbsp;customized module blocks/bulks for projs
     * optim:&nbsp;&nbsp;customized optimizers 
     * utils:&nbsp;&nbsp;data & algo & preprocess  
+* kits:  
+    * huggingface:  &nbsp;&nbsp;utilities for adapting huggingface-style to custom-style
 * lib:  
     * share: &nbsp;&nbsp;shared cpp headers & files  
-    * tokenizer:  &nbsp;&nbsp;cpp & cython files to boost tokenizer  
+    * tokenizer:  &nbsp;&nbsp;cpp & cython files to boost tokenizer bpe train  
 * projs:  
 &nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:  
     * function
@@ -38,8 +41,7 @@
     * functions
     * configs
     * _jobs
-* kits:  
-    * huggingface:  &nbsp;&nbsp;utilities to adapt huggingface objects to custom-style
+
 
 ## Work Note:
 

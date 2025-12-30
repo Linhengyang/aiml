@@ -4,7 +4,7 @@ import shutil # 引入 shutil 模块，虽然这里主要用 os.remove，但它�
 import typing as t
 
 
-def clean_folder(folder_path: str, method:t.Literal['all', 'only_file', 'only_folder']='all'):
+def clean_folder(folder_path: str, method:t.Literal['all', 'only_file', 'only_folder']='all', keep=True):
     """
     按方法清空指定文件夹中的所有文件
     Args:
@@ -36,3 +36,7 @@ def clean_folder(folder_path: str, method:t.Literal['all', 'only_file', 'only_fo
             raise OSError(f"processing '{item_path}' errors: {e}")
         except Exception as e:
             raise Exception(f"clean folder error: {e}")
+    
+    # keep = True 且删光了内部所有 --> 保存 folder_path; keep = False --> 不保存 folder_path
+    if method == 'all' and not keep:
+        shutil.rmtree(folder_path)

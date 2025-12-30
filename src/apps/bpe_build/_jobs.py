@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 import os
 import regex as re
-from ...core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer, boostBBPETokenizer, asyncBBPETokenizer
+from ...core.utils.text.tokenizer import baseBBPETokenizer, bufferBBPETokenizer, boostBBPETokenizer, mpBBPETokenizer
 
 configs = yaml.load(open('src/apps/bpe_build/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -39,9 +39,13 @@ def bpe_prepare():
     print('insight on dataset TinyStories')
     train_pq = configs['train_pq']
     valid_pq = configs['valid_pq']
-    
+
     for pq_file in [train_pq, valid_pq]:
+        meta_data = pq.ParquetFile(pq_file).metadata
         print(f'parquet file {pq_file} info:\n{pq.ParquetFile(pq_file).metadata}')
+
+        if meta_data.num_rows // buffer_size >= 200:
+            raise RuntimeError(f'Num of Batches {meta_data.num_rows // buffer_size} exceeds 200.')
 
 
 
@@ -60,15 +64,16 @@ def bpe_train():
     for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
         os.makedirs(folder, exist_ok=True)
         
-    tok = boostBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir, buffer_size=buffer_size)
-    corpora = [valid_pq, train_pq]
+    tok = mpBBPETokenizer(name=save_tok_name, buffer_dir=buffer_dir)
+    corpora = [valid_pq, ]
     colnames = ['text']*len(corpora)
 
     tok.train_bpe(num_merges,
                   corpora=corpora,
                   colnames=colnames,
-                  backup_init_tokens_dir=backup_init_dir,
-                  buffer_size=buffer_size,
+                  backup_init_tokens_dir=None,
+                #   buffer_size=buffer_size,
+                  keep_window=0,
                   verbose=True
                   )
 
@@ -85,18 +90,21 @@ def bpe_train():
 
 
 def bpe_continue(tok_path:str|None):
-
     print('continue to run BPE on dataset TinyStories')
-    tok = boostBBPETokenizer(name='init', buffer_dir=buffer_dir)
+    tok = mpBBPETokenizer(name='init', buffer_dir=buffer_dir)
 
     if tok_path and os.path.isfile(tok_path):
         tok.load(tok_path)
 
-    # continue train 只要 buffer_dir 的环境正确, load 的tok正确
-    # 就会自动分析该读取的中间文件，以继续训练
+    # continue train 只要 buffer_dir 的环境正确, load 的tok正确, 就会自动分析该读取的中间文件，以继续训练
+    # 当 tok_path 为 None 时, 相当于 load 一个只有 0-255 值映射的 tokenizer, 配合 buffer_dir/tokens/0 续train
 
     # continue train 下, corpora必须显式地输入None
-    tok.train_bpe(num_merges, corpora=None, verbose=True, buffer_size=buffer_size)
+    tok.train_bpe(num_merges,
+                  corpora=None,verbose=True,
+                  keep_window = 0,
+                #   buffer_size=buffer_size,
+                  )
 
     # rename and save the updated tokenizer
     tok.name = save_tok_name
