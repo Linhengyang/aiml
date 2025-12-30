@@ -1764,7 +1764,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
         if corpora is not None:
             self._clear()
-            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
+            self._init_tokens(corpora, colnames, backup_init_tokens_dir, row_group_size=self._ROW_GROUP_SIZE)
         # corpora 为 None 时, 模式是 续train.
         # 续train需要满足的条件会由 _prepair_train 检查或满足. 
         else:
