@@ -1546,13 +1546,14 @@ class mpBBPETokenizer(bufferBBPETokenizer):
             每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 count_func, 
             把生成的 pair-count-table 写入目标路径(由save_dir/src_fname/row_groups确定)
         '''
-        # 读取数据, 解析成 pair count function 的输入
+        # 读取数据, 解析成 pair count function 的输入: 用 iter_batches 一次读完所有row_group为一个RecordBatch
         pq_f = pq.ParquetFile(tokens_pq_path)
-        b_table = pq_f.read_row_groups(row_groups)
-        # b_table['tokens'] --> pa.LargeListArray
+        batch = next(pq_f.reader.iter_batches(batch_size=pq_f.metadata.num_rows, row_groups=row_groups))
+
+        # batch['tokens'] --> pa.LargeListArray
         # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
-        tokens_flat = b_table[cls.tokens_schema[0].name].values.to_numpy()
-        offsets = b_table[cls.tokens_schema[0].name].offsets.to_numpy()
+        tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
+        offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
         b_order = tuple(row_groups)
 
         tokens_offsets_border = (tokens_flat, offsets), b_order
@@ -1587,11 +1588,12 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         '''
         # 读取数据, 解析成 pair merge function 的输入
         pq_f = pq.ParquetFile(tokens_pq_path)
-        b_table = pq_f.read_row_groups(row_groups)
+        batch = next(pq_f.reader.iter_batches(batch_size=pq_f.metadata.num_rows, row_groups=row_groups))
+
         # b_table['tokens'] --> pa.LargeListArray
         # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
-        tokens_flat = b_table[cls.tokens_schema[0].name].values.to_numpy()
-        offsets = b_table[cls.tokens_schema[0].name].offsets.to_numpy()
+        tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
+        offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
         b_order = tuple(row_groups)
 
         tokens_offsets_border = (tokens_flat, offsets), b_order
@@ -1659,7 +1661,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         assert num_merged_epochs == int(os.path.basename(tokens_dir))
 
         # 创建 本次 rank 的 buffer_pcounts_dir
-        pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, num_merged_epochs)
+        pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, str(num_merged_epochs))
         os.makedirs(pcounts_save_dir, exist_ok=True)
 
         # compute pair_counts for every batch of tokens parquet into p_counts parquet, and collect them
