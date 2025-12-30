@@ -971,7 +971,10 @@ class bufferBBPETokenizer(baseBBPETokenizer):
         
         # 遍历每个 text parquet file, 分批 转换成 tokens(uint16) parquet file 于 buffer_dir/tokens
         for (corpus_pq, text_col), init_tokens_pq in zip(corpus_col_pair, init_tokens_pqs):
-            corpus_batch_iter = yield_parquet_batch(corpus_pq, 8192*32, [text_col])
+            # 读取 T 行text, 会被预切分成 N 行tokens. 为了保证 N 是 row_group_size 的倍数, 这里 T 直接选 row_group_size 最合适
+            # if row_group_size = None, parquet write_table 默认的 row_group_size = 1024 * 1024
+            batch_size = 1024 * 1024 if row_group_size is None else row_group_size
+            corpus_batch_iter = yield_parquet_batch(corpus_pq, batch_size, [text_col])
             with pq.ParquetWriter(init_tokens_pq, self.tokens_schema) as writer:
                 for k, batch in enumerate(corpus_batch_iter):
                     text = ENDOFTEXT.join( batch[text_col].to_pylist() )
