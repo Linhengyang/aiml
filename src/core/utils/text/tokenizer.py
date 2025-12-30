@@ -1797,22 +1797,3 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
-
-
-    def _train_loop(self, tokens_dir_start:str, start:int, end:int, executor, keep_window:int, verbose:bool):
-        tokens_dir_this = tokens_dir_start
-        for rank in range(start, end):
-            print(f'merge rank {rank} / {start} to {end-1}')
-            try:
-                top_pair, max_occurrence = self._get_merge_info(tokens_dir_this, executor)
-                new_token, occurrence = rank + 256, max_occurrence if verbose else None
-                self._update_tokenizer(top_pair, new_token, occurrence)
-                if rank == end - 1:
-                    break
-                tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
-                
-            finally:
-                to_remove = rank - keep_window
-                if to_remove > 0:
-                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}'), keep = False)
-                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}'), keep = False)
