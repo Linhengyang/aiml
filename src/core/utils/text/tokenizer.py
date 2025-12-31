@@ -1503,6 +1503,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
         续train模式, 或 init_tokens_pq 来自 backup 时, tokens_pq file 无法控制 row_group_size, 按 row group 分片读取即可因为下一个
         epoch就不会有问题了. 总结: 手动 sharding 分片 row groups 以控制 batch 总数
+    #TODO: 用 parquet.Dataset 而不是 table 存储 map 结果, 可以天然避免 reduce, 预计会极大加速 ---> 需要重新设计 buffer 文件
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
