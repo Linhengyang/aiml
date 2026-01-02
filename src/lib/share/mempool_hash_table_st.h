@@ -51,7 +51,7 @@ private:
             _table = nullptr;
             return;
         }
-        // calloc: 分配空间为 n 个 节点指针 的空间, 并零初始化, 避免 .resize的逐元素置空
+        // calloc: 分配空间为 n 个 节点指针 的空间, 并零初始化, 避免 .resize 的逐元素置空
         _table = static_cast<HashTableNode**>(std::calloc(n, sizeof(HashTableNode*)));
         if (!_table) throw std::bad_alloc();
     }
