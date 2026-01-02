@@ -211,7 +211,7 @@ public:
         // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可
         new_node->gc_next = _all_nodes_head;
 
-        // 如果 空 -> 非空, 那么记录桶号(桶锁下天然防重)
+        // 如果 空 -> 非空, 那么记录桶号
         if (was_empty) _occupied_indices.push_back(static_cast<uint32_t>(index));
 
         // node数量自加1. 原子线程安全
