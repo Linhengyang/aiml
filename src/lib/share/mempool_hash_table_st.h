@@ -308,7 +308,7 @@ public:
             _all_nodes_head = nullptr;
             return;
         }
-
+        // constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
         if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
             // 若 node 需要非平凡析构：沿着 gc 链 析构所有node
             HashTableNode* curr = _all_nodes_head;
