@@ -1,8 +1,9 @@
 // memory_pool.h
 
 
-// TODO: memory_pool 的 全局单例模式要去掉. 为了支持 hash table 的复用, hash table 所使用的 memory pool 应该是和它自身单一绑定的
-// 这样，一个hash table clear 自身时, reset 自身的 memory pool, 才使得这个hash table 可以复用. 不然 reset 会干扰其他所有分配在 memory pool上的对象
+// memory_pool 只负责一次次由 allocate 方法返回分配好的符合条件的 内存地址，并不在乎其上会被定义成什么数据结构.
+// 具体构造是在拿到该地址后，由具体非平凡结构的构造函数placement new，或平凡构造.
+// 其上的数据结构也只负责自身的析构，而不应涉及 memory pool 的复位reset / 释放 release 等操作.
 
 #ifndef MEMORY_POOL_H
 #define MEMORY_POOL_H
