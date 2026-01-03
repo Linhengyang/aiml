@@ -71,7 +71,8 @@ using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher>;
 
 /*
 全局对象在 .SO 被python导入后就存在主进程，python解释器没结束, 全局对象就一直存在且复用
-所以全局指针 delete 清空之后必须 置空set to nullptr, 不然就成了悬垂指针.
+只要一个指针在被delete之后，可能会被再次使用，就应该在delete之后置空 set to nullptr.
+所以全局指针 delete 清空之后必须 置空set to nullptr, 不然就成了未被销毁的悬垂指针. 局部指针倒没关系(delete之后马上要被销毁了所以无所谓)
 // 声明全局变量
 extern hasher pair_hasher; // 全局使用的哈希器
 extern counter_st* global_counter_st;
@@ -86,6 +87,9 @@ extern counter_mt* global_counter_mt;
 多进程的推荐办法：在子进程启动后，进程内初始化一切，特别是带锁/线程的结构；进程退出前统一释放
 */
 
+
+// C++ 编译器会对函数名进行修饰（如 _Z3fooi），而 C 编译器不会（保持 foo）
+// 使用 extern "C" 告诉 C++ 编译器：“按 C 的方式处理这些符号”，确保链接成功
 extern "C" {
 
 
