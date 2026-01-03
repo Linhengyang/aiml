@@ -71,7 +71,7 @@ void* mempool::allocate(size_t size) {
             }
         }
 
-        // 遍历之后还是没有找到足够分配 size 的block, 就新创建一个 block
+        // 遍历之后还是没有找到足够分配 size 的block, 就新创建一个 block(这里才有新内存申请)
         if (!found) {
 
             block* new_block = new block(_block_size, _alignment);
@@ -85,7 +85,7 @@ void* mempool::allocate(size_t size) {
         }
 
     }
-
+    // 调用 block 的 allocate 方法, 返回一个符合条件的地址
     return _current_block->allocate(size);
 }
 
