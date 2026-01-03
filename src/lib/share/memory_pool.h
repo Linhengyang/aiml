@@ -1,8 +1,9 @@
 // memory_pool.h
 
 
-// TODO: memory_pool 的 全局单例模式要去掉. 为了支持 hash table 的复用, hash table 所使用的 memory pool 应该是和它自身单一绑定的
-// 这样，一个hash table clear 自身时, reset 自身的 memory pool, 才使得这个hash table 可以复用. 不然 reset 会干扰其他所有分配在 memory pool上的对象
+// memory_pool 只负责一次次由 allocate 方法返回分配好的符合条件的 内存地址，并不在乎其上会被定义成什么数据结构.
+// 具体构造是在拿到该地址后，由具体非平凡结构的构造函数placement new，或平凡构造.
+// 其上的数据结构也只负责自身的析构，而不应涉及 memory pool 的复位reset / 释放 release 等操作.
 
 #ifndef MEMORY_POOL_H
 #define MEMORY_POOL_H
@@ -32,6 +33,12 @@ private:
     block* _current_block = nullptr; //内存池的当前正在使用的内存block起始位置指针
 
     // 互斥锁以保障线程安全. 非单例模式下只需满足自身成员变量安全访问即可, 故使用类成员的锁而非静态
+    // mutable关键字修饰非const非static非引用成员变量, 表达即使在 const 成员函数里, 被mutable修饰的成员变量仍然可以改变
+    
+    // 虽然当前没有 const 成员函数，仍然建议保留 mutable 修饰 _mtx，因为：
+    // 它为未来扩展提供灵活性
+    // 它符合 C++ 并发编程的最佳实践
+    // 它清晰表达了“这个成员仅用于同步，不影响逻辑状态”的意图
     mutable std::mutex _mtx;
 
     // 尽管 mempool 不是全局单例模式, 但仍然禁止拷贝构造和赋值操作.
@@ -42,7 +49,7 @@ private:
 public:
 
     // 构造函数. 构造 内存池 实例
-    explicit mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请 1MB 的内存, 8字节对齐
+    explicit mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请 1MB 的内存, 64字节对齐
 
     // 析构函数. 调用 release 释放 内存池 实例
     ~mempool();

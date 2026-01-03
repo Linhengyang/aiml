@@ -21,7 +21,7 @@ class singleton_mempool {
 
 private:
 
-    // 构造和析构函数写在private里，保证只能由 get_mempool 方法创建内存池实例
+    // 构造和析构函数写在private里，保证只能由 get 方法创建内存池实例
     explicit singleton_mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请1MB内存,64字节对齐
     // explicit的意思是禁止对 singleton_mempool 类对象作隐式转换
 
@@ -38,7 +38,7 @@ private:
 
     const size_t _alignment; //内存池的对齐参数
 
-    std::vector<block*> _blocks;
+    std::vector<block*> _blocks; // 内存block列表
 
     std::vector<void*> _large_allocs; //大于 _block_size 的内存申请, 单独申请. 在这里记录申请结果
 

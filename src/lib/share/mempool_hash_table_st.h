@@ -51,7 +51,7 @@ private:
             _table = nullptr;
             return;
         }
-        // calloc: 分配空间为 n 个 节点指针 的空间, 并零初始化, 避免 .resize的逐元素置空
+        // calloc: 分配空间为 n 个 节点指针 的空间, 并零初始化, 避免 .resize 的逐元素置空
         _table = static_cast<HashTableNode**>(std::calloc(n, sizeof(HashTableNode*)));
         if (!_table) throw std::bad_alloc();
     }
@@ -211,7 +211,7 @@ public:
         // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可
         new_node->gc_next = _all_nodes_head;
 
-        // 如果 空 -> 非空, 那么记录桶号(桶锁下天然防重)
+        // 如果 空 -> 非空, 那么记录桶号
         if (was_empty) _occupied_indices.push_back(static_cast<uint32_t>(index));
 
         // node数量自加1. 原子线程安全
@@ -308,7 +308,7 @@ public:
             _all_nodes_head = nullptr;
             return;
         }
-
+        // constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
         if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
             // 若 node 需要非平凡析构：沿着 gc 链 析构所有node
             HashTableNode* curr = _all_nodes_head;

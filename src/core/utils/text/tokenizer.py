@@ -802,9 +802,9 @@ def raise_continue_num_merges_conflict(num_merged, num_total_merges, continue_nu
 # 考虑一个大小为 x GB的parquet语料文件, pq压缩率大概在2-10, 那么算它是一个 10x GB左右的文本文件.
 # 也即最多 10x G个token(单字节一个token). 从而pair-counts的counts(出现频数)最多就是10x G= x 100亿 左右. uint32(最大值43亿)
 # 很可能存不下, 所以存储 counts 统一用 uint64就好. 正好聚合计算后, 一般都用 uint64 表示聚合计算的结果.
-# tokens ID而言, uint16值范围是0-65536, 足够覆盖小的tokenizer了。2个bytes最多覆盖65535(uint16上限).
+# tokens ID而言, uint16值范围是0-65535, 足够覆盖小的tokenizer了。2个bytes最多覆盖65535(uint16上限).
 #     经典例子, GPT2的词表大小(不包含special marks)是5W+256=50256. 
-# vocab_size(不包含special marks)不超过65535的tok, 其token用2个字节(uint16)就可以表达.
+# vocab_size(不包含special marks)不超过65536的tok, 其token用2个字节(uint16)就可以表达.
 # 总结一下:
 #     一个counts占据 8(uint64)字节.
 #     两个tokens占据 4(uint16, for 6W 词表大小以下) 或 8(uint32, for 6W 词表大小以上)字节.
@@ -1503,6 +1503,7 @@ class mpBBPETokenizer(bufferBBPETokenizer):
 
         续train模式, 或 init_tokens_pq 来自 backup 时, tokens_pq file 无法控制 row_group_size, 按 row group 分片读取即可因为下一个
         epoch就不会有问题了. 总结: 手动 sharding 分片 row groups 以控制 batch 总数
+    #TODO: 用 parquet.Dataset 而不是 table 存储 map 结果, 可以天然避免 reduce, 预计会极大加速 ---> 需要重新设计 buffer 文件
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

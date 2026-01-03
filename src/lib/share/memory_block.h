@@ -31,10 +31,10 @@ private:
 
 public:
 
-    // 构造函数. 默认对齐16字节
+    // 构造函数. 默认对齐64字节. 构造 block 的时候, 内存申请实际发生
     explicit block(size_t capacity, size_t alignment=64);
 
-    // 析构函数
+    // 析构函数. 析构 block 时, 内存释放实际发生
     ~block();
 
     // 成员函数
@@ -43,7 +43,7 @@ public:
     inline size_t get_capacity() const { return _capacity; }
     inline size_t get_remaining() const { return _capacity - _offset; }
 
-    // allocate & reset
+    // allocate & reset. allocate 仅是分配地址, 没有内存申请; reset 仅是地址复位, 没有内存释放
     void* allocate(size_t size); // 在本内存块中寻找大小为size的内存空间且首地址对齐。若不成功，返回nullptr
 
     void reset(); // 本内存block的标记为可从头复用状态

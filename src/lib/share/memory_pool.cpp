@@ -1,7 +1,8 @@
 // memory_pool.cpp
 
-// TODO: memory_pool 的 全局单例模式要去掉. 为了支持 hash table 的复用, hash table 所使用的 memory pool 应该是和它自身单一绑定的
-// 这样，一个hash table clear 自身时, reset 自身的 memory pool, 才使得这个hash table 可以复用. 不然 reset 会干扰其他所有分配在 memory pool上的对象
+// memory_pool 只负责一次次由 allocate 方法返回分配好的符合条件的 内存地址，并不在乎其上会被定义成什么数据结构.
+// 具体构造是在拿到该地址后，由具体非平凡结构的构造函数placement new，或平凡构造.
+// 其上的数据结构也只负责自身的析构，而不应涉及 memory pool 的复位reset / 释放 release 等操作.
 
 #include "memory_pool.h"
 #include "memory_block.h"
@@ -71,7 +72,7 @@ void* mempool::allocate(size_t size) {
             }
         }
 
-        // 遍历之后还是没有找到足够分配 size 的block, 就新创建一个 block
+        // 遍历之后还是没有找到足够分配 size 的block, 就新创建一个 block(这里才有新内存申请)
         if (!found) {
 
             block* new_block = new block(_block_size, _alignment);
@@ -85,7 +86,7 @@ void* mempool::allocate(size_t size) {
         }
 
     }
-
+    // 调用 block 的 allocate 方法, 返回一个符合条件的地址
     return _current_block->allocate(size);
 }
 

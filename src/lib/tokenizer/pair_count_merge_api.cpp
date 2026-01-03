@@ -10,10 +10,26 @@
 #include "mempool_hash_table_mt.h"
 #include "mempool_hash_table_st.h"
 
+// 概念解析:
+// 静态存储期：程序启动时创建，结束时销毁，存储在一个非栈、非普通堆的地方。python调用时, import .so文件时即被创建
+// 外部链接性：可以通过 extern 关键字被其他 .cpp 文件引用
+// 内部链接性：其他 .cpp 文件无法通过 extern 访问
+
+// 全局变量：在所有函数外部定义的变量，不属于任何类或命名空间, 作用域为整个程序  <--- 静态存储期 + 外部链接性
+// int global_var = 42;
+// 静态全局变量：在函数外部，用 static 修饰的变量. 实现“文件私有”的全局状态，作用域为当前文件, 避免命名冲突 <--- 静态存储期 + 内部链接性
+// static int static_global = 100;
+// 静态局部变量：在函数内部，用 static 修饰的变量. 作用域仅为函数内部. 只初始化一次(即函数调用时) <--- 静态存储期，无任何链接性, 出了函数就不可访问.
+// void func() {
+//     static int count = 0;  // 静态局部变量
+//     ++count;
+//     std::cout << count << "\n";
+// }
 
 // namespace 定义作用域, 在里面声明的变量函数类, 不会污染全局作用域, 要用显式调用 name::func
-// 匿名的命名空间, 意思是里面定义的链接仅限本.cpp文件使用, 不会暴露给其他编译单元. Cython可以正常调用 extern C 内部的 c_count_pair_batch
-// 进程内的静态对象也一并在这里定义, 比如 进程的单例内存池 / 基于单例内存池的可复用计数器 / 原子变量 g_inited 以判断是否需要初始化前二者
+// 匿名的命名空间, 意思是里面定义的链接仅限本.cpp文件使用, 实现“文件私有”的效果，避免命名冲突，不会暴露给其他编译单元.
+// 且里面的定义等价于 静态static，它具有内部链接 ---> 所以语义上就是“静态全局变量”，但比 static 更现代。
+// 所以相当于静态对象也一并在这里被定义并初始化, 比如 进程的单例内存池/基于单例内存池的可复用计数器/原子变量 g_inited 以判断是否需要初始化前二者
 // 保证进程内有各自所需的静态对象，更不容易被误用
 namespace {
 
@@ -28,7 +44,7 @@ namespace {
 }
 
 
-
+// Cython可以正常调用 extern C 内部的 c_count_pair_batch: 接口层必备 extern "C"
 extern "C" {
 
 
@@ -46,7 +62,7 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
         // g_counter_mt = new counter_mt(pair_hasher, capacity, singleton_mempool::get());
 
         const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
-        std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
+        std::cout << "singleton memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
     }
 
 }
@@ -63,23 +79,23 @@ void reset_process() {
         unsafe_singleton_mempool::get().reset();
     }
     // 线程安全版本的略过
-    if (singleton_mempool::exist()) {
-        singleton_mempool::get().shrink();
-        singleton_mempool::get().reset();
-    }
+    // if (singleton_mempool::exist()) {
+    //     singleton_mempool::get().shrink();
+    //     singleton_mempool::get().reset();
+    // }
 }
 
 
 // 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
 void release_process() {
-    // 先销毁 计数器. delete 后必须要置空指针，以防止UAF / 二次delete
+    // 先销毁 计数器. 由于 计数器是静态的,存在复用的可能性, 故 delete 后必须要置空指针，以防止UAF / 二次delete
     if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }
     if (unsafe_singleton_mempool::exist()) { unsafe_singleton_mempool::destroy(); }
 
     if (g_counter_mt) { delete g_counter_mt; g_counter_mt = nullptr; }
-    if (singleton_mempool::exist()) { singleton_mempool::destroy(); } 
+    // if (singleton_mempool::exist()) { singleton_mempool::destroy(); }
 
-    std::cout << "global memory pool released" << std::endl;
+    std::cout << "singleton memory pool released" << std::endl;
 
     // 复位 g_inited 允许重新初始化
     g_inited.store(false, std::memory_order_relaxed);
