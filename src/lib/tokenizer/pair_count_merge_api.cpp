@@ -62,7 +62,7 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
         // g_counter_mt = new counter_mt(pair_hasher, capacity, singleton_mempool::get());
 
         const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
-        std::cout << "global memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
+        std::cout << "singleton memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
     }
 
 }
@@ -79,23 +79,23 @@ void reset_process() {
         unsafe_singleton_mempool::get().reset();
     }
     // 线程安全版本的略过
-    if (singleton_mempool::exist()) {
-        singleton_mempool::get().shrink();
-        singleton_mempool::get().reset();
-    }
+    // if (singleton_mempool::exist()) {
+    //     singleton_mempool::get().shrink();
+    //     singleton_mempool::get().reset();
+    // }
 }
 
 
 // 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
 void release_process() {
-    // 先销毁 计数器. delete 后必须要置空指针，以防止UAF / 二次delete
+    // 先销毁 计数器. 由于 计数器是静态的,存在复用的可能性, 故 delete 后必须要置空指针，以防止UAF / 二次delete
     if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }
     if (unsafe_singleton_mempool::exist()) { unsafe_singleton_mempool::destroy(); }
 
     if (g_counter_mt) { delete g_counter_mt; g_counter_mt = nullptr; }
-    if (singleton_mempool::exist()) { singleton_mempool::destroy(); } 
+    // if (singleton_mempool::exist()) { singleton_mempool::destroy(); }
 
-    std::cout << "global memory pool released" << std::endl;
+    std::cout << "singleton memory pool released" << std::endl;
 
     // 复位 g_inited 允许重新初始化
     g_inited.store(false, std::memory_order_relaxed);
