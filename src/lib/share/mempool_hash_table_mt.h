@@ -104,6 +104,7 @@ private:
     std::atomic<HashTableNode*> _all_nodes_head{nullptr};
 
     // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index类型要与 _capacity 类型对齐, 因为它是 hash成员函数的输出 取_capacity余
+    // 要么给 _occuped_indices 另外加一个 锁, 要么去掉. TODO: 去掉 _occupied_indices
     std::vector<size_t> _occupied_indices;
 
     TYPE_MEMPOOL* _pool;
@@ -253,7 +254,7 @@ public:
                 new_node->gc_next = old; // 头插 gc 链
             } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
 
-            // 如果 空 -> 非空, 那么记录桶号(桶锁下天然防重?)
+            // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全
             if (was_empty) _occupied_indices.push_back(index);
 
             // node数量自加1. 原子线程安全
@@ -316,7 +317,7 @@ public:
                 new_node->gc_next = old; // 头插 gc 链
             } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
 
-            // 如果 空 -> 非空, 那么记录桶号(桶锁下天然防重?)
+            // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全
             if (was_empty) _occupied_indices.push_back(index);
 
             _size.fetch_add(1);
@@ -375,7 +376,7 @@ public:
     void destroy() {
         // 析构全表时, 析构过程要全程 独占表锁
         std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
-        
+
         if (_capacity == 0 || !_table) {
             _size.store(0, std::memory_order_relaxed);
             _occupied_indices.clear();
