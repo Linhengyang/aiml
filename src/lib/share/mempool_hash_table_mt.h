@@ -52,7 +52,7 @@ struct padded_mutex {
 
 
 // 读写锁
-// 写锁是核心概念：写锁提供互斥 --> 写锁是排他的，不光“排写锁”，还“排读锁”。在写锁 .lock 作用之后, 其他任何该锁内操作都会被阻塞
+// 写锁是核心概念：写锁提供互斥 --> 写锁是排他的，不光“排写锁”，还“排读锁”。在写锁 .lock 作用之后, 其他任何需要该锁的 操作都会被阻塞
 // 写锁除了提供互斥, 还提供线程之间的数据同步: 对同一个 mutex, 线程A的 unlock synchronize-with 线程B的lock, 所以B能看到A的所有修改, 即
 // 线程A在 持有锁期间对共享数据的所有 写操作, 在它 unlock 之后, 线程B lock同一把锁时, 一定拿到线程A在持锁期间的所有修改 --> 跨线程的内存同步
 // ----> synchronize-with 的语义. 注意只在 临界区内部有同步关系, 所以要避免锁外数据写入操作
@@ -69,7 +69,7 @@ private:
         HashTableNode* gc_next = nullptr;
         HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
     };
-
+    
     void destroy_node(HashTableNode* node) {
         if constexpr (!std::is_trivially_destructible<HashTableNode>::value) {
             node->~HashTableNode();
@@ -128,7 +128,12 @@ private:
         return _stripes[bucket_index & _stripe_mask].lock;
     }
 
-    std::atomic<bool> _rehashing{false};
+    // std::atomic<bool> _rehashing{false};
+    // 原方案用一个 _rehashing 原子bool类型, 来表达 "当前该哈希表是否正在经历rehash".
+    // 在 insert&upsert 操作之后, 要检查是否要 rehash, 如果要rehash, 那么必须要上 表级写锁. 这种争抢表级写锁的耗时很高, 严重影响并发, 所以要有一个预检查
+    // _rehashing 的问题在于: 其与 表级写锁lock 并非完全一致, 即存在可能_rehashing为True时, 线程恰好被OS调度了, 表级写锁未能lock, 从而其他线程错过 rehash
+    // 工业级实践中, Java/Rust 的 concurrentHashMap 都引入一个扩容阈值 resize threshold 的原子变量, 来作为 rehash 的预检查
+    std::atomic<size_t> _resize_threshold{0}; // 新增, 替代 _rehashing 用于 rehash 的预检查
 
     void rehash(size_t new_capacity) {
         // rehash 的调用在 insert 里，调用前会加 独占表锁, 故这里不再加独占表锁避免死锁
@@ -177,6 +182,7 @@ private:
         _table = _new_table;
         _capacity = new_capacity;
         _size.store(actual_node_count, std::memory_order_relaxed);
+        _resize_threshold.store(static_cast<size_t>(new_capacity * _max_load_factor), std::memory_order_relaxed); // 更新 下一次 rehash 的 size 阈值
         // _occupied_indices.swap(_new_occupied_indices);
         _all_nodes_head.store(_new_all_nodes_head, std::memory_order_relaxed);
     }
@@ -194,6 +200,7 @@ public:
         // .reserve 方法只是预留容量. 这里是实打实构造了 n 个独立实例 ---> 也就是说, 这里构造了 next_pow2(stripe_hint) 个 独立的互斥锁
         _stripes(next_pow2(stripe_hint))
     {
+        _resize_threshold.store(static_cast<size_t>(capacity * _max_load_factor), std::memory_order_relaxed);
         alloc_table_ptrs(_capacity);
     }
 
@@ -206,6 +213,7 @@ public:
         // .reserve 方法只是预留容量. 这里是实打实构造了 n 个独立实例 ---> 也就是说, 这里构造了 next_pow2(stripe_hint) 个 独立的互斥锁
         _stripes(next_pow2(stripe_hint))
     {
+        _resize_threshold.store(static_cast<size_t>(capacity * _max_load_factor), std::memory_order_relaxed);
         alloc_table_ptrs(_capacity);
     }
 
@@ -290,24 +298,29 @@ public:
         // 本线程在 unique_lock 表锁时, 会同步 表级写锁 作用域内所有修改, 即 _size 和 _capacity 都得到同步.
         // ----> 多次 rehash 前后, 数据必然得到同步, 因为每一次 rehash 都是 表级写锁 操作, 必然同步内存.
 
-        // 综上, 唯一的处理关键点在于: 要采取互斥机制，保证同一时间此表只能有一个线程执行 rehash ---> 原子变量 _rehashing
+        // 扩容检查. 因为在临近扩容时, 由于多并发写入, 会有多个进程近乎同时判断出需要rehash. 希望减少rehash次数.
+        // 但另一方面, 为了保证总是在锁内读取 _size和_capacity, 检查是否要rehash时必须要加 表级写锁 --> 每一次insert都要表级写锁lock, 成本太高
+        // ----> 二次检查以减少 触发 表级写锁. 原方案是 _rehashing --update--> _resize_threshold
 
-        // 扩容检查. 因为在临近扩容时,由于多并发写入, 会有多个进程近乎同时判断出需要rehash. 但只有一个能执行rehash
-        // TODO: 这里 存在 锁外 读取 _capacity，以及 _rehashing 与 _table_mutex 可能冲突 --> 去除 _rehashing, 引入一个原子变量 _capacity_threshold
-        bool expected = false;
-        // 临近状态下, 多个线程都满足第一个条件, 但是第二个条件: 原子变量 _rehashing == expected(false) 只能原子级满足
-        // compare_exchange_strong 保证了一旦原子变量 _rehashing 满足 == false, 马上将转化为true并返回true.
-        // 如此其他线程在这里只会得到一个为 true 的_rehashing, 从而无法进入内部.
-        if (_size >= _capacity*_max_load_factor && _rehashing.compare_exchange_strong(expected, true)) {
-
+        // UPDATE: 这里 存在锁外读取 _capacity，以及 _rehashing 与 _table_mutex 可能冲突 --> 去除 _rehashing, 引入一个原子变量 _capacity_threshold
+        
+        // // 临近状态下, 多个线程都满足第一个条件, 但是第二个条件: 原子变量 _rehashing == expected(false) 只能原子级满足
+        // // compare_exchange_strong 保证了一旦原子变量 _rehashing 满足 == false, 马上将转化为true并返回true.
+        // // 如此其他线程在这里只会得到一个为 true 的_rehashing, 从而无法进入内部.
+        // bool expected = false;
+        // if (_size >= _capacity*_max_load_factor && _rehashing.compare_exchange_strong(expected, true))
+        if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed))
+        {
             // 独占 _table_mutex 表锁, rehash 时其他任何线程不能对table作任何操作. 作用到rehash结束
             std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
 
             // 二次检查. 写锁作用域内的 共享状态才会被 synchronize-with, 所以这里会同步 写锁作用域内的 其他线程的操作
-            if (_size >= _capacity*_max_load_factor) { // _size 和 _capacity 会同步
+            // if (_size >= _capacity*_max_load_factor)
+            if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed))
+            { // _size 和 _capacity 会同步
                 rehash( _capacity*2 );
             }
-            _rehashing.store(false);
+            // _rehashing.store(false);
         }
 
         return true;
@@ -351,19 +364,16 @@ public:
             _size.fetch_add(1);
         }
         
-        _lock_table_from_rehash_clear_.unlock(); // 解开并发读的表锁, 是因为 rehash 操作需要 独占表锁
+        _lock_table_from_rehash_clear_.unlock();
 
-        bool expected = false;
-
-        if (_size >= _capacity*_max_load_factor && _rehashing.compare_exchange_strong(expected, true)) {
-
-            // 独占 _table_mutex 表锁, rehash 时其他任何线程不能对table作任何操作. 作用到rehash结束
+        if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed))
+        {
             std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
 
-            if (_size >= _capacity*_max_load_factor) {
+            if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed))
+            {
                 rehash( _capacity*2 );
             }
-            _rehashing.store(false);
         }
 
         return true;
@@ -391,7 +401,7 @@ public:
             _all_nodes_head.store(nullptr, std::memory_order_relaxed);
         }
 
-        // clear 和 destroy 的区别就在于: clear 保留了桶结构, _table 链表头数组不释放(但全部置空). 各链表不再可访问.
+        // clear 和 destroy 的区别就在于: clear 保留了桶结构, _table 链表头数组不释放(但全部置空, 各链表不再可访问), _capacity/_resize_threshold不缩容
         // 经过内存池的reset操作后, 本哈希表可以重新复用.
         for (size_t index = 0; index < _capacity; ++index) {
             _table[index] = nullptr;
@@ -424,11 +434,11 @@ public:
             _all_nodes_head.store(nullptr, std::memory_order_relaxed);
         }
         
-        // destroy 和 clear 的区别就在于: destroy 摧毁了桶结构, _table 链表头数组释放, 各链表不再可访问
+        // destroy 和 clear 的区别就在于: destroy 摧毁了桶结构, _table 链表头数组释放, 各链表不再可访问, _capacity/_resize_threshold置零
         // 本哈希表不再可复用.
         free_table_ptrs();
         _capacity = 0;
-
+        _resize_threshold.store(0, std::memory_order_relaxed);
         // _occupied_indices.clear();
         _size.store(0, std::memory_order_relaxed);
     }
