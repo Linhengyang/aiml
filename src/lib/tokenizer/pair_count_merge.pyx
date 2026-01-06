@@ -23,28 +23,28 @@ cdef extern from "pair_count_merge.h":
     # 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
     void release_process()
 
-    # 声明 C++ 中的 L_R_token_counts_ptrs 结构体
-    struct L_R_token_counts_ptrs:
+    # 声明 C++ 中的 u16token_pair_counts_ptrs 结构体
+    struct u16token_pair_counts_ptrs:
         uint16_t* L_tokens_ptr
         uint16_t* R_tokens_ptr
         uint64_t* counts_ptr
         size_t size;
 
-     # 声明 C++ 中的 c_count_pair_batch 函数
-    L_R_token_counts_ptrs c_count_pair_batch(
+     # 声明 C++ 中的 c_local_count_u16pair_batch 函数
+    u16token_pair_counts_ptrs c_local_count_u16pair_batch(
         const uint16_t* L_tokens,
         const uint16_t* R_tokens,
         const int64_t len
     )
 
-    # 声明 C++ 中的 token_filter_len_ptrs 结构体
-    struct token_filter_len_ptrs:
+    # 声明 C++ 中的 u16token_filter_len_ptrs 结构体
+    struct u16token_filter_len_ptrs:
         uint16_t* output_tokens_flat_ptr
         bool* output_filter_ptr
         int64_t* output_tokens_lens_ptr
 
     # 声明 C++ 中的 c_merge_pair_batch 函数
-    token_filter_len_ptrs c_merge_pair_batch(
+    u16token_filter_len_ptrs c_local_merge_u16pair_batch(
         const uint16_t* tokens_flat,
         const int64_t* offsets,
         const size_t num_chunks,
@@ -87,9 +87,9 @@ cpdef close():
 
 
 
-
+# with GIL 版本, 给 工作进程 使用 以绕开 GIL
 # 返回np.array of L_tokens/R_tokens/counts 给python
-cpdef count_pair_batch(
+cpdef count_u16pair_batch(
     object tokens_offsets_border
 ):
     # reset 进程单例内存池 / 基于单例内存池的计数器
@@ -137,8 +137,8 @@ cpdef count_pair_batch(
     cdef const uint16_t[:] R_tokens_view = R_tokens
     cdef const uint16_t* R_tokens_ptr = &R_tokens_view[0]
     
-    # 调用 c_count_pair_batch
-    cdef L_R_token_counts_ptrs result = c_count_pair_batch(
+    # 在进程内部 调用 c_local_count_u16pair_batch, 对 u16-token batch data 计算 pair-counts
+    cdef u16token_pair_counts_ptrs result = c_local_count_u16pair_batch(
         L_tokens_ptr,
         R_tokens_ptr,
         len
@@ -167,8 +167,9 @@ cpdef count_pair_batch(
 
 
 
+# with GIL 版本, 给 工作进程 使用 以绕开 GIL
 # 返回np.array of merged_tokens_flat/offsets给python
-cpdef merge_pair_batch(
+cpdef merge_u16pair_batch(
     object tokens_offsets_border,
     np.uint16_t pair_L,
     np.uint16_t pair_R,
@@ -195,12 +196,12 @@ cpdef merge_pair_batch(
     cdef const uint16_t[:] tokens_flat_view = tokens_flat
     cdef const int64_t[:] offsets_view = offsets
 
-    # get input ptr from memoryview input(zero-copy)
+    # 零拷贝获取数据地址: get input ptr from memoryview input(zero-copy)
     cdef const uint16_t* tokens_flat_ptr = &tokens_flat_view[0]
     cdef const int64_t* offsets_ptr = &offsets_view[0]
 
-    # deploy cpp function
-    cdef token_filter_len_ptrs result = c_merge_pair_batch(
+    # 在进程内部 调用 c_local_merge_u16pair_batch,
+    cdef u16token_filter_len_ptrs result = c_local_merge_u16pair_batch(
         tokens_flat_ptr,
         offsets_ptr,
         num_chunks,
