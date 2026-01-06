@@ -1,4 +1,4 @@
-// merge_pair_core.cpp
+// core_merge_pair.cpp
 // core functions for merge pair in tokenizer
 #include <vector>
 #include <omp.h>
@@ -8,7 +8,7 @@
 
 extern "C" {
 
-void merge_pair_core(
+void local_merge_u16pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
