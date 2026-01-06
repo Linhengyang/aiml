@@ -1,22 +1,22 @@
-// mempool_counter.h
+// mempooled_counter.h
 
-#ifndef MEMPOOL_COUNTER_H
-#define MEMPOOL_COUNTER_H
+#ifndef MEMPOOLED_COUNTER_H
+#define MEMPOOLED_COUNTER_H
 
 
 #include <functional>
 #include <cstddef>
 #include <type_traits> // std::conditional
 #include <utility> // std::forward
-#include "mempool_hash_table_st.h"
-#include "mempool_hash_table_mt.h"
+#include "mempooled_concurrent_hashtable.h"
+#include "mempooled_hashtable.h"
 
 
 template<typename TYPE_K, typename HASH_FUNC, bool threadsafe, typename TYPE_MEMPOOL>
 using selected_hash_table = typename std::conditional<
     threadsafe,
-    hash_table_mt_chain<TYPE_K, uint64_t, TYPE_MEMPOOL, HASH_FUNC>,
-    hash_table_st_chain<TYPE_K, uint64_t, TYPE_MEMPOOL, HASH_FUNC>
+    pooled_concurrent_hashtable<TYPE_K, uint64_t, TYPE_MEMPOOL, HASH_FUNC>,
+    pooled_hashtable<TYPE_K, uint64_t, TYPE_MEMPOOL, HASH_FUNC>
 >::type;
 
 
