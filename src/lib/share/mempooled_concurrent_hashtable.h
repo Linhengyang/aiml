@@ -1,7 +1,7 @@
-// mempool_hash_table_mt.h
+// mempooled_concurrent_hashtable.h
 
-#ifndef MEMPOOL_HASH_TABLE_MULTI_THREAD_H
-#define MEMPOOL_HASH_TABLE_MULTI_THREAD_H
+#ifndef MEMPOOLED_CONCURRENT_HASHTABLE_H
+#define MEMPOOLED_CONCURRENT_HASHTABLE_H
 
 
 #include <vector>
@@ -58,7 +58,7 @@ struct padded_mutex {
 // ----> synchronize-with 的语义. 注意只在 临界区内部有同步关系, 所以要避免锁外数据写入操作
 
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
-class hash_table_mt_chain {
+class pooled_concurrent_hashtable {
 
 private:
 
@@ -190,7 +190,7 @@ private:
 
 public:
 
-    explicit hash_table_mt_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
+    explicit pooled_concurrent_hashtable(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
         _hasher(hasher),
         _capacity(capacity),
         _pool(pool),
@@ -204,7 +204,7 @@ public:
         alloc_table_ptrs(_capacity);
     }
 
-    explicit hash_table_mt_chain(size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
+    explicit pooled_concurrent_hashtable(size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
         _hasher(),
         _capacity(capacity),
         _pool(pool),
@@ -217,7 +217,7 @@ public:
         alloc_table_ptrs(_capacity);
     }
 
-    ~hash_table_mt_chain() {
+    ~pooled_concurrent_hashtable() {
         destroy();
     }
 
@@ -487,7 +487,7 @@ public:
 
     public:
 
-        const_iterator(const hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node)
@@ -532,7 +532,7 @@ public:
 
     private:
 
-        const hash_table_mt_chain* _hash_table;
+        const pooled_concurrent_hashtable* _hash_table;
 
         size_t _bucket_index;
 
@@ -570,7 +570,7 @@ public:
     public:
 
         // 迭代器的构造函数
-        iterator(hash_table_mt_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node)
@@ -615,7 +615,7 @@ public:
 
     private:
 
-        hash_table_mt_chain* _hash_table;
+        pooled_concurrent_hashtable* _hash_table;
 
         size_t _bucket_index;
 
@@ -639,7 +639,7 @@ public:
         return iterator(this, _capacity, nullptr);
     }
 
-}; // end of hash_table_mt_chain definition
+}; // end of pooled_concurrent_hashtable definition
 
 
 
