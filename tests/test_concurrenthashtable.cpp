@@ -9,7 +9,7 @@ using namespace std;
 
 // 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
 struct hasher {
-    uint32_t operator()(const uint32_t& key) const {
+    int operator()(const int& key) const {
         return key;
     }
 };
@@ -24,16 +24,16 @@ void test_concurrent_hash_map() {
     // 创建 哈希器
     hasher my_hasher;
 
-    hash_table_mt_chain<uint32_t, int, unsafe_singleton_mempool, hasher> map(my_hasher, 128, &pool);
-    const int num_threads = 2;
-    const int ops_per_thread = 16;
+    hash_table_mt_chain<int, int, unsafe_singleton_mempool, hasher> map(my_hasher, 8192, &pool);
+    const int num_threads = 8;
+    const int ops_per_thread = 10000;
 
     // 启动写线程：每个线程插入自己的 key 范围
     vector<thread> writers;
     for (int t = 0; t < num_threads; ++t) {
         writers.emplace_back([&, t]() {
             for (int i = 0; i < ops_per_thread; ++i) {
-                uint32_t key = t * ops_per_thread + i;
+                int key = t * ops_per_thread + i;
                 map.insert(key, key * 2);
             }
         });
