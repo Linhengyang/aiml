@@ -1,5 +1,4 @@
-#include "mempool_hash_table_mt.h"
-#include "mempool_hash_table_st.h"
+#include "mempooled_concurrent_hashtable.h"
 #include "memory_pool_singleton.h"
 #include <iostream>
 #include <cassert>
@@ -17,14 +16,14 @@ struct hasher {
 
 void test_concurrent_hash_map() {
 
-    // 创建 内存池单例
+    // 创建 内存池单例: 并发哈希表必须要使用 线程安全的内存池
     size_t block_size = 40LL * 172470436LL;
-    singleton_mempool& pool = singleton_mempool::get(block_size, 64);
+    threadsafe_singleton_mempool& pool = threadsafe_singleton_mempool::get(block_size, 64);
 
     // 创建 哈希器
     hasher my_hasher;
 
-    hash_table_mt_chain<int, int, singleton_mempool, hasher> map(my_hasher, 4096, &pool);
+    pooled_concurrent_hashtable<int, int, threadsafe_singleton_mempool, hasher> map(my_hasher, 4096, &pool);
     const int num_threads = 8;
     const int ops_per_thread = 10000;
 
