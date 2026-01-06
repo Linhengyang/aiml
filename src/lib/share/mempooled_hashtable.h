@@ -1,7 +1,7 @@
-// mempool_hash_table_st.h
+// mempooled_hashtable.h
 
-#ifndef MEMPOOL_HASH_TABLE_SINGLE_THREAD_H
-#define MEMPOOL_HASH_TABLE_SINGLE_THREAD_H
+#ifndef MEMPOOLED_HASHTABLE_H
+#define MEMPOOLED_HASHTABLE_H
 
 
 #include <functional>
@@ -12,7 +12,7 @@
 
 
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
-class hash_table_st_chain {
+class pooled_hashtable {
 
 private:
 
@@ -135,7 +135,7 @@ private:
 
 public:
 
-    explicit hash_table_st_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
+    explicit pooled_hashtable(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
         _hasher(hasher), // 这里哈希器采用参数传入的实现了 operator()支持函数式调用hasher(key)的结构体
         _capacity(capacity),
         _pool(pool)
@@ -143,7 +143,7 @@ public:
         alloc_table_ptrs(_capacity);
     }
 
-    explicit hash_table_st_chain(size_t capacity, TYPE_MEMPOOL* pool):
+    explicit pooled_hashtable(size_t capacity, TYPE_MEMPOOL* pool):
         _hasher(), // 这里哈希器采用模板的默认构造 std::hash<TYPE_K>
         _capacity(capacity),
         _pool(pool)
@@ -153,7 +153,7 @@ public:
 
     // 析构函数, 会调用 destroy 方法来 析构 所有 HashTableNode 中需要显式析构的部分, 释放 buckets数组 _table并置空, _size 和 _capacity 置0
     // 但不负责内存释放. 由内存池在外部统一释放
-    ~hash_table_st_chain() {
+    ~pooled_hashtable() {
         destroy();
     }
 
@@ -346,7 +346,7 @@ public:
 
     public:
 
-        const_iterator(const hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node)
@@ -390,7 +390,7 @@ public:
 
     private:
 
-        const hash_table_st_chain* _hash_table;
+        const pooled_hashtable* _hash_table;
 
         size_t _bucket_index;
 
@@ -444,7 +444,7 @@ public:
         */
         // for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
         // for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
-        iterator(hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node)
@@ -492,7 +492,7 @@ public:
     private:
 
         // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
-        hash_table_st_chain* _hash_table;
+        pooled_hashtable* _hash_table;
 
         // 遍历哈希表的所有桶, 0 -> _capacity-1
         size_t _bucket_index;
@@ -520,20 +520,20 @@ public:
 
     };  // end of iterator definition
 
-    // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
+    // pooled_hashtable 类对象 hashtable 调用 begin 方法, 返回一个迭代器
     // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
     // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
     iterator begin() {
         return iterator(this, 0, nullptr);
     }
 
-    // hash_table_st_chain 类对象 hashtable 调用 end 方法, 返回一个迭代器
+    // pooled_hashtable 类对象 hashtable 调用 end 方法, 返回一个迭代器
     // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
     iterator end() {
         return iterator(this, _capacity, nullptr);
     }
 
-}; // end of hash_table_st_chain definition
+}; // end of pooled_hashtable definition
 
 
 
