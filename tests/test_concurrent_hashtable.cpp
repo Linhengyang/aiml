@@ -24,7 +24,7 @@ void test_concurrent_hash_map() {
     // 创建 哈希器
     hasher my_hasher;
 
-    hash_table_mt_chain<int, int, unsafe_singleton_mempool, hasher> map(my_hasher, 128, &pool);
+    hash_table_mt_chain<uint32_t, int, unsafe_singleton_mempool, hasher> map(my_hasher, 128, &pool);
     const int num_threads = 2;
     const int ops_per_thread = 16;
 
@@ -33,7 +33,7 @@ void test_concurrent_hash_map() {
     for (int t = 0; t < num_threads; ++t) {
         writers.emplace_back([&, t]() {
             for (int i = 0; i < ops_per_thread; ++i) {
-                int key = t * ops_per_thread + i;
+                uint32_t key = t * ops_per_thread + i;
                 map.insert(key, key * 2);
             }
         });
