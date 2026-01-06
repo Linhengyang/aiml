@@ -17,12 +17,12 @@
 // void* ptr;
 // int* pInt = statc_cast<int*>(ptr);
 
-class singleton_mempool {
+class threadsafe_singleton_mempool {
 
 private:
 
     // 构造和析构函数写在private里，保证只能由 get 方法创建内存池实例
-    explicit singleton_mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请1MB内存,64字节对齐
+    explicit threadsafe_singleton_mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请1MB内存,64字节对齐
     // explicit的意思是禁止对 singleton_mempool 类对象作隐式转换
 
     // 析构函数被private, 导致如下后果:
@@ -32,7 +32,7 @@ private:
     // 4. 无法作为函数的返回值(按值返回)，因为返回过程中临时对象需要被析构
     // 5. 禁止std::vector/std::list等标准容器存储, 因为容器需要访问元素的析构函数
     // 单例模式下的对象，适合把析构函数private：这样可以由 唯一指定的接口来释放销毁对象，以此手动控制单例的生命周期
-    ~singleton_mempool();
+    ~threadsafe_singleton_mempool();
 
     const size_t _block_size; //内存池中, 单个内存block的字节量
 
@@ -50,7 +50,7 @@ private:
 
     // 自定义删除器结构体
     struct Deleter {
-        void operator()(singleton_mempool* ptr) const {
+        void operator()(threadsafe_singleton_mempool* ptr) const {
             delete ptr;  // 这里可以访问 private 的析构. 删除器内部不加锁, 因为调用删除器前 destroy 会加锁
         }
     };
@@ -59,39 +59,41 @@ private:
     friend struct Deleter;
 
     // 声明静态成员变量 单例指针
-    static std::unique_ptr<singleton_mempool, Deleter> _instance;
+    static std::unique_ptr<threadsafe_singleton_mempool, Deleter> _instance;
 
     // 声明静态成员变量 互斥锁
     static std::mutex _mtx;
     // 互斥锁, 保证多线程安全。比如在allocate方法里加入互斥锁，那么会发生如下：
-    // 线程A在函数域内调用对象 singleton_mempool 的allocate方法以获得内存，这个时候lock_guard类就在线程A的作用域里生成了，
-    // 传入互斥量mtx_，生成对象 lock. 这个时候如果另一个线程试图调用 singleton_mempool 的allocate方法，它就拿不到互斥量mtx_，
+    // 线程A在函数域内调用对象 threadsafe_singleton_mempool 的allocate方法以获得内存，这个时候lock_guard类就在线程A的作用域里生成了，
+    // 传入互斥量mtx_，生成对象 lock. 这个时候如果另一个线程试图调用 threadsafe_singleton_mempool 的allocate方法，它就拿不到互斥量mtx_，
     // 所以就只能堵塞，这样就能保证线程A allocate拿到的内存只有线程A能用。
     // 当线程A函数在return后，对象 lock 就离开了线程A的作用域，自动销毁，那么互斥量mtx_就被释放了
 
     // 禁止拷贝构造和赋值操作
-    singleton_mempool(const singleton_mempool&) = delete;
-    singleton_mempool& operator=(const singleton_mempool&) = delete;
+    threadsafe_singleton_mempool(const threadsafe_singleton_mempool&) = delete;
+    threadsafe_singleton_mempool& operator=(const threadsafe_singleton_mempool&) = delete;
 
 
 public:
     // 类的静态方法不依赖实例（故也不能使用非静态成员/方法），适合用来定义单例：用单例类就可以调用，单例类约等于单例实例
     // 调用方法:  类名::静态方法名
-    // 带参数调用: 创建 singleton_mempool 单例
-    static singleton_mempool& get(size_t block_size, size_t alignment) {
+    // 带参数调用: 创建 threadsafe_singleton_mempool 单例
+    static threadsafe_singleton_mempool& get(size_t block_size, size_t alignment) {
+        // 加锁以保证线程安全
         std::lock_guard<std::mutex> lock(_mtx);
         if (!_instance) {
-            _instance.reset(new singleton_mempool(block_size, alignment));
+            _instance.reset(new threadsafe_singleton_mempool(block_size, alignment));
             // _instance = std::unique_ptr<singleton_mempool, Deleter>(new singleton_mempool(block_size, alignment));
         }
         return *_instance;
     }
 
-    // 不带参数调用: 获得已经实现的单例（加锁以保证线程安全）. 若尚未创建，报错
-    static singleton_mempool& get() {
+    // 不带参数调用: 获得已经实现的单例. 若尚未创建，报错
+    static threadsafe_singleton_mempool& get() {
+        // 加锁以保证线程安全
         std::lock_guard<std::mutex> lock(_mtx);
         if(!_instance) {
-            throw std::runtime_error("singleton_mempool not created");
+            throw std::runtime_error("threadsafe_singleton_mempool not created");
         }
         return *_instance;
     }
@@ -104,7 +106,8 @@ public:
 
     // 带锁释放内存池的公共接口，效果和release相同，但是是静态方法，可以并推荐用 类名::方法 来使用
     static void destroy() {
-        std::lock_guard<std::mutex> lock(_mtx); // 加锁
+        // 加锁以保证线程安全
+        std::lock_guard<std::mutex> lock(_mtx);
         _instance.reset(); // 智能指针 reset 会调用 删除器, 删除器作为友好类, 可以访问访问 private 的析构
     }
 
@@ -123,23 +126,23 @@ public:
     // 带锁释放内存池的公共接口，效果和 destroy 相同，但是是非静态方法
     void release() ; // 全部释放(block 和 large alloc都释放), 带锁以线程安全
 
-}; // end of singleton_mempool
+}; // end of threadsafe_singleton_mempool
 
 
 
 
-// unsafe_singleton_mempool 线程不安全、不带锁的 单例模式内存池：单线程使用
+// singleton_mempool 线程不安全、不带锁的 单例模式内存池：单线程使用
 
 
 
 
-class unsafe_singleton_mempool {
+class singleton_mempool {
 
 private:
 
-    explicit unsafe_singleton_mempool(size_t block_size = 1048576, size_t alignment = 64);
+    explicit singleton_mempool(size_t block_size = 1048576, size_t alignment = 64);
 
-    ~unsafe_singleton_mempool();
+    ~singleton_mempool();
 
     const size_t _block_size;
 
@@ -154,31 +157,31 @@ private:
     // 单例模式: 静态成员是保证该类只能有一个实现，在类层面定义. 静态成员变量必须要在类外定义, 类内只是申明
 
     struct Deleter {
-        void operator()(unsafe_singleton_mempool* ptr) const {
+        void operator()(singleton_mempool* ptr) const {
             delete ptr;
         }
     };
 
     friend struct Deleter;
 
-    static std::unique_ptr<unsafe_singleton_mempool, Deleter> _instance;
+    static std::unique_ptr<singleton_mempool, Deleter> _instance;
 
-    unsafe_singleton_mempool(const unsafe_singleton_mempool&) = delete;
-    unsafe_singleton_mempool& operator=(const unsafe_singleton_mempool&) = delete;
+    singleton_mempool(const singleton_mempool&) = delete;
+    singleton_mempool& operator=(const singleton_mempool&) = delete;
 
 
 public:
 
-    static unsafe_singleton_mempool& get(size_t block_size, size_t alignment) {
+    static singleton_mempool& get(size_t block_size, size_t alignment) {
         if (!_instance) {
-            _instance.reset(new unsafe_singleton_mempool(block_size, alignment));
+            _instance.reset(new singleton_mempool(block_size, alignment));
         }
         return *_instance;
     }
 
-    static unsafe_singleton_mempool& get() {
+    static singleton_mempool& get() {
         if(!_instance) {
-            throw std::runtime_error("unsafe_singleton_mempool not created");
+            throw std::runtime_error("singleton_mempool not created");
         }
         return *_instance;
     }
@@ -201,7 +204,7 @@ public:
 
     void release() ;
 
-}; // end of unsafe_singleton_mempool
+}; // end of singleton_mempool
 
 
 
