@@ -81,10 +81,42 @@ void test_concurrent_hash_map() {
     // 输出size
     cout << map.size() << endl;
 
-    // 手动销毁 哈希表
+    // 重新启动写线程：reset pool 之后, 复用 hashtable
+    pool.reset();
+
+    // 再次启动写线程：每个线程插入自己的 key 范围
+    vector<thread> writer2;
+    for (int t = 0; t < num_threads; ++t) {
+        writer2.emplace_back([&, t]() {
+            for (int i = 0; i < ops_per_thread; ++i) {
+                int key = t * ops_per_thread + i;
+                map.insert(key, key * 2);
+            }
+        });
+    }
+
+    // 启动读线程：随机读取已写入的 key（这里简化为等待写完再读）
+    for (auto& w : writer2) {
+        w.join();
+    }
+
+    // 验证所有写入都成功
+    assert(map.size() == num_threads * ops_per_thread);
+
+    for (int t = 0; t < num_threads; ++t) {
+        for (int i = 0; i < ops_per_thread; ++i) {
+            int key = t * ops_per_thread + i;
+            int val;
+            bool found = map.get(key, val);
+            assert(found);
+            assert(val == key * 2);
+        }
+    }
+
+    // 这次是 销毁 哈希表
     map.destroy();
 
-    // 手动销毁内存池
+    // 销毁内存池
     pool.destroy();
 
     cout << "✅ ConcurrentHashMap test passed!" << endl;
