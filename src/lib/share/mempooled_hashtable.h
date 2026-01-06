@@ -65,8 +65,9 @@ private:
     // gc 链表: 链起所有node
     HashTableNode* _all_nodes_head = nullptr;
 
-    // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index类型要与 _capacity 类型对齐, 因为它是 hash成员函数的输出 取_capacity余
-    std::vector<size_t> _occupied_indices;
+    // // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index类型要与 _capacity 类型对齐, 因为它是 hash成员函数的输出 取_capacity余
+    // std::vector<size_t> _occupied_indices;
+    // // REMOVE _occupied_indices --> 引入 vector 得不偿失. 高性能版本的不需要这个
 
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
@@ -90,9 +91,9 @@ private:
         HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
         if (!_new_table) throw std::bad_alloc();
 
-        // 新的非空桶列表
-        std::vector<size_t> _new_occupied_indices;
-        _new_occupied_indices.reserve(_occupied_indices.size());
+        // // 新的非空桶列表
+        // std::vector<size_t> _new_occupied_indices;
+        // _new_occupied_indices.reserve(_occupied_indices.size());
 
         // 新的gc链表
         HashTableNode* _new_all_nodes_head = nullptr;
@@ -100,19 +101,25 @@ private:
         // 重新计算 _size, 为缩容式 rehash 留下余地
         size_t actual_node_count = 0;
 
-        // 遍历非空桶
-        for (size_t old_index: _occupied_indices) {
-
+        // for (size_t old_index: _occupied_indices) // 遍历非空桶
+        for (size_t old_index = 0; old_index < _capacity; ++old_index) // 遍历所有桶
+        {
             HashTableNode* curr = _table[old_index];
             while (curr) { // 当前node非空
                 HashTableNode* next = curr->next; // 先取出next node
                 size_t new_index = hash(curr->key) % new_capacity; // 计算得出新bucket
-                const bool was_empty = (_new_table[new_index] == nullptr);
+
+                // const bool was_empty = (_new_table[new_index] == nullptr);
+                // // REMOVE _occupied_indices
+
                 // 头插到新bucket
                 curr->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = curr; // 更新确认新bucket的链表头
-                // 若空桶->非空, 记录
-                if (was_empty) _new_occupied_indices.push_back(new_index);
+
+                // // 若空桶->非空, 记录
+                // if (was_empty) _new_occupied_indices.push_back(new_index);
+                // // REMOVE _occupied_indices
+
                 // 头插到gc链表
                 curr->gc_next = _new_all_nodes_head;
                 _new_all_nodes_head = curr;
@@ -128,7 +135,7 @@ private:
         _table = _new_table;
         _capacity = new_capacity;
         _size = actual_node_count;
-        _occupied_indices.swap(_new_occupied_indices);
+        // _occupied_indices.swap(_new_occupied_indices);
         _all_nodes_head = _new_all_nodes_head;
     }
 
@@ -200,7 +207,9 @@ public:
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
 
         // 在 内存池 上分配新内存给新节点, raw_mem 内存
-        const bool was_empty = (_table[index] == nullptr);
+        // const bool was_empty = (_table[index] == nullptr);
+        // REMOVE _occupied_indices
+
         void* raw_mem = _pool->allocate(sizeof(HashTableNode));
         if (!raw_mem) return false; // 如果内存分配失败
 
@@ -211,8 +220,9 @@ public:
         // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可
         new_node->gc_next = _all_nodes_head;
 
-        // 如果 空 -> 非空, 那么记录桶号
-        if (was_empty) _occupied_indices.push_back(index);
+        // // 如果 空 -> 非空, 那么记录桶号
+        // if (was_empty) _occupied_indices.push_back(index);
+        // REMOVE _occupied_indices
 
         // node数量自加1. 原子线程安全
         ++_size;
@@ -243,7 +253,8 @@ public:
             }
         }
 
-        const bool was_empty = (_table[index] == nullptr);
+        // const bool was_empty = (_table[index] == nullptr);
+        // REMOVE _occupied_indices
         void* raw_mem = _pool->allocate(sizeof(HashTableNode));
         if (!raw_mem) return false;
 
@@ -252,7 +263,8 @@ public:
 
         new_node->gc_next = _all_nodes_head;
 
-        if (was_empty) _occupied_indices.push_back(index);
+        // if (was_empty) _occupied_indices.push_back(index);
+        // REMOVE _occupied_indices
 
         _size++;
 
@@ -271,7 +283,7 @@ public:
     void clear() {
         if (_capacity == 0 || !_table) {
             _size = 0;
-            _occupied_indices.clear();
+            // _occupied_indices.clear(); // REMOVE _occupied_indices
             _all_nodes_head = nullptr;
             return;
         }
@@ -290,11 +302,15 @@ public:
         _all_nodes_head = nullptr;
 
         // _table 指针数组保持结构
-        for (size_t index: _occupied_indices) {
+        // for (size_t index: _occupied_indices) // REMOVE _occupied_indices
+        for (size_t index = 0; index < _capacity; ++index)
+        {
             _table[index] = nullptr;
         }
-        // 非空桶置空
-        _occupied_indices.clear();
+        // // 非空桶置空
+        // _occupied_indices.clear();
+        // REMOVE _occupied_indices
+
         _size = 0;
 
     }
@@ -304,7 +320,7 @@ public:
     void destroy() {
         if (_capacity == 0 || !_table) {
             _size = 0;
-            _occupied_indices.clear();
+            // _occupied_indices.clear(); // REMOVE _occupied_indices
             _all_nodes_head = nullptr;
             return;
         }
@@ -325,8 +341,10 @@ public:
         // 释放 节点指针(桶)数组, 置空 _table. 所有桶/节点不再可访问. 但内存尚未释放, 等待内存池操作
         free_table_ptrs();
 
-        // 非空桶置空
-        _occupied_indices.clear();
+        // // 非空桶置空
+        // _occupied_indices.clear();
+        // // REMOVE _occupied_indices
+        
         _size = 0; // node数量置0
         _capacity = 0; // _capacity 置零
     }
