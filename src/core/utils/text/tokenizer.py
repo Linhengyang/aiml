@@ -1433,8 +1433,8 @@ class boostBBPETokenizer(bufferBBPETokenizer):
         
         self._set_config(
             buffer_size = buffer_size,
-            fc_count_pair_batch = pair_count_merge.count_pair_batch,
-            fc_merge_pair_batch = pair_count_merge.merge_pair_batch)
+            fc_count_pair_batch = pair_count_merge.count_u16pair_batch,
+            fc_merge_pair_batch = pair_count_merge.merge_u16pair_batch)
 
         # corpora 为 t.List[str], 模式是 从头train
         # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
@@ -1527,8 +1527,8 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         self._buffer_tokens_dir = buffer_tokens_dir
         self._buffer_pcounts_dir = buffer_pcounts_dir
 
-        self._func_count_pair_batch = pair_count_merge.count_pair_batch
-        self._func_merge_pair_batch = pair_count_merge.merge_pair_batch
+        self._func_count_pair_batch = pair_count_merge.count_u16pair_batch
+        self._func_merge_pair_batch = pair_count_merge.merge_u16pair_batch
 
         self._num_workers = 6
 
