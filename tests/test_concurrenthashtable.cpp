@@ -19,12 +19,12 @@ void test_concurrent_hash_map() {
 
     // 创建 内存池单例
     size_t block_size = 40LL * 172470436LL;
-    unsafe_singleton_mempool& pool = unsafe_singleton_mempool::get(block_size, 64);
+    singleton_mempool& pool = singleton_mempool::get(block_size, 64);
 
     // 创建 哈希器
     hasher my_hasher;
 
-    hash_table_mt_chain<int, int, unsafe_singleton_mempool, hasher> map(my_hasher, 8192, &pool);
+    hash_table_mt_chain<int, int, singleton_mempool, hasher> map(my_hasher, 4096, &pool);
     const int num_threads = 8;
     const int ops_per_thread = 10000;
 
