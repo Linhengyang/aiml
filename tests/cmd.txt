@@ -7,4 +7,4 @@ PYTHONDONTWRITEBYTECODE=1 pytest -v .
 
 # cpptest:  copy to build corresponding cpp files under directory `aiml/tests`:
 cd ../tests
-g++ @cppbuild_args_test_hashtable.txt
+g++ @cppbuild_args_test_concurrenthashtable.txt
