@@ -5,7 +5,7 @@ import pyarrow.dataset as ds
 import regex as re
 import os
 import typing as t
-
+from src.core.utils.file.folder_op import clean_folder
 
 valid_pq = '../../data/TinyStories/raw/validation.parquet'
 train_pq = '../../data/TinyStories/raw/train.parquet'
@@ -146,40 +146,46 @@ if __name__ == "__main__":
     # 遍历每个 text parquet file, 分批 转换成 一个 tokens(uint16) parquet file: init_tokens_pq
     init_tokens_pq = os.path.join(buffer_dir, 'byte_tokens.parquet')
 
-    with pq.ParquetWriter(init_tokens_pq, tokens_schema) as writer:
-        for (corpus_pq, text_col) in zip(corpus_files, text_colnames):
-            corpus_path = os.path.join(raw_pq_dir, corpus_pq)
+    # with pq.ParquetWriter(init_tokens_pq, tokens_schema) as writer:
+    #     for (corpus_pq, text_col) in zip(corpus_files, text_colnames):
+    #         corpus_path = os.path.join(raw_pq_dir, corpus_pq)
 
-            corpus_batch_iter = yield_parquet_batch(corpus_path, batch_size, [text_col])
-            for k, batch in enumerate(corpus_batch_iter):
-                text = ENDOFTEXT.join( batch[text_col].to_pylist() )
-                batch_table = text_to_tokens_pa_table(GPT4_TOKENIZER_REGEX, text)
-                writer.write_table(batch_table, row_group_size)
+    #         corpus_batch_iter = yield_parquet_batch(corpus_path, batch_size, [text_col])
+    #         for k, batch in enumerate(corpus_batch_iter):
+    #             text = ENDOFTEXT.join( batch[text_col].to_pylist() )
+    #             batch_table = text_to_tokens_pa_table(GPT4_TOKENIZER_REGEX, text)
+    #             writer.write_table(batch_table, row_group_size)
     
-    # 从 init_tokens 到 init dataset: tokens/0
+    # 从 init_tokens(parquet文件) 到 init dataset: tokens/0
     def _init_tokens_dataset(init_tokens_pq):
         # 0. 检查 总的batch数量不能超过 10000
         num_total_rows = pq.read_metadata(init_tokens_pq).num_rows
         assert num_total_rows // batch_size < 10000, \
-            f'current batch_size {batch_size} too small for parquet file {init_tokens_ds}, which leads more than 10000 files in dataset.'
+            f'batch_size {batch_size} too small for parquet file {init_tokens_pq}, which leads more than 10000 fragments in dataset.'
+        
+        print(f'initalizing tokens dataset at merge 0: {num_total_rows // batch_size} fragments with batch_size {batch_size}')
 
         # 1. 创建并清空 init_tokens_ds
         init_tokens_ds = os.path.join(buffer_tokens_dir, '0')
         os.makedirs(init_tokens_ds, exist_ok=True)
 
-        # TODO: 清空但保留 init_tokens_ds
+        # 清空但保留 init_tokens_ds
+        clean_folder(init_tokens_ds, method='all', keep=True)
 
-        # 写入 common_metadata
+        # 2. 写入 common_metadata
         pq.write_metadata(schema=tokens_schema, path=os.path.join(init_tokens_ds, "_common_metadata"))
 
-        # 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 批数据 写入 init_tokens_ds
+        # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
         # TODO: 改造成多线程/多进程
         for i, batch in yield_parquet_batch(init_tokens_pq, batch_size, [tokens_schema[0].name]):
             b_table = pa.Table.from_batches([batch], schema=tokens_schema)
             b_path = os.path.join(init_tokens_ds, f'part-{i:04d}.parquet')
             pq.write_table(b_table, b_path)
         
+        # 4. 写入完整 metadata --> 跳过
+
         return init_tokens_ds
     
 
-    _init_tokens_dataset(init_tokens_pq)
+    tokens_ds = _init_tokens_dataset(init_tokens_pq)
+    
