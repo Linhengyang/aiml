@@ -140,11 +140,12 @@ if __name__ == "__main__":
     batch_size = 32 * 1024 * 1024 # 当下是 英文语料+小词表, 选用 32M 作为 batch_size
     row_group_size = batch_size
 
-    corpus_files = os.listdir(raw_pq_dir)
-    text_colnames = ['text', ]*len(corpus_files)
-
     # 遍历每个 text parquet file, 分批 转换成 一个 tokens(uint16) parquet file: init_tokens_pq
     init_tokens_pq = os.path.join(buffer_dir, 'byte_tokens.parquet')
+
+
+    # corpus_files = os.listdir(raw_pq_dir)
+    # text_colnames = ['text', ]*len(corpus_files)
 
     # with pq.ParquetWriter(init_tokens_pq, tokens_schema) as writer:
     #     for (corpus_pq, text_col) in zip(corpus_files, text_colnames):
@@ -156,36 +157,74 @@ if __name__ == "__main__":
     #             batch_table = text_to_tokens_pa_table(GPT4_TOKENIZER_REGEX, text)
     #             writer.write_table(batch_table, row_group_size)
     
-    # 从 init_tokens(parquet文件) 到 init dataset: tokens/0
-    def _init_tokens_dataset(init_tokens_pq):
-        # 0. 检查 总的batch数量不能超过 10000
-        num_total_rows = pq.read_metadata(init_tokens_pq).num_rows
-        assert num_total_rows // batch_size < 10000, \
-            f'batch_size {batch_size} too small for parquet file {init_tokens_pq}, which leads more than 10000 fragments in dataset.'
+    # # 从 init_tokens(parquet文件) 到 init dataset: tokens/0
+    # def _init_tokens_dataset(init_tokens_pq):
+    #     # 0. 检查 总的batch数量不能超过 10000
+    #     num_total_rows = pq.read_metadata(init_tokens_pq).num_rows
+    #     assert num_total_rows // batch_size < 10000, \
+    #         f'batch_size {batch_size} too small for parquet file {init_tokens_pq}, which leads more than 10000 fragments in dataset.'
         
-        print(f'initalizing tokens dataset at merge 0: {num_total_rows // batch_size} fragments with batch_size {batch_size}')
+    #     print(f'initalizing tokens dataset at merge 0: {num_total_rows // batch_size} fragments with batch_size {batch_size}')
 
-        # 1. 创建并清空 init_tokens_ds
-        init_tokens_ds = os.path.join(buffer_tokens_dir, '0')
-        os.makedirs(init_tokens_ds, exist_ok=True)
+    #     # 1. 创建并清空 init_tokens_ds
+    #     init_tokens_ds = os.path.join(buffer_tokens_dir, '0')
+    #     os.makedirs(init_tokens_ds, exist_ok=True)
 
-        # 清空但保留 init_tokens_ds
-        clean_folder(init_tokens_ds, method='all', keep=True)
+    #     # 清空但保留 init_tokens_ds
+    #     clean_folder(init_tokens_ds, method='all', keep=True)
 
-        # 2. 写入 common_metadata
-        pq.write_metadata(schema=tokens_schema, path=os.path.join(init_tokens_ds, "_common_metadata"))
+    #     # 2. 写入 common_metadata
+    #     pq.write_metadata(schema=tokens_schema, where=os.path.join(init_tokens_ds, "_common_metadata"))
 
-        # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
-        # TODO: 改造成多线程/多进程
-        for i, batch in yield_parquet_batch(init_tokens_pq, batch_size, [tokens_schema[0].name]):
-            b_table = pa.Table.from_batches([batch], schema=tokens_schema)
-            b_path = os.path.join(init_tokens_ds, f'part-{i:04d}.parquet')
-            pq.write_table(b_table, b_path)
+    #     # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
+    #     # TODO: 改造成多线程/多进程
+    #     for i, batch in enumerate( yield_parquet_batch(init_tokens_pq, batch_size, [tokens_schema[0].name]) ):
+    #         b_table = pa.Table.from_batches([batch], schema=tokens_schema)
+    #         b_path = os.path.join(init_tokens_ds, f'part-{i:04d}.parquet')
+    #         pq.write_table(b_table, b_path)
         
-        # 4. 写入完整 metadata --> 跳过
+    #     # 4. 写入完整 metadata --> 跳过
 
-        return init_tokens_ds
+    #     return init_tokens_ds
     
 
-    tokens_ds = _init_tokens_dataset(init_tokens_pq)
+    # tokens_ds_path = _init_tokens_dataset(init_tokens_pq)
+    tokens_ds = ds.dataset( os.path.join(buffer_tokens_dir, '0') )
+    fragments = list(tokens_ds.get_fragments())
     
+
+    # count map 任务: 多进程版本, 分发 tokens dataset里的 fragments parquet文件路径给 process_pool
+    # fragment_paths = [f.path for f in fragments]
+    # map(_task, fragment_paths, *args, **kwargs)
+    def _map2process_read_count_write(fragment_path, count_func, save_dir):
+        # parquet path 直接读成 recordBatch
+        # if recordBatch 空, 直接结束 本任务
+        # 执行 count_pair_batch_c_extension, 生成 p_counts batch
+        # 组装 p_counts batch to table, write p_counts table to save dir with same partID
+        pass
+
+    # count map 任务:
+    # 多线程版本, 为了绕开GIL, 应该在主线程处理dataset里的 fragments(arrow对象) 成non-GIL 函数 tls_count_non_gil_func 的输入 tokens_flat, offsets
+    # 然后主线程应该收集 tls_count_non_gil_func 的输出 b_pcounts 作聚合
+    def _map2thread_read_count_write(fragment, tls_count_non_gil_func, save_dir):
+        # fragment 只能读成 table, table无法像 recordBatch 一样直接读 values 和 offsets, 需要先拼接chunk
+        table = fragment.to_table()
+        tokens_col = table.column(0) # 只有一列
+        if tokens_col.num_chunks == 1:
+            arr = tokens_col.chunk(0)
+        else:
+            arr = tokens_col.combine_chunks() # 合并所有chunk
+        
+        # 取到 tokens_flat / offsets as numpy arr, b_order from fragment
+        tokens_flat = arr.values.to_numpy()
+        offsets = arr.offsets.to_numpy()
+        b_order = None #TODO: 从 fragment 中解析出 
+
+        # 计算 pair count: b_pcounts tuple of L, R, counts arrays
+        b_pcounts = tls_count_non_gil_func(tokens_flat, offsets)
+
+
+
+    # count reduce 任务: 聚合统计 p_counts dataset，得到 max_occur_pairs
+
+    # merge map 任务: 多进程版本, 分发 tokens dataset里的 fragments parquet文件路径给 process_pool
