@@ -1847,7 +1847,7 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
     def _map_to_process_read_count_write(cls, src_tgt_paths):
         fragment_path, save_path = src_tgt_paths
 
-        tokens_col = pq.read_table(fragment_path).column(0)
+        tokens_col = pq.read_table(fragment_path, schema = cls.tokens_schema).column(0)
         if tokens_col.num_chunks == 1:
             tokens_arr = tokens_col.chunk(0)
         else:
@@ -1871,7 +1871,7 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
     def _map_to_process_read_merge_write(cls, src_tgt_paths, L, R, new_token):
         fragment_path, save_path = src_tgt_paths
 
-        tokens_col = pq.read_table(fragment_path).column(0)
+        tokens_col = pq.read_table(fragment_path, schema = cls.tokens_schema).column(0)
         if tokens_col.num_chunks == 1:
             tokens_arr = tokens_col.chunk(0)
         else:
@@ -1937,7 +1937,7 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
 
         # 生成器: 生成 tokens_ds 中的 fragment 路径, 以及其对应的 merged tokens fragment 路径
         def src_tgt_path_gen(tokens_ds):
-            for f in ds.dataset( tokens_ds ).get_fragments():
+            for f in ds.dataset(tokens_ds, self.tokens_schema, format="parquet").get_fragments():
                 yield (f.path, os.path.join(next_tokens_ds, os.path.basename(f.path)))
 
         stream_parallel_process_with_pending(
@@ -1966,7 +1966,7 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
 
         # 生成器: 生成 tokens_ds 中的 fragment 路径, 以及其对应的 pair-counts fragment 路径
         def src_tgt_path_gen(tokens_ds):
-            for f in ds.dataset( tokens_ds ).get_fragments():
+            for f in ds.dataset(tokens_ds, format="parquet").get_fragments():
                 yield (f.path, os.path.join(paircounts_ds, os.path.basename(f.path)))
 
         stream_parallel_process_with_pending(
@@ -1977,8 +1977,72 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
             max_pending = 32,
         )
 
-        if len(paircounts_ds) == 1:
+        if len(os.listdir(paircounts_ds)) == 1: # 如果除了 _common_metadat 没有其它 parquet 文件写入
             self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
             raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
         
-        # TODO: 聚合 paircounts_ds 计算得到 token pair with max_occurrence
+        pcounts_concats = ds.dataset(paircounts_ds, format="parquet").to_table()
+        agg_pcounts = pcounts_concats.group_by(['L', 'R']).aggregate([('counts', 'sum')])
+        
+        max_occurrence = pc.max(agg_pcounts['counts_sum'])
+
+        filter_mask = pc.equal(agg_pcounts['counts_sum'], max_occurrence)
+        _row = agg_pcounts.filter(filter_mask).slice(0, 1)
+
+        return _row['L'][0], _row['R'][0], max_occurrence
+
+
+    def _train_loop(self, tokens_ds_start:str, start:int, end:int, executor, keep_window:int, verbose:bool):
+
+        tokens_ds_this = tokens_ds_start
+        for rank in range(start, end):
+            print(f'merge rank {rank} / {start} to {end-1}')
+            try:
+                L, R, max_occurrence = self._merge_info(executor, tokens_ds_this)
+                # L, R, max_occurrence: pa.lib.UInt16Scalar, pa.lib.UInt16Scalar, pa.lib.UInt64Scalar
+                new_token, occurrence = rank + 256, int(max_occurrence) if verbose else None
+
+                self._update_tokenizer((int(L), int(R)), new_token, occurrence)
+                if rank == end - 1:
+                    break
+                # cython-extension function 对 L, R, new_token 的输入要求是 np.uint16, np.uint16, np.uint16
+                tokens_ds_this = self._next_tokens_ds(executor, tokens_ds_this, np.uint16(L), np.uint16(R), np.uint16(new_token))
+                
+            finally:
+                to_remove = rank - keep_window
+                if to_remove > 0:
+                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}'), False)
+                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}'), False)
+
+
+
+    def train_bpe(self,
+                  num_merges:int|None = None,               # global num merges for the tokenizer
+                  *,
+                  keep_window:int = 3,                      # max reserved tokens_pq file in disk
+                  verbose:bool = False
+                  ):
+        
+        assert keep_window >= 0
+        
+        self._set_config()
+        self._clear() # 从 tokens/0 开始 续train
+
+        ctx = mp.get_context('spawn')
+        memblock_size = 64 * self._batch_size # 内存池总需求是 128*batch_size, 内存块取半(即最多两次内存块申请)
+
+        with ProcessPoolExecutor(
+            max_workers=self._num_workers,
+            mp_context=ctx,
+            initializer=_worker_init,
+            initargs=(memblock_size,)
+        ) as executor:
+            tokens_ds_start = self._start_tokens_ds(num_merges, executor)
+            
+            start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
+            
+            self._train_loop(tokens_ds_start, start, end, executor, keep_window, verbose)
+
+        # set down others
+        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
+        self._register_special_tokens()
