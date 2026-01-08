@@ -193,38 +193,133 @@ if __name__ == "__main__":
     fragments = list(tokens_ds.get_fragments())
     
 
-    # count map 任务: 多进程版本, 分发 tokens dataset里的 fragments parquet文件路径给 process_pool
+    # count map 任务: 多进程版本, 分发 tokens dataset里的 fragments parquet文件路径 和相应的目标路径 给 process_pool
     # fragment_paths = [f.path for f in fragments]
     # map(_task, fragment_paths, *args, **kwargs)
-    def _map2process_read_count_write(fragment_path, count_func, save_dir):
-        # parquet path 直接读成 recordBatch
-        # if recordBatch 空, 直接结束 本任务
-        # 执行 count_pair_batch_c_extension, 生成 p_counts batch
-        # 组装 p_counts batch to table, write p_counts table to save dir with same partID
-        pass
+    def _map_to_process_read_count_write(src_tgt_paths, count_gil_func):
+        # src_tgt_paths 是 某 fragment 的路径 和 结果目标写入路径, 都可 pickle, IPC轻量
+        fragment_path, save_path = src_tgt_paths
+
+        tokens_col = pq.read_table(fragment_path).column(0)
+        if tokens_col.num_chunks == 1:
+            tokens_arr = tokens_col.chunk(0)
+        else:
+            tokens_arr = tokens_col.combine_chunks() # 合并所有chunk
+
+        # 取到 tokens_flat / offsets as numpy arr, b_order from fragment
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
+
+        # 计算 pair count: L, R, counts, np arrays
+        L, R, counts = count_gil_func(tokens_flat, offsets)
+
+        # 组装成 pa table. 用 pa.array, 不要用 from_pydict --> 后者有通用解析开销
+        table = pa.Table.from_arrays([
+            pa.array(L, type=token_dtype),
+            pa.array(R, type=token_dtype),
+            pa.array(counts, type=p_counts_schema.field('counts').type),
+        ], schema = p_counts_schema)
+
+        # 写入结果: 当不是空表
+        if table:
+            pq.write_table(table, save_path)
+
 
     # count map 任务:
-    # 多线程版本, 为了绕开GIL, 应该在主线程处理dataset里的 fragments(arrow对象) 成non-GIL 函数 tls_count_non_gil_func 的输入 tokens_flat, offsets
-    # 然后主线程应该收集 tls_count_non_gil_func 的输出 b_pcounts 作聚合
-    def _map2thread_read_count_write(fragment, tls_count_non_gil_func, save_dir):
-        # fragment 只能读成 table, table无法像 recordBatch 一样直接读 values 和 offsets, 需要先拼接chunk
-        table = fragment.to_table()
-        tokens_col = table.column(0) # 只有一列
+    # 多线程版本, pa 操作基本都能绕开 GIL, 保证 tls_count_non_gil_func 也是 non-GIL. 主线程生成 fragment 和 相应的 save_path
+    # map任务内部, if-else 和 顺序执行 还是需要 GIL, 但是持有时间极短, 不影响性能. 其他 任务特异的参数, 都在主线程处理完毕, 通过第一个参数发送进来
+    # 终极无GIL是用 numba.jit
+    def _map_to_thread_read_count_write(fragment_tgtpath, tls_count_non_gil_func):
+        # fragment_tgtpath 是 fragment(arrow对象) 和 结果目标写入路径, 前者不可pickle, 多线程共享无阻碍
+        fragment, save_path = fragment_tgtpath
+
+        # 读取数据. fragment 只能读成 table
+        # table无法像 recordBatch 一样直接读 values 和 offsets, 需要先拼接chunk
+        tokens_col = fragment.to_table().column(0)
         if tokens_col.num_chunks == 1:
-            arr = tokens_col.chunk(0)
+            tokens_arr = tokens_col.chunk(0)
         else:
-            arr = tokens_col.combine_chunks() # 合并所有chunk
+            tokens_arr = tokens_col.combine_chunks() # 合并所有chunk
         
         # 取到 tokens_flat / offsets as numpy arr, b_order from fragment
-        tokens_flat = arr.values.to_numpy()
-        offsets = arr.offsets.to_numpy()
-        b_order = None #TODO: 从 fragment 中解析出 
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
 
-        # 计算 pair count: b_pcounts tuple of L, R, counts arrays
-        b_pcounts = tls_count_non_gil_func(tokens_flat, offsets)
+        # 计算 pair count: L, R, counts, np arrays
+        L, R, counts = tls_count_non_gil_func(tokens_flat, offsets)
 
+        # 组装成 pa table. 用 pa.array, 不要用 from_pydict --> 后者有通用解析开销
+        table = pa.Table.from_arrays([
+            pa.array(L, type=token_dtype),
+            pa.array(R, type=token_dtype),
+            pa.array(counts, type=p_counts_schema.field('counts').type),
+        ], schema = p_counts_schema)
 
+        # 写入结果: 当不是空表
+        if table:
+            pq.write_table(table, save_path)
 
     # count reduce 任务: 聚合统计 p_counts dataset，得到 max_occur_pairs
 
+
+
+
+
     # merge map 任务: 多进程版本, 分发 tokens dataset里的 fragments parquet文件路径给 process_pool
+    def _map_to_process_read_merge_write(src_tgt_paths, merge_gil_func, to_merge_pair, new_token):
+        # src_tgt_paths 是 某 fragment 的路径 和 结果目标写入路径, 都可 pickle, IPC轻量
+        fragment_path, save_path = src_tgt_paths
+
+        tokens_col = pq.read_table(fragment_path).column(0)
+        if tokens_col.num_chunks == 1:
+            tokens_arr = tokens_col.chunk(0)
+        else:
+            tokens_arr = tokens_col.combine_chunks() # 合并所有chunk
+
+        # 取到 tokens_flat / offsets as numpy arr, b_order from fragment
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
+
+        # 计算 pair count: L, R, counts, np arrays
+        merged_tokens_flat, merged_offsets = merge_gil_func(tokens_flat, offsets, to_merge_pair, new_token)
+        merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
+
+        # 组装成 pa table. 用 pa.array, 不要用 from_pydict --> 后者有通用解析开销
+        table = pa.Table.from_arrays([
+            pa.array(merged_tokens, type=tokens_schema.field('tokens').type),
+        ], schema = tokens_schema)
+
+        # 写入结果: 当不是 空表
+        if table:
+            pq.write_table(table, save_path)
+
+
+    # merge map 任务:
+    # 多线程版本
+    def _map_to_thread_read_merge_write(fragment_tgtpath, tls_merge_non_gil_func, to_merge_pair, new_token):
+        fragment, save_path = fragment_tgtpath
+
+        tokens_col = fragment.to_table().column(0)
+        if tokens_col.num_chunks == 1:
+            tokens_arr = tokens_col.chunk(0)
+        else:
+            tokens_arr = tokens_col.combine_chunks() # 合并所有chunk
+        
+        # 取到 tokens_flat / offsets as numpy arr, b_order from fragment
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
+
+        # 计算 pair count: L, R, counts, np arrays
+        merged_tokens_flat, merged_offsets = tls_merge_non_gil_func(tokens_flat, offsets, to_merge_pair, new_token)
+        merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
+
+        # 组装成 pa table. 用 pa.array, 不要用 from_pydict --> 后者有通用解析开销
+        table = pa.Table.from_arrays([
+            pa.array(merged_tokens, type=tokens_schema.field('tokens').type),
+        ], schema = tokens_schema)
+
+        # 写入结果: 当不是 空表
+        if table:
+            pq.write_table(table, save_path)
+
+    # merge reduce 任务: 无

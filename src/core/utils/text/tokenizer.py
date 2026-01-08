@@ -1801,3 +1801,184 @@ class mpBBPETokenizer(bufferBBPETokenizer):
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
+
+
+
+import pyarrow.dataset as ds
+from pair_count_merge import count_u16pair_batch_, merge_u16pair_batch_
+
+class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
+
+    token_dtype = pa.uint16()
+
+    paircounts_schema = pa.schema([
+        pa.field('L', token_dtype),
+        pa.field('R', token_dtype),
+        pa.field('counts', pa.uint64()),
+        ])
+    
+    
+    tokens_schema = pa.schema([
+        pa.field( 'tokens', pa.large_list(pa.field('token', token_dtype)) ),
+        ])
+
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+    def _set_config(self):
+        os.makedirs(self._buffer_dir, exist_ok=True)
+        
+        buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
+        os.makedirs(buffer_tokens_dir, exist_ok=True)
+        
+        buffer_pcounts_dir = os.path.join(self._buffer_dir, 'paircounts')
+        os.makedirs(buffer_pcounts_dir, exist_ok=True)
+
+        self._buffer_tokens_dir = buffer_tokens_dir
+        self._buffer_pcounts_dir = buffer_pcounts_dir
+
+        self._num_workers = 10
+        self._batch_size = 32 * 1024 * 1024
+
+
+    @classmethod
+    def _map_to_process_read_count_write(cls, src_tgt_paths):
+        fragment_path, save_path = src_tgt_paths
+
+        tokens_col = pq.read_table(fragment_path).column(0)
+        if tokens_col.num_chunks == 1:
+            tokens_arr = tokens_col.chunk(0)
+        else:
+            tokens_arr = tokens_col.combine_chunks()
+        
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
+
+        L, R, counts = count_u16pair_batch_(tokens_flat, offsets)
+        table = pa.Table.from_arrays([
+            pa.array(L, type = cls.token_dtype),
+            pa.array(R, type = cls.token_dtype),
+            pa.array(counts, type = cls.paircounts_schema.field('counts').type),
+            ], schema = cls.paircounts_schema)
+
+        if table:
+            pq.write_table(table, save_path)
+
+
+    @classmethod
+    def _map_to_process_read_merge_write(cls, src_tgt_paths, L, R, new_token):
+        fragment_path, save_path = src_tgt_paths
+
+        tokens_col = pq.read_table(fragment_path).column(0)
+        if tokens_col.num_chunks == 1:
+            tokens_arr = tokens_col.chunk(0)
+        else:
+            tokens_arr = tokens_col.combine_chunks()
+
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
+
+        merged_tokens_flat, merged_offsets = merge_u16pair_batch_(tokens_flat, offsets, L, R, new_token)
+        merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
+
+        table = pa.Table.from_arrays([
+            pa.array(merged_tokens, type = cls.tokens_schema.field('tokens').type),
+        ], schema = cls.tokens_schema)
+
+        if table:
+            pq.write_table(table, save_path)
+
+
+    def _start_tokens_ds(self, num_merges, executor):
+        # 检查 num_merges 和 explicit_n_vocabs 和 merge_ranks 的size 之间的冲突. 确定 num_train_epochs
+        super()._prepare_train(num_merges)
+
+        # 确定 buffer_dir/tokens/ 不为空, 至少存在一个 dataset
+        assert os.listdir(self._buffer_tokens_dir, f'empty buffer directory of tokens {self._buffer_tokens_dir}')
+
+        # 如果 merge_ranks 的 size = 0, 那么本次 BPE 是从头开始train, 起始dataset 是 tokens/0/
+        if len(self._merge_ranks) == 0:
+            tokens_ds_0 = os.path.join(self._buffer_tokens_dir, '0')
+            assert os.listdir(tokens_ds_0) # 确认 tokens dataset 0 不为空
+            return tokens_ds_0
+        
+        # 根据最新的 tokens dataset 和 merge_ranks.size, 确认 起始dataset
+        latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
+        tokens_ds_latest = os.path.join(self._buffer_tokens_dir, f'{latest}')
+
+        # 如果 merge_ranks 的 size > 0, 那么本次 BPE 是续train. merge_ranks.size == num_merged
+        # 情况1: merge_ranks.size == latest dataset  -->  latest dataset 直接作为 起始dataset
+        if latest == len(self._merge_ranks):
+            return tokens_ds_latest
+        # 情况2: merge_ranks.size == latest + 1 dataset --> 上次 top_pair 和 new_token 更新到 tokenizer 之后, 没有作 merge
+        # 用 latest merge pair & merged_token, 对 tokens/latest 作一次 merge --> 作为 起始dataset
+        elif latest + 1 == len(self._merge_ranks):
+            (L, R), new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
+            return self._next_tokens_ds(tokens_ds_latest, L, R, new_token, executor)
+        # 情况3: 报错
+        else:
+            raise RuntimeError(
+                f"current merge_ranks size {len(self._merge_ranks)} not match with latest buffered tokens dataset "
+                f"{self._buffer_tokens_dir}/{latest}:\nmerge_ranks size shall be equal to latest, or latest + 1")
+    
+
+    def _next_tokens_ds(self, executor, tokens_ds, L, R, new_token):
+        # 此时 pair merge 已经发生, merge_ranks 已经更新添加了 L, R -> merged_token
+        next_rank = int( os.path.basename(tokens_ds) ) + 1
+        assert next_rank == len(self._merge_ranks)
+
+        next_tokens_ds = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
+        os.makedirs(next_tokens_ds, exist_ok = True)
+        clean_folder(next_tokens_ds, method='all', keep=True)
+
+        pq.write_metadata(self.tokens_schema, os.path.join(next_tokens_ds, "_common_metadata"))
+
+        # 生成器: 生成 tokens_ds 中的 fragment 路径, 以及其对应的 merged tokens fragment 路径
+        def src_tgt_path_gen(tokens_ds):
+            for f in ds.dataset( tokens_ds ).get_fragments():
+                yield (f.path, os.path.join(next_tokens_ds, os.path.basename(f.path)))
+
+        stream_parallel_process_with_pending(
+            executor = executor,
+            data_gen = src_tgt_path_gen(tokens_ds),
+            process_fn = self._map_to_process_read_merge_write,
+            result_handler = None,
+            max_pending = 32,
+            process_args = (L, R, new_token)
+        )
+
+        return next_tokens_ds
+    
+
+    def _merge_info(self, executor, tokens_ds):
+        # 此时 pair merge 尚未发生
+        num_merged_epochs = int(os.path.basename(tokens_ds))
+        assert num_merged_epochs == len(self._merge_ranks)
+
+        # tokens_ds tokens/i  ---paircount---> paircounts_ds paircounts/i
+        paircounts_ds = os.path.join(self._buffer_pcounts_dir, f'{num_merged_epochs}')
+        os.makedirs(paircounts_ds, exist_ok = True)
+        clean_folder(paircounts_ds, method='all', keep=True)
+
+        pq.write_metadata(self.paircounts_schema, os.path.join(paircounts_ds, "_common_metadata"))
+
+        # 生成器: 生成 tokens_ds 中的 fragment 路径, 以及其对应的 pair-counts fragment 路径
+        def src_tgt_path_gen(tokens_ds):
+            for f in ds.dataset( tokens_ds ).get_fragments():
+                yield (f.path, os.path.join(paircounts_ds, os.path.basename(f.path)))
+
+        stream_parallel_process_with_pending(
+            executor = executor,
+            data_gen = src_tgt_path_gen(tokens_ds),
+            process_fn = self._map_to_process_read_count_write,
+            result_handler = None,
+            max_pending = 32,
+        )
+
+        if len(paircounts_ds) == 1:
+            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
+            raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
+        
+        # TODO: 聚合 paircounts_ds 计算得到 token pair with max_occurrence
