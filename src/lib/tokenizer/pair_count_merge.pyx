@@ -60,11 +60,6 @@ cdef extern from "pair_count_merge.h":
 
 
 # 创建内存池/计数器接口给python. block_size size_t 从python侧传入, alignment设为64
-# 经过测算，output needed size 的chunk_lens/fitler/tokens 所占空间分别大概是 8倍/10倍/20倍 batch_size bytes
-# 为了保证tokens在同一个block而不是large alloc, block_size 设定为 40倍 batch_size 比较好
-# 计数器capacity: 对于 32000 次merge, 最终pair的种类不超过 32256*32256 = 10亿左右. 
-# 初始计数器设在 16384*16384*2 = 2^29 次 = 536870912 就好。这样如果初始分配的capacity不够，一次rehash就差不多就足够了
-# 计数器和count_pair_batch使用单线程
 cpdef initialize(size_t block_size):
     init_process(block_size, 64, 536870912)
 
