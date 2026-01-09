@@ -1856,7 +1856,7 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
         tokens_flat = tokens_arr.values.to_numpy()
         offsets = tokens_arr.offsets.to_numpy()
 
-        L, R, counts = count_u16pair_batch_(tokens_flat, offsets)
+        L, R, counts = count_u16pair_batch_((tokens_flat, offsets))
         table = pa.Table.from_arrays([
             pa.array(L, type = cls.token_dtype),
             pa.array(R, type = cls.token_dtype),
@@ -1880,7 +1880,7 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
         tokens_flat = tokens_arr.values.to_numpy()
         offsets = tokens_arr.offsets.to_numpy()
 
-        merged_tokens_flat, merged_offsets = merge_u16pair_batch_(tokens_flat, offsets, L, R, new_token)
+        merged_tokens_flat, merged_offsets = merge_u16pair_batch_((tokens_flat, offsets), L, R, new_token)
         merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
 
         table = pa.Table.from_arrays([
@@ -1896,7 +1896,7 @@ class bufferBBPE_u16Tokenizer(baseBBPETokenizer):
         super()._prepare_train(num_merges)
 
         # 确定 buffer_dir/tokens/ 不为空, 至少存在一个 dataset
-        assert os.listdir(self._buffer_tokens_dir, f'empty buffer directory of tokens {self._buffer_tokens_dir}')
+        assert os.listdir(self._buffer_tokens_dir), f'empty buffer directory of tokens {self._buffer_tokens_dir}'
 
         # 如果 merge_ranks 的 size = 0, 那么本次 BPE 是从头开始train, 起始dataset 是 tokens/0/
         if len(self._merge_ranks) == 0:

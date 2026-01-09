@@ -6,66 +6,12 @@ import regex as re
 import os
 import typing as t
 from src.core.utils.file.folder_op import clean_folder
+from src.core.utils.text.tokenizer import 
 
 valid_pq = '../../data/TinyStories/raw/validation.parquet'
 train_pq = '../../data/TinyStories/raw/train.parquet'
 raw_pq_dir = '../../data/TinyStories/raw/'
 
-token_dtype = pa.uint16()
-tokens_schema = pa.schema([
-    pa.field( 'tokens', pa.large_list(pa.field('token', token_dtype)) ),
-    ])
-p_counts_schema = pa.schema([
-    pa.field('L', token_dtype),
-    pa.field('R', token_dtype),
-    pa.field('counts', pa.uint64()),
-    ])
-buffer_dir = '../cache/temp/buffer'
-buffer_tokens_dir = os.path.join(buffer_dir, 'tokens')
-buffer_pcounts_dir = os.path.join(buffer_dir, 'p_counts')
-
-GPT4_TOKENIZER_REGEX = \
-    r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
-
-
-ENDOFTEXT = '<|endoftext|>'
-
-def encode_to_ints(s:str, encoding='utf-8') -> t.List[int]:
-    return list( s.encode(encoding) )
-
-
-def text_to_tokens_pa_table(pre_split_pat, text):
-    if not text.endswith(ENDOFTEXT):
-        text = text + ENDOFTEXT
-    chunks_str = re.findall(pre_split_pat, text) # list of tokens(string)
-    
-    # list of list of integers(every list of integers as tokens)
-    chunks_tokens = [encode_to_ints(chunk) for chunk in chunks_str]
-    
-    # 创建 pa table
-    batch_table = pa.Table.from_pydict({tokens_schema[0].name: chunks_tokens}, tokens_schema)
-    return batch_table
-
-
-def yield_parquet_batch(file_path: str, batch_size: int, columns: t.List[str]|None=None):
-    """
-    从 Parquet 文件中分批读取数据。
-
-    Args:
-        file_path (str): Parquet 文件的路径。
-        batch_size (int): 每次读取的行数。
-        columns: 每次读取的列集（列名列表）。输入代表读取全部列
-
-    Yields:
-        parquet.RecordBatch: 包含当前批次数据的 pyarrow record batch
-        use __getitem__(field name) to get column data
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Error: File '{file_path}' not found.")
-    
-    parquet_file = pq.ParquetFile(file_path)
-    for batch in parquet_file.iter_batches(batch_size=batch_size, columns=columns):
-        yield batch
 
 
 

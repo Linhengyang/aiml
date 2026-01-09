@@ -19,3 +19,16 @@ def merge_u16pair_batch(
 
 def close() -> None:
     ...
+
+def count_u16pair_batch_(
+    tokens_offsets,
+    ):
+    ...
+
+def merge_u16pair_batch_(
+    tokens_offsets,
+    pair_L:np.uint16,
+    pair_R:np.uint16,
+    new_token:np.uint16
+    ):
+    ...
