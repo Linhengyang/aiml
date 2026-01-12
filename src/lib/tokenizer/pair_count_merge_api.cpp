@@ -106,7 +106,7 @@ void release_process() {
 u16token_pair_counts_ptrs c_local_count_u16pair_batch(
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
-    const int64_t len
+    const size_t len
 ) {
     try
     {
@@ -115,14 +115,14 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
         }
 
         auto& pool = singleton_mempool::get();
-        const size_t n = static_cast<size_t>(len);
+        // const size_t n = static_cast<size_t>(len);
         // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
-        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(n*sizeof(uint32_t)));
-        uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(n*sizeof(uint16_t)));
-        uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(n*sizeof(uint16_t)));
-        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(n*sizeof(uint64_t)));
+        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(len*sizeof(uint32_t)));
+        uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
+        uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
+        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(len*sizeof(uint64_t)));
 
-        for (int64_t i = 0; i < len; ++i) {
+        for (size_t i = 0; i < len; ++i) {
             const uint32_t l = static_cast<uint32_t>(L_tokens[i]) & 0xFFFFu;
             const uint32_t r = static_cast<uint32_t>(R_tokens[i]) & 0xFFFFu;
             keys[i] = ( l<<16 ) | r;
@@ -133,7 +133,7 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
         
         // 线性遍历计数
         uint32_t prev = keys[0]; uint64_t cnt = 1; size_t size = 0;
-        for (size_t i = 1; i < n; ++i) {
+        for (size_t i = 1; i < len; ++i) {
             if (keys[i] == prev) {
                 ++cnt; }
             else {
