@@ -6,7 +6,7 @@ import regex as re
 import os
 import typing as t
 from src.core.utils.file.folder_op import clean_folder
-from src.core.utils.text.tokenizer import 
+from src.core.utils.text.tokenizer import bufferBBPE_u16Tokenizer
 
 valid_pq = '../../data/TinyStories/raw/validation.parquet'
 train_pq = '../../data/TinyStories/raw/train.parquet'
@@ -187,7 +187,7 @@ if __name__ == "__main__":
         else:
             tokens_arr = tokens_col.combine_chunks() # 合并所有chunk
         
-        # 取到 tokens_flat / offsets as numpy arr, b_order from fragment
+        # 取到 tokens_flat / offsets as numpy arr
         tokens_flat = tokens_arr.values.to_numpy()
         offsets = tokens_arr.offsets.to_numpy()
 
