@@ -1549,12 +1549,13 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
         self._buffer_paircounts_dir = os.path.join(self._buffer_dir, 'paircounts')
         os.makedirs(self._buffer_paircounts_dir, exist_ok=True)
 
-    # 从 init_tokens(parquet文件), 切分成 batches 到 fragments of init dataset: tokens/0
-    def _init_tokens_dataset(self, init_tokens_pq):
+
+    # 从多个 init_tokens(多parquet格式), 切分成 batches 到 fragments of init dataset: tokens/0
+    def _init_tokens_dataset(self, init_tokens_pq_files: t.List[str]):
         # 0. 检查 总的batch数量不能超过 10000
-        num_total_rows = pq.read_metadata(init_tokens_pq).num_rows
+        num_total_rows = sum( [pq.read_metadata(init_tokens_pq).num_rows for init_tokens_pq in init_tokens_pq_files] )
         assert num_total_rows // self._batch_size < 10000, \
-            f'batch_size {self._batch_size} too small for parquet file {init_tokens_pq}, which leads more than 10000 fragments in dataset.'
+            f'batch_size {self._batch_size} too small for parquet files {init_tokens_pq_files}, which leads more than 10000 fragments in dataset.'
         
         print(f'initalizing tokens dataset at merge 0: {num_total_rows//self._batch_size} fragments with batch_size {self._batch_size}')
 
@@ -1570,11 +1571,12 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
 
         # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
         # TODO: 改造成多线程/多进程 以加速
-        parquet_file = pq.ParquetFile(init_tokens_pq)
-        for i, batch in enumerate( parquet_file.iter_batches(self._batch_size, columns=[self.tokens_schema[0].name]) ):
-            b_table = pa.Table.from_batches([batch], schema=self.tokens_schema)
-            b_path = os.path.join(init_tokens_ds, f'part-{i:04d}.parquet')
-            pq.write_table(b_table, b_path)
+        for init_tokens_pq in init_tokens_pq_files:
+            pq_file = pq.ParquetFile(init_tokens_pq)
+            for i, batch in enumerate( pq_file.iter_batches(self._batch_size, columns=[self.tokens_schema[0].name]) ):
+                b_table = pa.Table.from_batches([batch], self.tokens_schema)
+                b_path = os.path.join(init_tokens_ds, f'{os.path.basename(init_tokens_pq)}-part-{i:04d}.parquet')
+                pq.write_table(b_table, b_path)
         
         # 4. 写入完整 metadata --> 跳过
 
@@ -1749,27 +1751,52 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
                     clean_folder( os.path.join(self._buffer_tokens_dir,     f'{to_remove}'), False)
 
 
+    def preprocess(self, corpora: t.List[str]|str, corpus_type: t.Literal['byte','text'], column: t.List[str]|None):
+        # 当 corpora is not None --> 作为语料从头train.
+        if isinstance(corpora, str):
+            corpora = [corpora]
+
+        # 如果语料是 byte, 即已经完成初始化tokenized
+        if corpus_type == 'byte':
+            # 检查 corpora 路径全部有效, 然后就可 write batch to 初始 dataset 即tokens/0
+            assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora])
+
+            return corpora
+        
+        # 如果语料是 text, 那么先把 text pq文件转换成对应 byte value
+        if corpus_type == 'text':
+            for (corpus, text_col) in zip(corpora, column):
+                if os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet'):
+                    
+                else:
+
+
+
 
     def train_bpe(self,
                   num_merges:int|None = None,                                   # global num merges for the tokenizer
                   *,
-                  corpora:t.List[str]|str|None,                                 # None -> 从buffer_dir续train. str|parquet_path -> 基于语料从头train
-                  type:t.Literal['byte','text'],                                # 指明corpora(not None)数据类型 byte -> 0-255值; text -> string
+                  corpora:t.List[str]|str|None,                                 # None -> 从buffer_dir续train. str|parquet_paths -> 基于语料从头train
+                  corpus_type:t.Literal['byte','text'],                         # 指明corpora(if parquet)数据类型 byte -> 0-255值; text -> string
+                  column:t.List[str]|None,                                      # 指明corpora(if parquet)数据表的列名
                   language:t.Literal['en','zh'],                                # 语料的语言类型
-                  batch_size_level:t.Literal['min', 'medium', 'high', 'max'],   # batch_size的大小档次
+                  batch_size_level:t.Literal['min','medium','high','max'],   # batch_size的大小档次
                   memory_utilization:float=0.8,                                 # 对本机内存的占用水位
                   keep_window:int = 3,                                          # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
         
         assert keep_window >= 0
-        
+        if isinstance(corpora, str):
+            corpora = [corpora]
+            corpus_type = 'text'
+
         self._set_config(language, batch_size_level, memory_utilization)
 
         # 当 corpora is not None --> 作为语料从头train. 如果语料是 bytes, 那么直接write batch to tokens/0即可; 如果语料是 texts, 那么先
         if corpora is not None:
             self._clear()
-            self.
+            pq_corpus = self.preprocess(corpora, corpus_type)
         # 当 corpora is None --> 续train --> _start_tokens_ds 会检测buffer目录里tokens_ds和num_merges, 返回符合条件的 start dataset
         else:
             self._build_vocab() # vocab: token_ID --> bytes 的映射
