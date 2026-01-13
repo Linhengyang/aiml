@@ -89,7 +89,7 @@ if __name__ == "__main__":
     # 遍历每个 text parquet file, 分批 转换成 一个 tokens(uint16) parquet file: init_tokens_pq
     init_tokens_pq = os.path.join(buffer_dir, 'byte_tokens.parquet')
 
-
+    import uuid
     # corpus_files = os.listdir(raw_pq_dir)
     # text_colnames = ['text', ]*len(corpus_files)
 
