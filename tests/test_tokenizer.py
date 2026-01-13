@@ -132,7 +132,7 @@ def test_save_load(tokenizer_factory, special_marks):
     # delete the temporary files
     for file in ["temp/test_tokenizer_tmp.tok"]:
         os.remove(file)
-    # clean_folder(buffer, method='all')
+    clean_folder(buffer, method='all')
 
 
 
