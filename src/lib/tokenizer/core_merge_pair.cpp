@@ -1,6 +1,5 @@
 // core_merge_pair.cpp
 // core functions for merge pair in tokenizer
-#include <vector>
 #include <omp.h>
 #include <cstddef>
 #include <cstdint>
