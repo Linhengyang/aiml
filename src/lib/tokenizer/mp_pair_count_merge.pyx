@@ -68,7 +68,7 @@ cpdef initialize_process(size_t block_size):
 
 
 # 只是给python提供了reset进程的接口，但实际上count_pair_batch和merge_pair_batch每一次执行前都reset了
-cpdef reset_process():
+cpdef clear_process():
     reset_process()
 
 
