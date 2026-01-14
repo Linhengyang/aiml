@@ -115,12 +115,8 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
         }
 
         auto& pool = singleton_mempool::get();
-        // const size_t n = static_cast<size_t>(len);
         // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
         uint32_t* keys = static_cast<uint32_t*>(pool.allocate(len*sizeof(uint32_t)));
-        // uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
-        // uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
-        // uint64_t* counts = static_cast<uint64_t*>(pool.allocate(len*sizeof(uint64_t)));
 
         for (size_t i = 0; i < len; ++i) {
             const uint32_t l = static_cast<uint32_t>(L_tokens[i]) & 0xFFFFu;
@@ -128,36 +124,18 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
             keys[i] = ( l<<16 ) | r;
         }
 
-        // // 排序, 可并行
-        // std::sort(keys, keys+len);
-        
-        // // 线性遍历计数
-        // uint32_t prev = keys[0]; uint64_t cnt = 1; size_t size = 0;
-        // for (size_t i = 1; i < len; ++i) {
-        //     if (keys[i] == prev) {
-        //         ++cnt; }
-        //     else {
-        //         // flush(prev, cnt)
-        //         L_uniq[size] = static_cast<uint16_t>(prev >> 16);
-        //         R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
-        //         counts[size] = cnt; ++size;
-
-        //         prev = keys[i]; cnt = 1; }
-        // }
-        // L_uniq[size] = static_cast<uint16_t>(prev >> 16);
-        // R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
-        // counts[size] = cnt; ++size;
-
-        u16token_pair_counts_ptrs result = local_count_u16pair_core(
+        // u16token_pair_counts_ptrs result = local_count_u16pair_core(
+        //     keys,
+        //     len,
+        //     pool
+        // );
+        u16token_pair_counts_ptrs result = _local_count_u16pair_core(
             keys,
             len,
-            pool
-            // L_uniq,
-            // R_uniq,
-            // counts
+            pool,
+            local_counter
         );
 
-        // return u16token_pair_counts_ptrs{L_uniq, R_uniq, counts, size};
         return result;
     }
     catch(const std::exception& e)

@@ -24,13 +24,10 @@ app_name: 'bpe_build' # /logs /model /tmp /cache 的项目目录
 train_pq: '../../data/TinyStories/raw/train.parquet'
 valid_pq: '../../data/TinyStories/raw/validation.parquet'
 
-backup_init_dir: '../../data/TinyStories/bytes'
-
 
 # train-params
-num_merges: 8
-buffer_size: 172470436
-save_tok_name: '8merges'
+num_merges: 3
+save_tok_name: '3merges'
 
 
 

@@ -61,7 +61,7 @@ cdef extern from "mp_pair_count_merge.h":
 
 # 创建内存池/计数器接口给python. block_size size_t 从python侧传入, alignment设为64
 cpdef initialize_process(size_t block_size):
-    init_process(block_size, 64, 2)
+    init_process(block_size, 64, 1024)
 
 
 
