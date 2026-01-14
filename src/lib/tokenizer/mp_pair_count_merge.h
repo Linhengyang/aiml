@@ -9,7 +9,7 @@
 #include "memory_pool.h"
 // #include "mempooled_concurrent_hashtable.h"
 // #include "mempooled_hashtable.h"
-// #include "mempooled_counter.h"
+#include "mempooled_counter.h"
 
 
 /*
@@ -44,8 +44,8 @@ struct hasher {
 
 
 
-// // 定义 counter_key_type
-// using counter_key_type = uint32_t;
+// 定义 counter_key_type
+using counter_key_type = uint32_t;
 
 // // 定义从一般输入 到 counter_key_type 的 构造器
 // struct key_maker {
@@ -54,14 +54,14 @@ struct hasher {
 //     }
 // };
 
-// // 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
-// struct hasher {
-//     uint32_t operator()(const counter_key_type& key) const {
-//         return key;
-//     }
-// };
+// 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+struct hasher {
+    size_t operator()(const counter_key_type& key) const {
+        return static_cast<size_t>(key); // 无符号整数自身就是很好的哈希值, 无需复杂变换
+    }
+};
 
-// using counter_st = counter<counter_key_type, false, singleton_mempool, hasher>;
+using counter_st = counter<counter_key_type, false, singleton_mempool, hasher>;
 
 // // 实测 多线程并发写同一个全局哈希表，速度非常慢。真正的多线程写法是分数据段+线程独立资源+合并统计。
 // using counter_mt = counter<counter_key_type, true, threadsafe_singleton_mempool, hasher>;
@@ -122,12 +122,13 @@ struct u16token_pair_counts_ptrs {
 
 
 // 给单一进程用的 count uint16_t token-pair batch data 的 core
-size_t local_count_u16pair_core(
+u16token_pair_counts_ptrs local_count_u16pair_core(
     uint32_t* keys,
     const size_t len,
-    uint16_t* L_uniq, // in-place change in this function
-    uint16_t* R_uniq, // in-place change in this function
-    uint64_t* counts // in-place change in this function
+    singleton_mempool& pool
+    // uint16_t* L_uniq, // in-place change in this function
+    // uint16_t* R_uniq, // in-place change in this function
+    // uint64_t* counts // in-place change in this function
 );
 
 

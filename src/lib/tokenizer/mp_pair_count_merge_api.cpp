@@ -33,13 +33,13 @@
 // 保证进程内有各自所需的静态对象，更不容易被误用
 namespace {
 
-    // counter_st* g_counter_st = nullptr;
+    counter_st* local_counter = nullptr;
     // counter_mt* g_counter_mt = nullptr;
     
     std::atomic<bool> g_inited{false};
 
     /* 默认构造哈希器 pair_hasher */
-    // hasher pair_hasher;
+    hasher pair_hasher;
 
 }
 
@@ -56,7 +56,7 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
         /* 初始化 单例内存池（进程内）/ 基于单例内存池的 可复用计数器 */
         
         singleton_mempool::get(block_size, alignment);
-        // g_counter_st = new counter_st(pair_hasher, capacity, singleton_mempool::get());
+        local_counter = new counter_st(pair_hasher, capacity, singleton_mempool::get());
 
         // threadsafe_singleton_mempool::get(block_size, alignment);
         // g_counter_mt = new counter_mt(pair_hasher, capacity, threadsafe_singleton_mempool::get());
@@ -71,7 +71,7 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
 // 重置进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
 void reset_process() {
 
-    // if (g_counter_st) g_counter_st->clear();
+    if (local_counter) local_counter->clear();
     // if (g_counter_mt) g_counter_mt->clear();
     
     if (singleton_mempool::exist()) {
@@ -89,7 +89,7 @@ void reset_process() {
 // 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
 void release_process() {
     // 先销毁 计数器. 由于 计数器是静态的,存在复用的可能性, 故 delete 后必须要置空指针，以防止UAF / 二次delete
-    // if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }
+    if (local_counter) { delete local_counter; local_counter = nullptr; }
     if (singleton_mempool::exist()) { singleton_mempool::destroy(); }
 
     // if (g_counter_mt) { delete g_counter_mt; g_counter_mt = nullptr; }
@@ -118,9 +118,9 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
         // const size_t n = static_cast<size_t>(len);
         // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
         uint32_t* keys = static_cast<uint32_t*>(pool.allocate(len*sizeof(uint32_t)));
-        uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
-        uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
-        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(len*sizeof(uint64_t)));
+        // uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
+        // uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
+        // uint64_t* counts = static_cast<uint64_t*>(pool.allocate(len*sizeof(uint64_t)));
 
         for (size_t i = 0; i < len; ++i) {
             const uint32_t l = static_cast<uint32_t>(L_tokens[i]) & 0xFFFFu;
@@ -148,15 +148,17 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
         // R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
         // counts[size] = cnt; ++size;
 
-        size_t size = local_count_u16pair_core(
+        u16token_pair_counts_ptrs result = local_count_u16pair_core(
             keys,
             len,
-            L_uniq,
-            R_uniq,
-            counts
+            pool
+            // L_uniq,
+            // R_uniq,
+            // counts
         );
 
-        return u16token_pair_counts_ptrs{L_uniq, R_uniq, counts, size};
+        // return u16token_pair_counts_ptrs{L_uniq, R_uniq, counts, size};
+        return result;
     }
     catch(const std::exception& e)
     {
