@@ -161,7 +161,7 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
     assert tokenizer.encode(text, 'all') == tokens
-    # clean_folder(buffer, method='all')
+    clean_folder(buffer, method='all')
 
 
 
