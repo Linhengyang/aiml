@@ -3,12 +3,12 @@
 #include <iostream>
 #include <cstdint>
 #include <atomic>
-#include "pair_count_merge.h"
+#include "mp_pair_count_merge.h"
 #include "memory_pool_singleton.h"
 #include "memory_pool.h"
-#include "mempool_counter.h"
-#include "mempool_hash_table_mt.h"
-#include "mempool_hash_table_st.h"
+// #include "mempooled_counter.h"
+#include "mempooled_concurrent_hashtable.h"
+#include "mempooled_hashtable.h"
 
 // 概念解析:
 // 静态存储期：程序启动时创建，结束时销毁，存储在一个非栈、非普通堆的地方。python调用时, import .so文件时即被创建
@@ -33,8 +33,8 @@
 // 保证进程内有各自所需的静态对象，更不容易被误用
 namespace {
 
-    counter_st* g_counter_st = nullptr;
-    counter_mt* g_counter_mt = nullptr;
+    counter_st* local_counter = nullptr;
+    // counter_mt* g_counter_mt = nullptr;
     
     std::atomic<bool> g_inited{false};
 
@@ -55,11 +55,11 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
     if (g_inited.compare_exchange_strong(expected, true)) {
         /* 初始化 单例内存池（进程内）/ 基于单例内存池的 可复用计数器 */
         
-        unsafe_singleton_mempool::get(block_size, alignment);
-        // g_counter_st = new counter_st(pair_hasher, capacity, unsafe_singleton_mempool::get());
+        singleton_mempool::get(block_size, alignment);
+        local_counter = new counter_st(pair_hasher, capacity, singleton_mempool::get());
 
-        // singleton_mempool::get(block_size, alignment);
-        // g_counter_mt = new counter_mt(pair_hasher, capacity, singleton_mempool::get());
+        // threadsafe_singleton_mempool::get(block_size, alignment);
+        // g_counter_mt = new counter_mt(pair_hasher, capacity, threadsafe_singleton_mempool::get());
 
         const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
         std::cout << "singleton memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;
@@ -71,17 +71,17 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
 // 重置进程的单例内存池 / 基于该单例内存池的可复用计数器，使得它们处于可复用状态
 void reset_process() {
 
-    if (g_counter_st) g_counter_st->clear();
-    if (g_counter_mt) g_counter_mt->clear();
+    if (local_counter) local_counter->clear();
+    // if (g_counter_mt) g_counter_mt->clear();
     
-    if (unsafe_singleton_mempool::exist()) {
-        unsafe_singleton_mempool::get().shrink();
-        unsafe_singleton_mempool::get().reset();
+    if (singleton_mempool::exist()) {
+        singleton_mempool::get().shrink();
+        singleton_mempool::get().reset();
     }
     // 线程安全版本的略过
-    // if (singleton_mempool::exist()) {
-    //     singleton_mempool::get().shrink();
-    //     singleton_mempool::get().reset();
+    // if (threadsafe_singleton_mempool::exist()) {
+    //     threadsafe_singleton_mempool::get().shrink();
+    //     threadsafe_singleton_mempool::get().reset();
     // }
 }
 
@@ -89,11 +89,11 @@ void reset_process() {
 // 销毁进程的单例内存池 / 基于该单例内存池的可复用计数器，准备退出程序
 void release_process() {
     // 先销毁 计数器. 由于 计数器是静态的,存在复用的可能性, 故 delete 后必须要置空指针，以防止UAF / 二次delete
-    if (g_counter_st) { delete g_counter_st; g_counter_st = nullptr; }
-    if (unsafe_singleton_mempool::exist()) { unsafe_singleton_mempool::destroy(); }
+    if (local_counter) { delete local_counter; local_counter = nullptr; }
+    if (singleton_mempool::exist()) { singleton_mempool::destroy(); }
 
-    if (g_counter_mt) { delete g_counter_mt; g_counter_mt = nullptr; }
-    // if (singleton_mempool::exist()) { singleton_mempool::destroy(); }
+    // if (g_counter_mt) { delete g_counter_mt; g_counter_mt = nullptr; }
+    // if (threadsafe_singleton_mempool::exist()) { threadsafe_singleton_mempool::destroy(); }
 
     std::cout << "singleton memory pool released" << std::endl;
 
@@ -103,62 +103,55 @@ void release_process() {
 
 
 
-L_R_token_counts_ptrs c_count_pair_batch(
+u16token_pair_counts_ptrs c_local_count_u16pair_batch(
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
-    const int64_t len
+    const size_t len
 ) {
     try
     {
         if (len <= 0) {
-            return L_R_token_counts_ptrs{nullptr, nullptr, nullptr, 0};
+            return u16token_pair_counts_ptrs{nullptr, nullptr, nullptr, 0};
         }
 
-        auto& pool = unsafe_singleton_mempool::get();
-        const size_t n = static_cast<size_t>(len);
+        auto& pool = singleton_mempool::get();
         // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
-        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(n*sizeof(uint32_t)));
-        uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(n*sizeof(uint16_t)));
-        uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(n*sizeof(uint16_t)));
-        uint64_t* counts = static_cast<uint64_t*>(pool.allocate(n*sizeof(uint64_t)));
+        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(len*sizeof(uint32_t)));
 
-        for (int64_t i = 0; i < len; ++i) {
+        for (size_t i = 0; i < len; ++i) {
             const uint32_t l = static_cast<uint32_t>(L_tokens[i]) & 0xFFFFu;
             const uint32_t r = static_cast<uint32_t>(R_tokens[i]) & 0xFFFFu;
             keys[i] = ( l<<16 ) | r;
         }
-
-        // 排序, 可并行
-        std::sort(keys, keys+len);
         
-        // 线性遍历计数
-        uint32_t prev = keys[0]; uint64_t cnt = 1; size_t size = 0;
-        for (size_t i = 1; i < n; ++i) {
-            if (keys[i] == prev) {
-                ++cnt; }
-            else {
-                // flush(prev, cnt)
-                L_uniq[size] = static_cast<uint16_t>(prev >> 16);
-                R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
-                counts[size] = cnt; ++size;
-
-                prev = keys[i]; cnt = 1; }
+        // 根据是否有 counter 来决定使用哪一个计数函数
+        if (local_counter) {
+            u16token_pair_counts_ptrs result = local_dict_count_u16pair_core(
+                keys,
+                len,
+                pool,
+                local_counter
+            );
+            return result;
         }
-        L_uniq[size] = static_cast<uint16_t>(prev >> 16);
-        R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
-        counts[size] = cnt; ++size;
-
-        return L_R_token_counts_ptrs{L_uniq, R_uniq, counts, size};
+        else {
+            u16token_pair_counts_ptrs result = local_sort_count_u16pair_core(
+                keys,
+                len,
+                pool
+            );
+            return result;
+        }
     }
     catch(const std::exception& e)
     {
-        throw std::runtime_error("Error in c_count_pair_batch");
+        throw std::runtime_error("Error in c_local_count_u16pair_batch");
     }
 }
 
 
 
-token_filter_len_ptrs c_merge_pair_batch(
+u16token_filter_len_ptrs c_local_merge_u16pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks, // num_chunks = len(offsets) - 1
@@ -168,7 +161,7 @@ token_filter_len_ptrs c_merge_pair_batch(
 ) {
     try
     {
-        auto& pool = unsafe_singleton_mempool::get();
+        auto& pool = singleton_mempool::get();
 
         // num_chunks = len(offsets) - 1 = len(output_tokens_lens)
         // need size = sizeof(long) * num_chunks
@@ -196,7 +189,7 @@ token_filter_len_ptrs c_merge_pair_batch(
             output_tokens_flat[i] = -1; // 全部初始化为 -1
         }
 
-        merge_pair_core(
+        local_merge_u16pair_core(
             tokens_flat,
             offsets,
             num_chunks,
@@ -208,13 +201,13 @@ token_filter_len_ptrs c_merge_pair_batch(
             output_tokens_lens
         );
         
-        token_filter_len_ptrs result = token_filter_len_ptrs{output_tokens_flat, output_filter, output_tokens_lens};
+        u16token_filter_len_ptrs result = u16token_filter_len_ptrs{output_tokens_flat, output_filter, output_tokens_lens};
 
         return result;
     }
     catch(const std::exception& e)
     {
-        throw std::runtime_error("Error in c_merge_pair_batch");
+        throw std::runtime_error("Error in c_local_merge_u16pair_batch");
     }
 }
 

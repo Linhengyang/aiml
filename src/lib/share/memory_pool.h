@@ -18,7 +18,7 @@
 
 
 
-class mempool {
+class threadsafe_mempool {
 
 private:
 
@@ -40,6 +40,59 @@ private:
     // 它符合 C++ 并发编程的最佳实践
     // 它清晰表达了“这个成员仅用于同步，不影响逻辑状态”的意图
     mutable std::mutex _mtx;
+
+    // 尽管 threadsafe_mempool 不是全局单例模式, 但仍然禁止拷贝构造和赋值操作.
+    threadsafe_mempool(const threadsafe_mempool&) = delete;
+    threadsafe_mempool& operator=(const threadsafe_mempool&) = delete;
+
+
+public:
+
+    // 构造函数. 构造 内存池 实例
+    explicit threadsafe_mempool(size_t block_size = 1048576, size_t alignment = 64); //默认给单个内存block申请 1MB 的内存, 64字节对齐
+
+    // 析构函数. 调用 release 释放 内存池 实例
+    ~threadsafe_mempool();
+
+    // 非静态方法，调用方法:  实例.方法名
+
+    // 分配指定大小的内存, 非静态, 依赖成员变量 _blocks 等
+    void* allocate(size_t size); // 如果当前块不足以容纳, 则申请新块
+
+    void dealloc_large(void* ptr) ; //如果 ptr 记录在 _large_allocs 中，会被释放; 否则不会被释放
+
+    void shrink(size_t max_num = 1) ; //缩小block数量, 释放部分尚未使用的block. 必须要在 reset之前用. 因为reset会重置所有block.used=false
+
+    // 复用内存池的公共接口
+    void reset(); // 全部复用，所有已经申请好的内存block都reset成从头可用
+
+    // 带锁释放内存池的公共接口
+    void release(); // 全部释放(block 和 large alloc都释放), 带锁以线程安全
+
+}; // end of threadsafe_mempool
+
+
+
+
+
+// mempool 线程不安全、不带锁的 内存池：单线程使用
+
+
+
+
+class mempool {
+
+private:
+
+    const size_t _block_size; //内存池中, 单个内存block的字节量
+
+    const size_t _alignment; //内存池的对齐参数
+
+    std::vector<block*> _blocks; // 内存块 指针数组
+
+    std::vector<void*> _large_allocs; //大于 _block_size 的内存申请, 单独申请. 在这里记录申请结果
+
+    block* _current_block = nullptr; //内存池的当前正在使用的内存block起始位置指针
 
     // 尽管 mempool 不是全局单例模式, 但仍然禁止拷贝构造和赋值操作.
     mempool(const mempool&) = delete;
@@ -70,6 +123,7 @@ public:
     void release(); // 全部释放(block 和 large alloc都释放), 带锁以线程安全
 
 }; // end of mempool
+
 
 
 #endif

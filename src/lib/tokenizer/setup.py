@@ -15,10 +15,10 @@ ext_modules = [
     Extension(
         name="pair_count_merge",  # 输出模块名 (import 时用的名字)
         sources=[
-            "pair_count_merge.pyx",
-            "pair_count_merge_api.cpp",
-            "core_count_pair.cpp",
-            "core_merge_pair.cpp",
+            "mp_pair_count_merge.pyx",
+            "mp_pair_count_merge_api.cpp",
+            "core_merge_pair_mp.cpp",
+            "core_count_pair_mp.cpp",
             os.path.join(share_dir,"memory_block.cpp"),
             os.path.join(share_dir,"memory_pool_singleton.cpp"),
             os.path.join(share_dir,"memory_pool.cpp"),

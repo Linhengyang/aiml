@@ -1,7 +1,7 @@
-// mempool_hash_table_st.h
+// mempooled_hashtable.h
 
-#ifndef MEMPOOL_HASH_TABLE_SINGLE_THREAD_H
-#define MEMPOOL_HASH_TABLE_SINGLE_THREAD_H
+#ifndef MEMPOOLED_HASHTABLE_H
+#define MEMPOOLED_HASHTABLE_H
 
 
 #include <functional>
@@ -12,7 +12,7 @@
 
 
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
-class hash_table_st_chain {
+class pooled_hashtable {
 
 private:
 
@@ -29,7 +29,7 @@ private:
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构
     void destroy_node(HashTableNode* node) {
         if constexpr (!std::is_trivially_destructible<HashTableNode>::value) {
-            node->~HashTableNode();
+            node->~HashTableNode(); // HashTableNode 没有显式定义 析构函数, 编译器会生成默认的析构函数: 其会逆序递归析构所有需要析构的成员
         }
     }
 
@@ -65,8 +65,9 @@ private:
     // gc 链表: 链起所有node
     HashTableNode* _all_nodes_head = nullptr;
 
-    // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index用uint32_t就够了，因为它可代表42亿大的hashtable
-    std::vector<uint32_t> _occupied_indices;
+    // // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index类型要与 _capacity 类型对齐, 因为它是 hash成员函数的输出 取_capacity余
+    // std::vector<size_t> _occupied_indices;
+    // // REMOVE _occupied_indices --> 引入 vector 得不偿失. 高性能版本的不需要这个
 
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
@@ -74,7 +75,7 @@ private:
     // 成员遍历哈希器, 定义了 operator() 即可供函数式调用 _hasher(key)
     HASH_FUNC _hasher;
 
-    // 使用哈希器, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值
+    // 使用哈希器, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值类型必须是 size_t 与 _capacity 对齐
     size_t hash(const TYPE_K& key) const {
         return _hasher(key);
     }
@@ -90,9 +91,9 @@ private:
         HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
         if (!_new_table) throw std::bad_alloc();
 
-        // 新的非空桶列表
-        std::vector<uint32_t> _new_occupied_indices;
-        _new_occupied_indices.reserve(_occupied_indices.size());
+        // // 新的非空桶列表
+        // std::vector<size_t> _new_occupied_indices;
+        // _new_occupied_indices.reserve(_occupied_indices.size());
 
         // 新的gc链表
         HashTableNode* _new_all_nodes_head = nullptr;
@@ -100,19 +101,25 @@ private:
         // 重新计算 _size, 为缩容式 rehash 留下余地
         size_t actual_node_count = 0;
 
-        // 遍历非空桶
-        for (uint32_t old_index: _occupied_indices) {
-
+        // for (size_t old_index: _occupied_indices) // 遍历非空桶
+        for (size_t old_index = 0; old_index < _capacity; ++old_index) // 遍历所有桶
+        {
             HashTableNode* curr = _table[old_index];
             while (curr) { // 当前node非空
                 HashTableNode* next = curr->next; // 先取出next node
                 size_t new_index = hash(curr->key) % new_capacity; // 计算得出新bucket
-                const bool was_empty = (_new_table[new_index] == nullptr);
+
+                // const bool was_empty = (_new_table[new_index] == nullptr);
+                // // REMOVE _occupied_indices
+
                 // 头插到新bucket
                 curr->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = curr; // 更新确认新bucket的链表头
-                // 若空桶->非空, 记录
-                if (was_empty) _new_occupied_indices.push_back(static_cast<uint32_t>(new_index));
+
+                // // 若空桶->非空, 记录
+                // if (was_empty) _new_occupied_indices.push_back(new_index);
+                // // REMOVE _occupied_indices
+
                 // 头插到gc链表
                 curr->gc_next = _new_all_nodes_head;
                 _new_all_nodes_head = curr;
@@ -128,14 +135,14 @@ private:
         _table = _new_table;
         _capacity = new_capacity;
         _size = actual_node_count;
-        _occupied_indices.swap(_new_occupied_indices);
+        // _occupied_indices.swap(_new_occupied_indices);
         _all_nodes_head = _new_all_nodes_head;
     }
 
 
 public:
 
-    explicit hash_table_st_chain(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
+    explicit pooled_hashtable(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool):
         _hasher(hasher), // 这里哈希器采用参数传入的实现了 operator()支持函数式调用hasher(key)的结构体
         _capacity(capacity),
         _pool(pool)
@@ -143,7 +150,7 @@ public:
         alloc_table_ptrs(_capacity);
     }
 
-    explicit hash_table_st_chain(size_t capacity, TYPE_MEMPOOL* pool):
+    explicit pooled_hashtable(size_t capacity, TYPE_MEMPOOL* pool):
         _hasher(), // 这里哈希器采用模板的默认构造 std::hash<TYPE_K>
         _capacity(capacity),
         _pool(pool)
@@ -151,9 +158,9 @@ public:
         alloc_table_ptrs(_capacity);
     }
 
-    // 析构函数, 会调用 destroy 方法来释放所有 HashTableNode 中需要显式析构的部分, 释放 buckets数组 _table并置空, _size 和 _capacity 置0
+    // 析构函数, 会调用 destroy 方法来 析构 所有 HashTableNode 中需要显式析构的部分, 释放 buckets数组 _table并置空, _size 和 _capacity 置0
     // 但不负责内存释放. 由内存池在外部统一释放
-    ~hash_table_st_chain() {
+    ~pooled_hashtable() {
         destroy();
     }
 
@@ -200,7 +207,9 @@ public:
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
 
         // 在 内存池 上分配新内存给新节点, raw_mem 内存
-        const bool was_empty = (_table[index] == nullptr);
+        // const bool was_empty = (_table[index] == nullptr);
+        // REMOVE _occupied_indices
+
         void* raw_mem = _pool->allocate(sizeof(HashTableNode));
         if (!raw_mem) return false; // 如果内存分配失败
 
@@ -211,8 +220,9 @@ public:
         // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可
         new_node->gc_next = _all_nodes_head;
 
-        // 如果 空 -> 非空, 那么记录桶号
-        if (was_empty) _occupied_indices.push_back(static_cast<uint32_t>(index));
+        // // 如果 空 -> 非空, 那么记录桶号
+        // if (was_empty) _occupied_indices.push_back(index);
+        // REMOVE _occupied_indices
 
         // node数量自加1. 原子线程安全
         ++_size;
@@ -243,7 +253,8 @@ public:
             }
         }
 
-        const bool was_empty = (_table[index] == nullptr);
+        // const bool was_empty = (_table[index] == nullptr);
+        // REMOVE _occupied_indices
         void* raw_mem = _pool->allocate(sizeof(HashTableNode));
         if (!raw_mem) return false;
 
@@ -252,7 +263,8 @@ public:
 
         new_node->gc_next = _all_nodes_head;
 
-        if (was_empty) _occupied_indices.push_back(static_cast<uint32_t>(index));
+        // if (was_empty) _occupied_indices.push_back(index);
+        // REMOVE _occupied_indices
 
         _size++;
 
@@ -264,19 +276,19 @@ public:
     }
 
 
-    // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的销毁
+    // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的 复位or销毁
     // 内存池本身是只可以 整体复用/整体销毁，不可精确销毁单次allocate的内存
-    // 哈希表的"清空"：原数据全部析构, 不再可访问, 但其分配的内存不会在这里被销毁. 保持 bucket 结构
+    // 哈希表的"清空"：原数据全部析构, 不再可访问, 但其分配的内存不会在这里被 复位or销毁. 保持 bucket 结构
     // 由于保持了 bucket 结构 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
     void clear() {
         if (_capacity == 0 || !_table) {
             _size = 0;
-            _occupied_indices.clear();
+            // _occupied_indices.clear(); // REMOVE _occupied_indices
             _all_nodes_head = nullptr;
             return;
         }
 
-        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) { // constexpr: 编译时求值
             // 若 node 需要非平凡析构：沿着 gc 链 析构所有node
             HashTableNode* curr = _all_nodes_head;
             while (curr) {
@@ -289,12 +301,16 @@ public:
         // gc 链表置空
         _all_nodes_head = nullptr;
 
-        // 非空桶置空. _table 指针数组保持结构
-        for (uint32_t index: _occupied_indices) {
+        // _table 指针数组保持结构
+        // for (size_t index: _occupied_indices) // REMOVE _occupied_indices
+        for (size_t index = 0; index < _capacity; ++index)
+        {
             _table[index] = nullptr;
         }
+        // // 非空桶置空
+        // _occupied_indices.clear();
+        // REMOVE _occupied_indices
 
-        _occupied_indices.clear();
         _size = 0;
 
     }
@@ -304,7 +320,7 @@ public:
     void destroy() {
         if (_capacity == 0 || !_table) {
             _size = 0;
-            _occupied_indices.clear();
+            // _occupied_indices.clear(); // REMOVE _occupied_indices
             _all_nodes_head = nullptr;
             return;
         }
@@ -322,9 +338,13 @@ public:
         // gc 链表置空
         _all_nodes_head = nullptr;
 
-        // 释放 节点指针数组, 置空 _table
+        // 释放 节点指针(桶)数组, 置空 _table. 所有桶/节点不再可访问. 但内存尚未释放, 等待内存池操作
         free_table_ptrs();
-        _occupied_indices.clear();
+
+        // // 非空桶置空
+        // _occupied_indices.clear();
+        // // REMOVE _occupied_indices
+        
         _size = 0; // node数量置0
         _capacity = 0; // _capacity 置零
     }
@@ -344,7 +364,7 @@ public:
 
     public:
 
-        const_iterator(const hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node)
@@ -388,7 +408,7 @@ public:
 
     private:
 
-        const hash_table_st_chain* _hash_table;
+        const pooled_hashtable* _hash_table;
 
         size_t _bucket_index;
 
@@ -442,7 +462,7 @@ public:
         */
         // for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
         // for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
-        iterator(hash_table_st_chain* hash_table, size_t bucket_index, HashTableNode* node)
+        iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
             :_hash_table(hash_table),
             _bucket_index(bucket_index),
             _node(node)
@@ -490,7 +510,7 @@ public:
     private:
 
         // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
-        hash_table_st_chain* _hash_table;
+        pooled_hashtable* _hash_table;
 
         // 遍历哈希表的所有桶, 0 -> _capacity-1
         size_t _bucket_index;
@@ -518,20 +538,20 @@ public:
 
     };  // end of iterator definition
 
-    // hash_table_st_chain 类对象 hashtable 调用 begin 方法, 返回一个迭代器
+    // pooled_hashtable 类对象 hashtable 调用 begin 方法, 返回一个迭代器
     // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
     // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
     iterator begin() {
         return iterator(this, 0, nullptr);
     }
 
-    // hash_table_st_chain 类对象 hashtable 调用 end 方法, 返回一个迭代器
+    // pooled_hashtable 类对象 hashtable 调用 end 方法, 返回一个迭代器
     // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
     iterator end() {
         return iterator(this, _capacity, nullptr);
     }
 
-}; // end of hash_table_st_chain definition
+}; // end of pooled_hashtable definition
 
 
 

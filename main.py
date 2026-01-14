@@ -2,7 +2,7 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 # from src.projs.gpt2._jobs import env_set, pretrain_job, build_tokenizer_job, generate_job
-from src.apps.bpe_build._jobs import bpe_continue, bpe_train
+from src.apps.bpe_build._jobs import bpe_continue
 import time
 
 if __name__ == "__main__":

@@ -1,0 +1,127 @@
+#include "mempooled_concurrent_hashtable.h"
+#include "memory_pool_singleton.h"
+#include <iostream>
+#include <cassert>
+#include <thread>
+
+using namespace std;
+
+// 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+struct hasher {
+    int operator()(const int& key) const {
+        return key;
+    }
+};
+
+
+void test_concurrent_hash_map() {
+
+    // 创建 内存池单例: 并发哈希表必须要使用 线程安全的内存池
+    size_t block_size = 40LL * 172470436LL;
+    threadsafe_singleton_mempool& pool = threadsafe_singleton_mempool::get(block_size, 64);
+
+    // 创建 哈希器
+    hasher my_hasher;
+
+    pooled_concurrent_hashtable<int, int, threadsafe_singleton_mempool, hasher> map(my_hasher, 4096, &pool);
+    const int num_threads = 8;
+    const int ops_per_thread = 10000;
+
+    // 启动写线程：每个线程插入自己的 key 范围
+    vector<thread> writers;
+    for (int t = 0; t < num_threads; ++t) {
+        writers.emplace_back([&, t]() {
+            for (int i = 0; i < ops_per_thread; ++i) {
+                int key = t * ops_per_thread + i;
+                map.insert(key, key * 2);
+            }
+        });
+    }
+
+    // 启动读线程：随机读取已写入的 key（这里简化为等待写完再读）
+    for (auto& w : writers) {
+        w.join();
+    }
+
+    // 验证所有写入都成功
+    assert(map.size() == num_threads * ops_per_thread);
+
+    for (int t = 0; t < num_threads; ++t) {
+        for (int i = 0; i < ops_per_thread; ++i) {
+            int key = t * ops_per_thread + i;
+            int val;
+            bool found = map.get(key, val);
+            assert(found);
+            assert(val == key * 2);
+        }
+    }
+
+    // // 测试删除
+    // vector<thread> deleters;
+    // for (int t = 0; t < num_threads / 2; ++t) {
+    //     deleters.emplace_back([&, t]() {
+    //         for (int i = 0; i < ops_per_thread; ++i) {
+    //             int key = t * ops_per_thread + i;
+    //             map.remove(key);
+    //         }
+    //     });
+    // }
+
+    // for (auto& d : deleters) {
+    //     d.join();
+    // }
+
+    // // 检查剩余元素数量
+    // assert(map.size() == (num_threads / 2) * ops_per_thread);
+
+    // clear 哈希表
+    map.clear();
+
+    // 输出size
+    cout << map.size() << endl;
+
+    // 重新启动写线程：reset pool 之后, 复用 hashtable
+    pool.reset();
+
+    // 再次启动写线程：每个线程插入自己的 key 范围
+    vector<thread> writer2;
+    for (int t = 0; t < num_threads; ++t) {
+        writer2.emplace_back([&, t]() {
+            for (int i = 0; i < ops_per_thread; ++i) {
+                int key = t * ops_per_thread + i;
+                map.insert(key, key * 2);
+            }
+        });
+    }
+
+    // 启动读线程：随机读取已写入的 key（这里简化为等待写完再读）
+    for (auto& w : writer2) {
+        w.join();
+    }
+
+    // 验证所有写入都成功
+    assert(map.size() == num_threads * ops_per_thread);
+
+    for (int t = 0; t < num_threads; ++t) {
+        for (int i = 0; i < ops_per_thread; ++i) {
+            int key = t * ops_per_thread + i;
+            int val;
+            bool found = map.get(key, val);
+            assert(found);
+            assert(val == key * 2);
+        }
+    }
+
+    // 这次是 销毁 哈希表
+    map.destroy();
+
+    // 销毁内存池
+    pool.destroy();
+
+    cout << "✅ ConcurrentHashMap test passed!" << endl;
+}
+
+int main() {
+    test_concurrent_hash_map();
+    return 0;
+}

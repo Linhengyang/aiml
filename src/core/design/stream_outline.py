@@ -64,9 +64,11 @@ def stream_parallel_process_with_pending(
             done, futures = wait(futures, return_when=FIRST_COMPLETED) # 直接更新 futures, 从而已经完成的 future 不再在内
             for f in done:
                 result = f.result()
-                result_handler(result, *result_handler_args)
+                if result_handler:
+                    result_handler(result, *result_handler_args)
 
     # 收尾, 处理剩下的任务
     for f in futures:
         result = f.result()
-        result_handler(result, *result_handler_args)
+        if result_handler:
+            result_handler(result, *result_handler_args)

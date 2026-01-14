@@ -1,0 +1,7 @@
+-std=c++17
+test_concurrent_hashtable.cpp
+../src/lib/share/memory_pool_singleton.cpp
+../src/lib/share/memory_block.cpp
+-I../src/lib/share
+-o
+.cpptest_cache/testconcurrenthashtable.exe

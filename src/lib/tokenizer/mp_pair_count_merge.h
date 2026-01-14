@@ -1,14 +1,15 @@
-// pair_count_merge.h
-// statement for pair_count_merge_api.cpp
+// multi-process: mp_pair_count_merge.h
+// statement for mp_pair_count_merge_api.cpp
 
 
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#include "mempool_counter.h"
 #include "memory_pool_singleton.h"
-#include "mempool_hash_table_mt.h"
-#include "mempool_hash_table_st.h"
+#include "memory_pool.h"
+// #include "mempooled_concurrent_hashtable.h"
+// #include "mempooled_hashtable.h"
+#include "mempooled_counter.h"
 
 
 /*
@@ -46,28 +47,25 @@ struct hasher {
 // 定义 counter_key_type
 using counter_key_type = uint32_t;
 
-// 定义从一般输入 到 counter_key_type 的 构造器
-struct key_maker {
-    counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
-        return L << 16 | R;
-    }
-};
+// // 定义从一般输入 到 counter_key_type 的 构造器
+// struct key_maker {
+//     counter_key_type operator()(const uint16_t& L, const uint16_t& R) const {
+//         return L << 16 | R;
+//     }
+// };
 
 // 定义哈希 counter_key 的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
 struct hasher {
-    uint32_t operator()(const counter_key_type& key) const {
-        return key;
+    size_t operator()(const counter_key_type& key) const {
+        return static_cast<size_t>(key); // 无符号整数自身就是很好的哈希值, 无需复杂变换
     }
 };
 
+using counter_st = counter<counter_key_type, false, singleton_mempool, hasher>;
 
+// // 实测 多线程并发写同一个全局哈希表，速度非常慢。真正的多线程写法是分数据段+线程独立资源+合并统计。
+// using counter_mt = counter<counter_key_type, true, threadsafe_singleton_mempool, hasher>;
 
-
-
-using counter_st = counter<counter_key_type, false, unsafe_singleton_mempool, hasher>;
-
-// 实测 多线程并发写同一个全局哈希表，速度非常慢。真正的多线程写法是分数据段+线程独立资源+合并统计。
-using counter_mt = counter<counter_key_type, true, singleton_mempool, hasher>;
 
 /*
 全局对象在 .SO 被python导入后就存在主进程，python解释器没结束, 全局对象就一直存在且复用
@@ -78,6 +76,8 @@ extern hasher pair_hasher; // 全局使用的哈希器
 extern counter_st* global_counter_st;
 extern counter_mt* global_counter_mt;
 
+
+
 全局对象在多进程里不推荐使用：
 在linux下，多进程的启动方式是folk，子进程通过copy-on-write来继承父进程地址空间的一切，包括全局对象。之后进程之间各用各的副本，互相隔离
 在windows/macOS下，子进程的启动方式是spawn，子进程会重新import模块，.so重新加载，全局对象会在各子进程里各自初始化，互相隔离
@@ -86,6 +86,11 @@ extern counter_mt* global_counter_mt;
 
 多进程的推荐办法：在子进程启动后，进程内初始化一切，特别是带锁/线程的结构；进程退出前统一释放
 */
+
+
+
+
+// 计数器遍历计数的性能低于 排序计数. 舍弃 计数器遍历计数, 采用排序计数
 
 
 // C++ 编译器会对函数名进行修饰（如 _Z3fooi），而 C 编译器不会（保持 foo）
@@ -105,15 +110,10 @@ void reset_process();
 void release_process();
 
 
-// void count_pair_core(
-//     counter_st* counter,
-//     uint32_t* keys,
-//     const int64_t len
-// );
 
-
-// 结构体，用于封装count_pair_batch函数返回的多个data指针, 和(L,R) pair-freq 总数
-struct L_R_token_counts_ptrs {
+// 结构体，用于封装 c_count_u16pair_batch 函数返回的多个data指针, 和(L,R) pair-freq 总数
+// 这里的 token 是 uint16_t 类型, 表示范围 0-65535  --> 不适用于超过此规模的 大号词表
+struct u16token_pair_counts_ptrs {
     uint16_t* L_tokens_ptr;
     uint16_t* R_tokens_ptr;
     uint64_t* counts_ptr;
@@ -121,14 +121,33 @@ struct L_R_token_counts_ptrs {
 };
 
 
-L_R_token_counts_ptrs c_count_pair_batch(
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
-    const int64_t len
+// 给单一进程用的 count uint16_t token-pair batch data 的 core: 采用 sort for count
+u16token_pair_counts_ptrs local_sort_count_u16pair_core(
+    uint32_t* keys,
+    const size_t len,
+    singleton_mempool& pool
 );
 
 
-void merge_pair_core(
+// 给单一进程用的 count uint16_t token-pair batch data 的 core: 采用 counter for count
+u16token_pair_counts_ptrs local_dict_count_u16pair_core(
+    uint32_t* keys,
+    const size_t len,
+    singleton_mempool& pool,
+    counter_st* counter
+);
+
+
+// 给单一进程用的 count uint16_t token-pair batch data 的函数
+u16token_pair_counts_ptrs c_local_count_u16pair_batch(
+    const uint16_t* L_tokens,
+    const uint16_t* R_tokens,
+    const size_t len
+);
+
+
+// 给单一进程用的 merge uint16_t token-pair batch data 的 core
+void local_merge_u16pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
@@ -141,15 +160,17 @@ void merge_pair_core(
 );
 
 
-// 结构体，用于封装merge_pair_batch函数返回的多个data指针
-struct token_filter_len_ptrs {
+// 结构体，用于封装 merge_u16pair_core 函数返回的多个data指针
+// 这里的 token 是 uint16_t 类型, 表示范围 0-65535  --> 不适用于超过此规模的 大号词表
+struct u16token_filter_len_ptrs {
     uint16_t* output_tokens_flat_ptr;
     bool* output_filter_ptr;
     int64_t* output_tokens_lens_ptr;
 };
 
 
-token_filter_len_ptrs c_merge_pair_batch(
+// 给单一进程用的 merge uint16_t token-pair batch data 的函数
+u16token_filter_len_ptrs c_local_merge_u16pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,

@@ -306,7 +306,7 @@ class baseBBPETokenizer(Tokenizer):
 
 
 
-    def _init_tokens(self, corpora:t.List[str]|str, *args, **kwargs) -> t.Generator:
+    def __init_tokens(self, corpora:t.List[str]|str, *args, **kwargs) -> t.Generator:
         if isinstance(corpora, str):
             corpora = [corpora]
         
@@ -357,7 +357,7 @@ class baseBBPETokenizer(Tokenizer):
         # 所以 baseTokenizer 只能从头开始 train
         self._clear()
         self._prepare_train(num_merges)
-        yield_tokens:t.Generator = self._init_tokens(corpora)
+        yield_tokens:t.Generator = self.__init_tokens(corpora)
         
         # <merge循环有前后依赖，所以不能并行>
         # <从init_merge_ranks_size续训num_train_epochs轮次, rank从init_merge_ranks_size到total_size-1>
@@ -623,7 +623,6 @@ import pyarrow.compute as pc
 import numpy as np
 from collections import defaultdict
 from multiprocessing import get_context, Manager
-from ..file.parquet_io import yield_parquet_batch, concate_parquet_files
 from ..file.folder_op import clean_folder
 from ...design.stream_outline import stream_parallel_process_with_pending
 
@@ -645,19 +644,18 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 # TODO: 多线程版本的 count_pair_batch/merge_pair_batch 是效率更高的 并行 办法
 
 
-def count_pair_batch(tokens_offsets_border):
+def count_pair_batch(tokens_offsets):
     '''
     对一个 batch 统计 pair-counts: 返回一个shape为(N, 3)的np.ndarray for pair-counts.
     3列分别是 L, R, counts. 其中 L, R 作为pair, dtype是uint16 确定. counts dtype uint64
 
     input:
-        tokens_offsets_border: tokens_flat: uint16, offsets: int64, b_order: int
+        tokens_offsets: tokens_flat: uint16, offsets: int64
 
     return:
         pcounts:tuple of 3 arrays (L,R,counts), dtype(uint16, uint16, uint64)
-        b_order: int
     '''
-    (tokens_flat, offsets), b_order = tokens_offsets_border
+    (tokens_flat, offsets) = tokens_offsets
 
     mask = np.full(shape=(len(tokens_flat),), fill_value=True)
     chunk_ends_ = (offsets-1)[1:] # 每个chunk末尾token在flat中的index
@@ -690,7 +688,7 @@ def count_pair_batch(tokens_offsets_border):
     # (N, 3)array as (L, R, counts), dtype分别是(uint16, uint16, uint64)
     pcounts = (uniq_pairs['L'], uniq_pairs['R'], counts.astype(np.uint64))
 
-    return pcounts, b_order # pcounts:tuple of 3 arrays (L,R,counts), dtype(uint16, uint16, uint64)
+    return pcounts # pcounts:tuple of 3 arrays (L,R,counts), dtype(uint16, uint16, uint64)
 
 
 
@@ -698,7 +696,7 @@ def count_pair_batch(tokens_offsets_border):
 # 解决办法是把 token data 用numpy.array.data 的方式传入. 这种方式只传数组指针, 不拷贝.
 # 为了统一接口, 在这里先提供一份 tokens_batch（np.ndarray）以及其他输入输出的版本
 def merge_pair_batch_memcontiguous(
-        tokens_offsets_border: object,
+        tokens_offsets: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
         new_token:np.uint16):
@@ -706,7 +704,7 @@ def merge_pair_batch_memcontiguous(
     # offsets:np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
-    (tokens_flat, offsets), b_order = tokens_offsets_border
+    (tokens_flat, offsets) = tokens_offsets
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -730,14 +728,14 @@ def merge_pair_batch_memcontiguous(
     
     output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
-    return (output_tokens_flat[:output_offsets[-1]], output_offsets), b_order
+    return (output_tokens_flat[:output_offsets[-1]], output_offsets)
 
 
 
 
 
 def merge_pair_batch_parallel(
-        tokens_offsets_border: object,
+        tokens_offsets: object,
         pair_L:np.uint16,
         pair_R:np.uint16,
         new_token:np.uint16):
@@ -745,7 +743,7 @@ def merge_pair_batch_parallel(
     # offsets:np.ndarray, # np.ndarray of int64
     # e.g, tokens_flat: [1, 2, 3, 4, 5], offsets: [0, 1, 1, 3, 5] --> [1], [], [2, 3], [4,5]
     # tokens_lens: [1, 0, 2, 2]
-    (tokens_flat, offsets), b_order = tokens_offsets_border
+    (tokens_flat, offsets) = tokens_offsets
     tokens_lens = [j-i for i, j in zip(offsets, offsets[1:])]
 
     output_tokens_lens = list(tokens_lens) # 复制 tokens_lens
@@ -771,7 +769,7 @@ def merge_pair_batch_parallel(
     
     output_offsets = np.array([0]+output_tokens_lens, dtype=np.int64).cumsum()
 
-    return (output_tokens_flat[output_filter], output_offsets), b_order
+    return (output_tokens_flat[output_filter], output_offsets)
 
 
 
@@ -788,604 +786,168 @@ def raise_continue_num_merges_conflict(num_merged, num_total_merges, continue_nu
         )
 
 
-# get_pair_counts 和 merge_pair 两个 work on tokens(list of integers) 的原子操作, 在超长的 chunks of tokens 上并发执行
-# 的收益非常低。由于 tokens 一般被切得很小, 故 这两个原子操作的计算密度不大, 而超长的 chunks of tokens 的并发数量太大，并发
-# 带来的开销完全抵消了其提升。
-# 真正的瓶颈在于 stored_tokens(暂存的tokens以merge top pair) 导致的内存瓶颈。超长的 stored_tokens 是 list of tokens, 长
-# 度非常长，单机内存很可能放不下。 应该首先处理这个内存瓶颈。-----> buffer it
 
-# 由于有中间结果可以和 merge_ranks 相互校对, 所以buffer之后存在一个"续训"的概念: 从init/load到的tok, 检查它的merge_ranks状
-# 态是否符合buffer_tokens文件。若符合, 则从buffer_tokens续train
 
-# 最大的中间结果: 全局 pair-counts, 一张形状为(N, 3)的表格. 每行三个元素分别是L_token, R_token, counts
-# 首先分析一行占用空间:
-# 考虑一个大小为 x GB的parquet语料文件, pq压缩率大概在2-10, 那么算它是一个 10x GB左右的文本文件.
-# 也即最多 10x G个token(单字节一个token). 从而pair-counts的counts(出现频数)最多就是10x G= x 100亿 左右. uint32(最大值43亿)
-# 很可能存不下, 所以存储 counts 统一用 uint64就好. 正好聚合计算后, 一般都用 uint64 表示聚合计算的结果.
-# tokens ID而言, uint16值范围是0-65535, 足够覆盖小的tokenizer了。2个bytes最多覆盖65535(uint16上限).
-#     经典例子, GPT2的词表大小(不包含special marks)是5W+256=50256. 
-# vocab_size(不包含special marks)不超过65536的tok, 其token用2个字节(uint16)就可以表达.
-# 总结一下:
-#     一个counts占据 8(uint64)字节.
-#     两个tokens占据 4(uint16, for 6W 词表大小以下) 或 8(uint32, for 6W 词表大小以上)字节.
-# 小词表 --> 每行12字节.   大词表 --> 每行16字节
-    
-# 然后分析总行数N for merge epoch e:
-# 考虑 e 时刻状态下的语料: 长度为L(个tokens), 词表大小为V(e=V-256), 它生成的 pair-tokens counts总行数, 有两个上限1: L, 上限2: V^2
-# 两个上限共同起作用:
-#     初期V^2小, L大, N 主要由 V^2 限制
-#     随着merge进行, L逐渐降低(以衰减的速率), V^2逐渐增大(以2次的速率增大), 后期 N 主要由 L 限制
 
-# 对于小词表而言, pair-count的 V^2 上限大概是 6W^2 = 36亿行, 每行12字节 ----> 40GB
 
-class bufferBBPETokenizer(baseBBPETokenizer):
+# 总共执行 num_merges 次下述循环: step i, i = 0 <-> num_merges-1  --->  step i+1
+# MAP 任务之 pair_count:
+# parquet dataset as /tokens/i  ---> shard read batch ---> map to executor for MAP_PAIR_COUNT_BATCH
+# ---> part_pair_count ---> write independently with metadata --> parquet dataset as /p_counts/i
+
+# REDUCE 任务之
+# --aggregate parquet dataset /p_counts/i ---> to_merge_pair, new_token
+
+# MAP 任务之 pair_merge:
+# parquet dataset as /tokens/i ---> shard read batch ---> map to executor for MAP_PAIR_MERGE_BATCH
+# ---> part_merged_tokens ---> write independently with metadata --> parquet dataset as /tokens/i+1
+
+
+
+# buffer_dir/tokens  ---> 存储诸如 0/. 1/. 等 parquet dataset. 其中文件名数字表达 num_merged in tokens
+# buffer_dir/paircounts ---> 存储诸如 0/. 1/. 等 parquet dataset. 其中文件名数字表达对应 tokens 的 pair-counts
+
+# batch_size: 单个工作线程/进程处理, 在单次批处理时的行数  --> num_batches = total_num_rows_after_chunk / batch_size
+# 我们用 parquet dataset 来表达完整的 tokens 和 pari-counts data
+# 因为 dataset 数据结构即可以视作独立的 parquet 文件, 又可以视作同一个metadata下的数据表 --> 提供天然的 REDUCE 途径, 写入批数据到dataset即可
+
+# 同时, parquet dataset还提供了 并行读取 的途径: 
+# 1. 对于多进程, 并行读取 --> 并行读取多个 dataset 内部的 parquet 文件, 所以要将 dataset 内各 fragment的路径, 及其对应的写入路径发送给工作进程,
+#     工作进程拿到 读取路径、计算结果、将结果写入到对应写入路径
+# 2. 对于多线程, 并行读取 --> 并行读取 dataset.get_fragments() 方法返回的 fragment 对象, 及其对应的写入路径(多线程下fragment对象不需要pickle, 可共享)
+#     thread MAP 任务要尽量 绕开GIL: pa operations 基本都是释放 GIL 的, pair-count/merge也必须要重写成non-GIL的.
+#     内部的一些 Python if-else/顺序/引用 操作, 尽管会持有 GIL, 但持有时间极短, 预计不会对性能有较大影响. 其余的Python操作不要放在工作线程里.
+
+# 综上, batch_size 就是一个工作线程/进程在具体执行计算时的数据量, 也是一个 dataset.fragment 的行数.
+# 它不能过大 --> num_workers*batch_size OOM,  也不能过小 --> batch_size导致 fragment file size 过小, 导致 num_fragments 过多, 影响性能.
+
+# 那么, 是控制 batch_size 还是 num_batches?
+# 答案: 控制 dataset 内部单个 parquet 文件大小在 256MB - 1GB, 因为 dataset并发读取, 单个pq文件大小比控制pq文件总数更重要. 后续分析过程如下:
+
+# step1: 确定 batch_size
+# avg_num_tokens_per_chunk, 英文约为5-10, 中文约为60.
+# token_bytes, 小词表(大小<=65536)为2, 全尺寸词表(大小>65536)为4
+# single paritial(from batch) file size: 
+#     tokens = batch_size * avg_num_tokens_per_chunk * token_bytes
+#     pcounts <= batch_size * vocab_size^2 * (2*token_bytes + 8)
+# 由于 pcounts 的 生成完全是由客观情况决定的, 且 pcounts dataset 只涉及 并发单文件写入 和 聚合统计 过程, 不涉及并发读取, 所以无需不控制其大小.
+# ----> 控制 batch_size * avg_num_tokens_per_chunk * token_bytes 在 256MB ~ 1024MB 之间. 中/英 语料 avg_num_tokens_per_chunk 分别取64/8.
+# ----> for英文&小词表, batch_size=(16~64)M,   for英文&大词表, batch_size=( 8~32)M,
+#       for中文&小词表, batch_size=( 2~ 8)M,   for中文&大词表, batch_size=( 1~ 4)M
+
+# step2. 确定写入的 row_group_size: 由于 batch_size 完整地落在 valid row group size 区间内, 直接让 row_group_size = batch_size 是有利于并发的
+
+# step3. 确定工作进程/线程数量:
+# 根据 总可用内存, 和 batch_size 大小的批数据 单任务计算 所需的内存, 得到 任务并行数目
+#   merge任务:
+#     input:
+#       tokens_flat:        num_tokens个uint16/uint32 = batch_size * avg_num_tokens_per_chunk * 2/4 bytes
+#       offsets:            batch_size个int64         = batch_size * 8 bytes
+#     output:
+#       merged_tokens_lens: batch_size个int64         = batch_size * 8 bytes
+#       filter:             num_tokens个bool          = batch_size * avg_num_tokens_per_chunk * 1 bytes
+#       merged_tokens_flat: num_tokens个uint16/uint32 = batch_size * avg_num_tokens_per_chunk * 2/4 bytes
+#   --> merge任务总结:
+#       for英文&小词表, 56*batch_size(内存池32*batch_size) bytes; for英文&大词表, 88*batch_size(内存池48*batch_size) bytes
+#       for中文&小词表, 336*batch_size(内存池200*batch_size) bytes; for中文&大词表, 592*batch_size(内存池328*batch_size) bytes
+#   count任务:
+#     input:
+#       L_tokens:        num_tokens个uint16/uint32 = batch_size * avg_num_tokens_per_chunk * 2/4 bytes
+#       R_tokens:        num_tokens个uint16/uint32 = batch_size * avg_num_tokens_per_chunk * 2/4 bytes
+#     output:
+#       keys:            num_tokens个uint32/uint64 = batch_size * avg_num_tokens_per_chunk * 4/8 bytes
+#       L_uniqs:         num_tokens个uint32/uint64 = batch_size * avg_num_tokens_per_chunk * 2/4 bytes
+#       R_uniqs:         num_tokens个uint32/uint64 = batch_size * avg_num_tokens_per_chunk * 2/4 bytes
+#       counts:          num_tokens个uint64 = batch_size * avg_num_tokens_per_chunk * 8 bytes
+#   --> count任务总结:
+#       for英文&小词表, 160*batch_size(内存池128*batch_size) bytes; for英文&大词表, 256*batch_size(内存池192*batch_size) bytes
+#       for中文&小词表, 1280*batch_size(内存池1024*batch_size) bytes; for中文&大词表, 2048*batch_size(内存池1536*batch_size) bytes
+#   显然 count任务 所需的内存 远大于 merge任务. 由于内存池复用, 只需考虑 count任务.
+#   根据batch_size范围, 单工作线程/进程任务计算 所需内存 如下:
+#       for英文&小词表, 2.5~10GB(内存池2~8GB); for英文&大词表, 2~8GB(内存池1.5~6GB)
+#       for中文&小词表, 2.5~10GB(内存池2~8GB); for中文&大词表, 2~8GB(内存池1.5~6GB)
+
+# 总结(M=1024^2, G=1024^3):
+# 小词表:
+#   英文, batch_size=(16~64)M, 单工作线程/进程任务计算 所需内存 2.5~10GB(batch_size* 160), 其中内存池  2 ~8GB(batch_size* 128)
+#   中文, batch_size=( 2~ 8)M, 单工作线程/进程任务计算 所需内存 2.5~10GB(batch_size*1280), 其中内存池  2 ~8GB(batch_size*1024)
+# 大词表:
+#   英文, batch_size=( 8~32)M, 单工作线程/进程任务计算 所需内存  2 ~ 8GB(batch_size* 256), 其中内存池 1.5~6GB(batch_size* 192)
+#   中文, batch_size=( 1~ 4)M, 单工作线程/进程任务计算 所需内存  2 ~ 8GB(batch_size*2048), 其中内存池 1.5~6GB(batch_size*1536)
+
+# step4: 根据本机总内存 memory_size / 内存水位 alpha, 动态确定 batch_size 和 num_workers
+
+
+def text_to_byte_pa_table(pre_split_pat, text, tokens_schema):
     '''
-    BBPE buffer-train 的每一 epoch, 可分为以下几个步骤
-    步骤1 count:
-        1. 读取 batch of tokens chunks 从磁盘
-        2. 计算 pair-counts
-        3. 写入 pcounts for batch 到磁盘
-    步骤2 reduce:
-        1. 聚合所有 pcounts for batch, 并得到 max-occur pair.
-           如果没有 max-occur pair, 即极端情况下没有 pair 了(所有tokens chunks都是单一token), 那么说明语料耗尽
-        2. 生成 new token
-    步骤3 merge:
-        1. 读取 batch of tokens chunks 从磁盘
-        2. 合并 max-occur pair to new token, 得到 new batch of tokens chunks
-        3. 写入 new batch of tokens chunks 到磁盘
+    text_to_tokens_pa_table: 把 text 依照正则表达式 pre_split_pat 切分, 并将切分结果映射成 byte-values
+    返回 一个单列pa.Table, 列名和 schema 由 tokens_schema 确定
     
-    步骤2 reduce 在主进程完成, 所以步骤1 和步骤3必然分开执行. 关于这两个步骤, 同步流程可以是:
-    版本1: 主进程 read batch, IPC到工作进程完成 pair-count/pair-merge, 且在工作进程完成写入
-    版本2(mpBBPE): 在工作进程完成读取(分片按row-group), 然后在工作进程完成 pair-count/pair-merge, 且在工作进程完成写入 --> 全程没有IPC
+    :param pre_split_pat: 预切分的正则表达式
+    :param text: 文本
+    :param tokens_schema: pa.Table的schema
     '''
-    token_dtype = pa.uint16()
-
-    p_counts_schema = pa.schema([
-        pa.field('L', token_dtype),
-        pa.field('R', token_dtype),
-        pa.field('counts', pa.uint64()),
-        ])
+    if not text.endswith(ENDOFTEXT):
+        text = text + ENDOFTEXT
+    chunks_str = re.findall(pre_split_pat, text) # list of tokens(string)
     
+    # list of list of integers(every list of integers as tokens)
+    chunks_tokens = [encode_to_ints(chunk) for chunk in chunks_str]
     
-    tokens_schema = pa.schema([
-        pa.field( 'tokens', pa.large_list(pa.field('token', token_dtype)) ),
-        ])
+    # 创建 pa table
+    batch_table = pa.Table.from_pydict({tokens_schema[0].name: chunks_tokens}, tokens_schema)
+    return batch_table
 
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-    @classmethod
-    def text_to_tokens_pa_table(cls, pre_split_pat, text):
-        if not text.endswith(ENDOFTEXT):
-            text = text + ENDOFTEXT
-        chunks_str = re.findall(pre_split_pat, text) # list of tokens(string)
-        
-        # list of list of integers(every list of integers as tokens)
-        chunks_tokens = [encode_to_ints(chunk) for chunk in chunks_str]
-        
-        # 创建 pa table
-        batch_table = pa.Table.from_pydict({cls.tokens_schema[0].name: chunks_tokens}, cls.tokens_schema)
-        return batch_table
-
-
-    def _set_config(self, buffer_size, fc_count_pair_batch:t.Callable, fc_merge_pair_batch:t.Callable):
-
-        os.makedirs(self._buffer_dir, exist_ok=True)
-        
-        buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
-        os.makedirs(buffer_tokens_dir, exist_ok=True)
-        
-        buffer_pcounts_dir = os.path.join(self._buffer_dir, 'p_counts')
-        os.makedirs(buffer_pcounts_dir, exist_ok=True)
-
-        self._buffer_tokens_dir = buffer_tokens_dir
-        self._buffer_pcounts_dir = buffer_pcounts_dir
-
-        self._buffer_size = buffer_size
-        self._func_merge_pair_batch = fc_merge_pair_batch
-        self._func_count_pair_batch = fc_count_pair_batch
-
-
-    def _init_tokens(self, corpora:str|t.List[str], text_colnames:t.List[None|str], extra_save_dir:str|None, row_group_size=None):
-        '''
-        如果 extra_save_dir 是path str, 且目录不为空, 那么copy extra_save_dir里的文件到 _buffer_dir/tokens/0
-        如果 extra_save_dir 是None,
-        生成 _buffer_dir/tokens/0 目录, 并在其中生成 corpora 的 byte-tokens .pq文件们
-
-        corpora: list of string or parquet file paths
-        text_colnames: corresponding column names for parquet files. place None for string
-            e.g.,
-            corpora: ['aaabbc', '../data/raw/train.pq', '../data/raw/valid.pq']
-            text_colnames: [None, 'text', 'text']
-        
-        the resulting _buffer_dir/tokens/0 & extra_save_dir(if any) would be like as:
-        [   /buffer_dir/tokens/0/{name1}.pq
-            /buffer_dir/tokens/0/{name2}.pq
-                      ...
-            /buffer_dir/tokens/0/{name_}.pq   ]
-
-        step1: save string corpus as .pq file with column 'text' under _buffer_dir
-        step2: byte-level tokenize all parquet corpus files into .pq files with column 'tokens'
-               under _buffer_dir/tokens/0 & extra_save_dir(if any)
-
-        .pq file generating:
-        从 corpus 中读取 batch of text, join/split 成 chunks 之后, 把每个 chunk encode 成 tokens(list of integers)
-        把 tokens 写入到位于 buffer_dir 的 Parquet 文件。per tokens-chunk per row
-
-        tokens-chunk 是 ListArray 类型 --> list of uint16 named 'token' --> list_of_ints_type
-            变长的 List Array, field 是 token, dtype 为 uint16(token的最大vocab size 十几万即可, 目前这个小tok uint16足够)
-        
-        Parquet table 的 schema:
-            列名: tokens
-            column type: list_of_ints_type, which is pa.list_(pa.field('token', pa.uint16()))
-        '''
-        # create and clean starting directory: _buffer_dir/tokens/0
-        tokens_dir_0 = os.path.join(self._buffer_tokens_dir, '0')
-        os.makedirs( tokens_dir_0, exist_ok=True)
-        clean_folder( tokens_dir_0 )
-
-        # 如果输入了 extra_save_dir 且 extra_save_dir 不为空, 就从 extra_save_dir 拷贝到 _buffer_dir/tokens/0
-        if extra_save_dir and os.listdir(extra_save_dir):
-            if len(os.listdir(extra_save_dir)) == len(corpora):
-                import shutil
-                shutil.copytree(extra_save_dir, tokens_dir_0, dirs_exist_ok=True)
-                return
-            else:
-                raise ValueError(
-                    f'extra_save_dir {extra_save_dir} conflicts with {len(corpora)} corpora'
-                    )
-
-        # 如果没有输入 extra_save_dir 亦或 extra_save_dir 为空. 从 corpora 生产 init tokens pq files
-        assert len(corpora) == len(text_colnames), f"length of corpora must match with length of columns"
-        corpus_col_pair = []
-        for i, corpus in enumerate(corpora):
-            if not corpus.endswith('.parquet'): # 若此 corpus 是纯文本, 那么在 buffer_dir 给它创建一个 corpus_X.parquet 文件: 列名 text
-                corpus_pq_schema = pa.schema([ pa.field('text', pa.string()) ])
-                # overwrite if exists
-                corpus_pq = os.path.join(self._buffer_dir, f'corpus_{i}.parquet')
-                with pq.ParquetWriter(corpus_pq, corpus_pq_schema) as writer:
-                    writer.write_table(
-                        pa.Table.from_pydict({"text":[corpus]}, corpus_pq_schema)
-                        )
-                corpus_col_pair.append( (corpus_pq, 'text') )
-            elif os.path.exists(corpus) and text_colnames[i]: # 若此 corpus 是parquet文件路径, 那么在配对一个合理列名即可
-                corpus_col_pair.append( (corpus, text_colnames[i]) )
-            else:
-                raise FileNotFoundError(
-                    f'corpus parquet file {corpus} column for text {text_colnames[i]} not exiting')
-
-        # create corresponding tokens .pq files
-        init_tokens_pqs = []
-        for corpus_pq, _ in corpus_col_pair:
-            init_tokens_pq = os.path.join(self._buffer_tokens_dir, '0', os.path.basename(corpus_pq))
-            if init_tokens_pq in init_tokens_pqs:
-                raise FileExistsError(
-                    f'input corpus parquet files cannot have duplicated file basename.\n'
-                    f'here {init_tokens_pq} duplicated.\n'
-                    f'change the basename of input corpus file of parquet format, because the program '
-                    f'generated same name for previous corpus of string format.')
-            else:
-                init_tokens_pqs.append(init_tokens_pq)
-        
-        # 遍历每个 text parquet file, 分批 转换成 tokens(uint16) parquet file 于 buffer_dir/tokens
-        for (corpus_pq, text_col), init_tokens_pq in zip(corpus_col_pair, init_tokens_pqs):
-            # 读取 T 行text, 会被预切分成 N 行tokens. 为了保证 N 是 row_group_size 的倍数, 这里 T 直接选 row_group_size 最合适
-            # if row_group_size = None, parquet write_table 默认的 row_group_size = 1024 * 1024
-            batch_size = 1024 * 1024 if row_group_size is None else row_group_size
-            corpus_batch_iter = yield_parquet_batch(corpus_pq, batch_size, [text_col])
-            with pq.ParquetWriter(init_tokens_pq, self.tokens_schema) as writer:
-                for k, batch in enumerate(corpus_batch_iter):
-                    text = ENDOFTEXT.join( batch[text_col].to_pylist() )
-                    # 创建 pa table of tokens(not text)
-                    batch_table = self.text_to_tokens_pa_table(self.pat_str, text)
-                    writer.write_table(batch_table, row_group_size)
-        
-        # clean corpus parquet file from string input
-        clean_folder(self._buffer_dir, method='only_file')
-
-        # copy init_tokens file to extra_save_dir if it is an empty dir
-        if extra_save_dir and os.path.isdir(extra_save_dir) and os.listdir(extra_save_dir) == []:
-            import shutil
-            shutil.copytree(tokens_dir_0, extra_save_dir, dirs_exist_ok=True)
-
-
-    def _prepare_train(self, num_merges, executor, *args, **kwargs) -> str:
-        '''
-        检查是否满足训练条件, 返回与当前_merge_ranks匹配的 本次训练的开始点 _buffer_tokens_dir/?
-        对于 size = S 的 _merge_ranks 来说, 匹配的本次训练开始点是 _buffer_tokens_dir/S
-        '''
-        # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突. 确定 num_train_epochs
-        super()._prepare_train(num_merges)
-        # 确保 _buffer_tokens_dir 不为空, 在里面选取一个作为 训练起始点
-        assert os.listdir(self._buffer_tokens_dir), f'empty buffer dir for tokens {self._buffer_tokens_dir}'
-
-        # 由于 bufferTokenizer 存在一个续train的概念, 要检查 _buffer_dir_tokens 和 merge_ranks 的状态
-        # 对于 merge_ranks size = 0：buffer_dir_tokens/0 不为空，即可开始训练
-        if len(self._merge_ranks) == 0:
-            tokens_dir_0 = os.path.join(self._buffer_tokens_dir, '0')
-            assert os.listdir(tokens_dir_0)
-            return tokens_dir_0
-        
-        # 对于 merge_ranks size = s > 0：训练 next token, 即 merge_ranks s+1 的素材是 buffer_dir_tokens/s
-        latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
-        tokens_dir_latest = os.path.join(self._buffer_tokens_dir, f'{latest}')
-
-        if latest == len(self._merge_ranks):
-            return tokens_dir_latest
-        
-        elif latest + 1 == len(self._merge_ranks): # merge_ranks 不会是空
-            # 取出 merge_ranks 的最后一对
-            to_merge_pair, new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
-            return self._next_tokens_dir(tokens_dir_latest, to_merge_pair, new_token, executor)
-        
-        else:
-            raise RuntimeError(
-                f"current merge_ranks size {len(self._merge_ranks)} not match with buffer_tokens_dir "
-                f"{self._buffer_tokens_dir}'s latest buffer tokens {tokens_dir_latest}, merge_ranks "
-                f"size shall be equal to latest dir, or latest dir + 1")
-
-
-    @classmethod
-    def yield_tokens_offsets_order(cls, yield_batch: t.Generator):
-        for i, batch in enumerate(yield_batch):
-            # batch['tokens'] --> pa.LargeListArray
-            # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
-            tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
-            offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
-
-            yield (tokens_flat, offsets), i
-
-
-
-
-    @classmethod
-    def _write_count_batch(cls, tokens_offsets_border, count_func, save_dir, src_tokens_fname):
-        # tokens_offsets: tuple of tokens_flat: uint16 ndarray, offsets: int64 ndarray
-        # b_order: 批次batch的序号
-        # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
-        # save_dir: 保存的目录, src_tokens_fname: 批次batch的来源文件名
-
-        b_pcounts, b_order = count_func(tokens_offsets_border) # b_pcounts: tuple of 3 same-length arrays(L/uint16,R/uint16,counts/uint64)
-
-        data = {
-            cls.p_counts_schema[0].name: b_pcounts[0], # L: L_tokens
-            cls.p_counts_schema[1].name: b_pcounts[1], # R: R_tokens
-            cls.p_counts_schema[2].name: b_pcounts[2], # counts: counts
-            }
-
-        table = pa.Table.from_pydict(data, cls.p_counts_schema)
-
-        if not table: # 如果是空table, 直接返回None. 当 batch 全部为 length 1 chunk 时, table 为空
-            return None
-        
-        pcnts_save_path = os.path.join(save_dir, f'{src_tokens_fname}-part-{b_order:06d}.parquet')
-
-        # pq.write_table 是线程安全的(并发写入不同 parquet 文件), 内部创建独属的文件句柄和缓冲区, 不依赖全局状态
-        # pq.write_table 底层使用 C++ API, 所以它能绕开 GIL, 故多线程是可以得到 加速的
-        pq.write_table(table, pcnts_save_path)
-
-        return pcnts_save_path
+def text_corpora_preprocess(
+        corpora: t.List[str]|str,
+        column: t.List[str]|str|None,
+        save_dir,
+        tokens_schema,
+        batch_size) -> t.List[str]:
+    '''
+    corpora_preprocess: 输入语料 corpora, 全部作 预切分+byte映射 之后, 存储 parquet 文件到 save_dir. 返回 byte-value parquet 目录列表
     
-
-
-    def _write_pcounts(self, tokens_pq, executor) -> t.List[str]:
-        '''
-        input args:
-            tokens_pq: 单个 parquet 文件, 存储了来自自然语料的 tokens(巨量), 每个 tokens 是 list of int
-            executor: 持久化的 进程池/线程池
-        
-        tokens parquet 文件用生成器逐一生成 batch(批数据限定了size, 且是 flattened ints 和 offsets 的两个array紧凑表达方式, 以及 批order), 即:
-            generator of batch as (tokens_flat, offsets), i
-        batch as b_data=(tokens_flat, offsets), b_order=i 经过 fc_count(func_count_pair_batch) 处理后, 返回 batch result as (pcounts, b_order),
-        最后 result_handler 将 batch result 独立写入到 pcounts_save_dir, 并记录 pcounts 文件路径 到 pcounts_paths
-
-        output:
-            pcounts_paths: pcounts 文件路径们. 每个文件是从一个 batch 内统计出来的 pcounts
-        '''
-        # 从 tokens_pq 中解析出 rank 和 tokens_pq 名字
-        rank, tokens_fname = tokens_pq.split('/')[-2:]
-
-        # 创建 本次 rank 的 buffer_pcounts_dir
-        pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, rank)
-        os.makedirs(pcounts_save_dir, exist_ok=True) 
-
-        pcounts_path_collector = []
-        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, self._buffer_size)
-        # data_gen: (tokens_flat, offsets), i
-        data_gen:t.Generator = self.yield_tokens_offsets_order(yield_tokens)
-
-        stream_parallel_process_with_pending(
-            executor,
-            data_gen, # data_gen: (tokens_flat, offsets), i
-            process_fn = self._write_count_batch, # return None or pcnts_save_path
-            result_handler = lambda pcnts_save_path: pcnts_save_path is not None and pcounts_path_collector.append(pcnts_save_path),
-            max_pending = 8,
-            process_args = (self._func_count_pair_batch, pcounts_save_dir, tokens_fname)
-        )
-
-        return pcounts_path_collector
-    
-
-    @classmethod
-    def _aggregate_pcounts(cls, pcounts_files):
-
-        tables = [pq.read_table(f) for f in pcounts_files]
-        concatenation = pa.concat_tables(tables)
-
-        L, R, counts = cls.p_counts_schema[0].name, cls.p_counts_schema[1].name, cls.p_counts_schema[2].name
-        
-        # group sum 会提升精度防止溢出, counts_sum dtype=uint64
-        agg_pcounts = concatenation.group_by([L, R]).aggregate([(counts, 'sum')]) # counts 列 --> counts_sum 列
-
-        return agg_pcounts, L, R, '_'.join([counts, 'sum'])
-
-
-    @staticmethod
-    def get_occur_most_info(agg_pcounts, L_col, R_col, agg_pcounts_col):
-
-        max_occur = pc.max(agg_pcounts[agg_pcounts_col]).as_py()
-        filter_mask = pc.equal(agg_pcounts[agg_pcounts_col], max_occur)
-
-        _row = agg_pcounts.filter(filter_mask).slice(0, 1)
-
-        occur_most_pair: tuple[int, int] = (_row[L_col][0].as_py(), _row[R_col][0].as_py())
-
-        return occur_most_pair, max_occur
-
-
-
-    @classmethod
-    def _write_merge_batch(cls, tokens_offsets_border, merge_func, L, R, new_token, save_dir, src_fname):
-        # tokens_offsets: tuple of tokens_flat: uint16 ndarray, offsets: int64 ndarray
-        # b_order: 批次batch的序号
-        # merge_fun: 执行 merge pair的函数. L, R, new_token: uint16
-        # save_dir: 保存的目录, src_fname: 批次batch的来源文件名
-
-        # valid 指已经剔除掉 merge 之后长度为 1 的chunk of tokens. 可以为 空 array, 这样 written pq table 也是空的
-        # 有些 merge_func 并不剔除 merge 之后长度为 1 的chunk. 这样 written pq table 永远不会是 空的.
-        # 但是这些 length 1 chunks 从次之后既无法贡献 pair counts, 也无法发生 merge.(count_pair/merge_pair都兼容此情况)
-        (valid_merged_tokens_flat, valid_merged_offsets), b_order = merge_func(
-            tokens_offsets_border,
-            L, R, new_token)
-        
-        merged_tokens = pa.ListArray.from_arrays(valid_merged_offsets, valid_merged_tokens_flat)
-        batch = pa.RecordBatch.from_pydict({cls.tokens_schema[0].name: merged_tokens}, cls.tokens_schema)
-        table = pa.Table.from_batches([batch], schema=cls.tokens_schema)
-        
-        # 如果 valid_merged_tokens_flat/valid_merged_offsets 为空, 即merge后本batch全部都是length 1 chunks
-        if not table: # 此时 table 为空. 放弃 write table 直接返回
-            return None
-
-        merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{b_order:06d}.parquet')
-
-        # pq.write_table 是线程安全的(并发写入不同 parquet 文件), 内部创建独属的文件句柄和缓冲区, 不依赖全局状态
-        # pq.write_table 底层使用 C++ API, 所以它能绕开 GIL, 故多线程是可以得到 加速的
-        pq.write_table(table, merged_save_path)
-
-        return merged_save_path
-
-    
-    @classmethod
-    def _merge_tokens_save(
-            cls,
-            save_dir,
-            to_merge_pair,
-            new_token,
-            tokens_pq,
-            fc_merge:t.Callable,
-            buffer_size,
-            executor
-            ):
-        '''
-        given tokens parquet file `tokens_pq`,
-        merge `to_merge_pair` tokens to `new_token` inside every tokens chunk,
-        then save result tokens chunks into a single same-file-name parquet file to `save_dir`
-
-        读(yield_tokens)
-        算(_thrd_process_tokens_batch)
-        写(writer.write_batch to save_dir)
-        batches(buffer_size确定batch大小)
-        '''
-        src_fname = os.path.basename(tokens_pq)
-        L, R = map(cls.token_dtype.to_pandas_dtype(), to_merge_pair)
-        new_token = cls.token_dtype.to_pandas_dtype()(new_token)
-
-        # 遍历读取当前 tokens_pq
-        yield_tokens:t.Generator = yield_parquet_batch(tokens_pq, buffer_size)
-        # data_gen yields: (tokens_flat:uint16 array, offsets:int64 array), i
-        data_gen:t.Generator = cls.yield_tokens_offsets_order(yield_tokens)
-
-        merged_save_path_collector = []
-        # ParquetWriter 并发写入同一不安全, 可能会造成文件损坏。故这里采用多进程分片写入(各batch独立落盘), 再统一合并处理
-        stream_parallel_process_with_pending(
-            executor,
-            data_gen, # data_gen: (tokens_flat, offsets), i
-            process_fn = cls._write_merge_batch, # return merged_save_path or None
-            result_handler = lambda merged_save_path: merged_save_path is not None and merged_save_path_collector.append(merged_save_path), 
-            max_pending = 8,
-            process_args = (fc_merge, L, R, new_token, save_dir, src_fname)
-            )
-        
-        concate_parquet_files(merged_save_path_collector, os.path.join(save_dir, src_fname), clean=True) # 支持 空list
-
-
-    def _next_tokens_dir(
-            self,
-            tokens_dir_this:str,
-            occur_most_pair:t.Tuple,
-            new_token:int,
-            executor
-            ) -> str:
-        # 在计算获得 tokens parquet for next merge_rank 时, 当前 tokens_pq 已经提炼出了 merge_info
-        # 并更新了 tokenizer._merge_rank，使得其 + 1。所以 cur_dir_for_tokens_pq = len(_merge_rank) - 1
-        # next_dir_for_tokens_pq = cur_dir_for_tokens_pq + 1 = len(cur_merge_rank)
-        next_rank = len(self._merge_ranks)
-        assert next_rank == int( os.path.basename(tokens_dir_this) ) + 1
-        
-        tokens_dir_next = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
-        os.makedirs( tokens_dir_next, exist_ok=True)
-
-        for f in os.listdir(tokens_dir_this):
-            tokens_pq = os.path.join(tokens_dir_this, f)
-
-            self._merge_tokens_save(
-                save_dir = tokens_dir_next,
-                to_merge_pair = occur_most_pair, 
-                new_token = new_token,
-                tokens_pq = tokens_pq,
-                fc_merge = self._func_merge_pair_batch,
-                buffer_size = self._buffer_size,
-                executor = executor
-                )
-        
-        return tokens_dir_next # update
-
-
-
-    def _get_merge_info(self, tokens_dir, executor):
-        # 从当前 tokens_dir, 统计得到 next merge pair 和 new token
-        num_merged_epochs = len(self._merge_ranks)
-        assert num_merged_epochs == int(os.path.basename(tokens_dir))
-
-        # compute pair_counts for every batch of tokens parquet into p_counts parquet, and collect them
-        b_pcounts_pqs = []
-        for f in os.listdir(tokens_dir):
-            tokens_pq = os.path.join(tokens_dir, f)
-
-            if not os.path.exists(tokens_pq):
-                raise FileNotFoundError(
-                    f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
-                    )
-            b_pcounts_pqs.extend( self._write_pcounts(tokens_pq, executor) )
-
-        # 当 所有 tokens pq files 的所有 batch 都是 length 1 chunks 时, 说明一个 pair 都找不出来了. 此时 b_pcounts_pqs 为空
-        if not b_pcounts_pqs:
-            # 在raise error前先保存已经train好的tokenizer
-            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
-
-            raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
-
-        # aggregate pair counts to agg_p_counts(pa.Tabel)
-        # obtain the pair with most occurrence
-        occur_most_pair, max_occurence = self.get_occur_most_info(*self._aggregate_pcounts(b_pcounts_pqs))
-
-        return occur_most_pair, max_occurence
-
-
-    def _train_loop(self, tokens_dir_start:str, start:int, end:int, executor, keep_window:int, verbose:bool):
-        '''
-        merge_rank 遍历 start --> end(不含) 地 BPE train 循环.
-        tokens_dir_start 是起始 tokens 文件夹, buffer_dir/tokens/start
-        
-        merge_rank 是此次merge相对第1次merge的偏移, 比如第1次merge的merge_rank=0
-        merge_rank + 256是此次merge生成的new_token. 
-        此次merge完成后, merge_ranks 的size = merge_rank of final merge + 1
-        由此, 在 train_loop 开始时, merge_rank = start, merge_ranks size = start+1
-        在 train_loop 结束时, merge_rank = end-1, merge_ranks size = end
-        '''
-
-        tokens_dir_this = tokens_dir_start
-        for rank in range(start, end):
-            print(f'merge rank {rank} / {start} to {end-1}')
-            try:
-                # _get_merge_info 的副作用: 
-                #   遍历 buffer_dir/tokens/this 所有 tokens 的pq文件 tokens_pq:
-                #   由 _write_pcounts 函数, 对 this/tokens_pq 生成 batch 生成器: tokens_flat: uint16, offsets: int64, b_order: int, 然后并行执行如下:
-                #       由 注册的 self._func_count_pair_batch 函数统计出 每个batch 的 pair_counts
-                #       由 _write_pcounts_batch 函数, 将 每个batch 的 pair_counts 写成 pq 文件落盘: buffer_dir/p_counts/this/tokens_pq-part-{b_id}.pq
-                #   由 _aggregate_pcounts 合并上述所有 buffer_dir/p_counts/this/tokens_pq-part-{b_id}.pq 成一个 agg_pcounts 的 pyarrow table
-                #   由 get_occur_most_info 作用在 agg_pcounts pa table 上, 得到 occur_most_pair (int, int), 以及 max_occurrence
-                top_pair, max_occurrence = self._get_merge_info(tokens_dir_this, executor)
-                
-                new_token, occurrence = rank + 256, max_occurrence if verbose else None
-
-                # update tokenizer: len(self._merge_rank) += 1
-                self._update_tokenizer(top_pair, new_token, occurrence)
-                
-                # rank = i = len(self._merge_rank) - 1 == self._num_merges - 1:
-                if rank == end - 1:
-                    break
-
-                # _next_tokens_dir 返回 buffer_dir/tokens/next 的路径:
-                #   遍历 buffer_dir/tokens/this 所有 tokens 的pq文件 tokens_pq:
-                #   由 _merge_tokens_save 函数, 目标 buffer_dir/tokens/next, 基于 tokens_pq 的 batch 生成器: tokens_flat, offsets, b_order, 然后并行执行如下:
-                #       由 _write_merge_batch 函数, 调用注册的 self._func_merge_pair_batch, 得到 merged tokens_flat/offsets 后, 落盘成 pa table for batch
-                #       收集 _write_merge_batch 返回的 pa table for batch 的 paths, 添加到 一个 list 里
-                #   由 concate_parquet_files 把 list 中所有 new tokens_batch pa table 拼接成一个 大 pa table, 作为 next tokens_pq, 并保存到 buffer_dir/tokens/next
-                tokens_dir_this = self._next_tokens_dir(tokens_dir_this, top_pair, new_token, executor)
-                
-            finally:
-                # keep the init and `keep_window` tokens/p_counts parquet file
-                to_remove = rank - keep_window
-                if to_remove > 0:
-                    clean_folder( os.path.join(self._buffer_tokens_dir, f'{to_remove}'), keep = False)
-                    clean_folder( os.path.join(self._buffer_pcounts_dir, f'{to_remove}'), keep = False)
-
-
-
-    def train_bpe(self,
-                  num_merges:int|None = None, # global_total num_merges for the tokenizer
-                  *,
-                  corpora:t.List[str]|str|None,
-                  colnames:t.List[str|None]|None = None,
-                  backup_init_tokens_dir:str|None = None, # backup the init tokens files of corpus
-                  buffer_size:int = 172470436, # max num of token-chunks in memory for each core. default 0.16GB
-                  keep_window:int = 3, # max reserved tokens_pq file on disk
-                  verbose:bool = False
-                  ):
-        
-        assert keep_window >= 0
-        if isinstance(corpora, str):
+    :param corpora: 语料. 可以是 1. parquet文件列表  2. 语料文本
+    :param column: parquet列名. 与corpora对应. 若column is None, 说明corpora是语料文本而不是路径
+    :param save_dir: 存储 byte-value parquet 语料的目录
+    :param tokens_schema: byte-value parquet 的 schema
+    :param batch_size: 写入 byte-value parquet 的 row_group_size
+    '''
+    if isinstance(corpora, str):
+        # 若 column not None 且 corpora 作为路径 --> 组装成list
+        if column is not None and os.path.isfile(corpora) and os.path.exists(corpora) and corpora.endswith('.parquet'):
             corpora = [corpora]
-            colnames = [None]
-
-        self._set_config(
-            buffer_size = buffer_size,
-            fc_count_pair_batch = count_pair_batch, # function to count pair
-            fc_merge_pair_batch = merge_pair_batch_memcontiguous) # function to merge pair
-
-        # corpora 为 t.List[str], 模式是 从头train
-        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
-        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
-        if corpora is not None:
-            self._clear()
-            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
-        # corpora 为 None 时, 模式是 续train.
-        # 续train需要满足的条件会由 _prepair_train 检查或满足. 
+            column = [column]
+        # 若 column is None, corpora 作为语料文本
         else:
-            self._build_vocab()
+            import uuid
+            init_tokens_path = os.path.join(save_dir, str(uuid.uuid3(uuid.NAMESPACE_DNS, corpora)))
+            tokens_table = text_to_byte_pa_table(GPT4_TOKENIZER_REGEX, corpora, tokens_schema)
+            pq.write_table(tokens_table, init_tokens_path)
+            return [init_tokens_path]
+    
+    if isinstance(corpora, list):
+        # 检查 column 是否完整输入
+        assert isinstance(column, list) and len(corpora) == len(column), \
+            f'corpora {corpora} not match with column {column}'
+        # 检车 语料文件是否都存在
+        assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora]), \
+            f'file-error with input copora {corpora}'
+        
+        init_corpora = []
+        for (corpus, text_col) in zip(corpora, column):
+            # 在 buffer_dir/内生成 对应的 byte-value tokens parquet file
+            init_tokens_path = os.path.join(save_dir, os.path.basename(corpus))
+            with pq.ParquetWriter(init_tokens_path, tokens_schema) as writer:
+                for batch in pq.ParquetFile(corpus).iter_batches(batch_size, columns=[text_col]):
+                    text = ENDOFTEXT.join( batch[text_col].to_pylist() )
+                    tokens_table = text_to_byte_pa_table(GPT4_TOKENIZER_REGEX, text, tokens_schema)
+                    writer.write_table(tokens_table, batch_size)
 
-        with ProcessPoolExecutor(os.cpu_count()) as executor: # 
-            # _prepare_train 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 的冲突
-            # 确定 num_train_epochs, 检查 buffer_dir_tokens 和 merge_ranks 是否匹配. 返回匹配的训练起点文件夹
-            tokens_dir_start = self._prepare_train(num_merges, executor)
-            
-            start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
-
-            self._train_loop(tokens_dir_start, start, end, executor, keep_window, verbose)
-
-        # set down others
-        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
-        self._register_special_tokens()
-
-
-
-    def extend_bpe(self, *args, **kwargs):
-        assert hasattr(self, '_merge_ranks'), f'tokenizer not load.'
-        if not self._merge_ranks:
-            raise RuntimeError(f'merge_ranks empty. should run `train_bpe`.')
-        #TODO
-        raise NotImplementedError(f'tokenizer extend not implemented')
-
-
-
-
-
-
-
-
+            init_corpora.append(init_tokens_path)
+        
+        return init_corpora
 
 
 
@@ -1399,405 +961,334 @@ import pair_count_merge
 
 def _worker_init(block_size: int):
     # 子进程启动时, 执行 cython 包里的 initialize
-    pair_count_merge.initialize(block_size)
+    pair_count_merge.initialize_process(block_size)
 
     # 注册 进程退出时的清理程序
-    Finalize(None, pair_count_merge.close, exitpriority=10)
-    atexit.register(pair_count_merge.close)
+    Finalize(None, pair_count_merge.close_process, exitpriority=10)
+    atexit.register(pair_count_merge.close_process)
 
 
+import pyarrow.dataset as ds
+from pair_count_merge import count_u16pair_batch, merge_u16pair_batch
 
 
-
-class boostBBPETokenizer(bufferBBPETokenizer):
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-    def train_bpe(self,
-                  num_merges:int|None = None,               # global num merges for the tokenizer
-                  *,
-                  corpora:t.List[str]|str|None,             # None 代表从 buffer_dir 续train; 可以是直接输入文本str; 可以是parquet路径; 可以混合
-                  colnames:t.List[str|None]|None = None,    # 和 corpora 对应, 指定 parquet 文件里 文本 列名
-                  backup_init_tokens_dir:str|None = None,   # backup the init tokens files of corpus
-                  buffer_size:int = 172470436,              # max num of token-chunks in memory for each core. 0.16GB
-                  keep_window:int = 3,                      # max reserved tokens_pq file in disk
-                  verbose:bool = False
-                  ):
-        
-        assert keep_window >= 0
-        if isinstance(corpora, str):
-            corpora = [corpora]
-            colnames = [None]
-        
-        self._set_config(
-            buffer_size = buffer_size,
-            fc_count_pair_batch = pair_count_merge.count_pair_batch,
-            fc_merge_pair_batch = pair_count_merge.merge_pair_batch)
-
-        # corpora 为 t.List[str], 模式是 从头train
-        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
-        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
-        if corpora is not None:
-            self._clear()
-            self._init_tokens(corpora, colnames, backup_init_tokens_dir)
-        # corpora 为 None 时, 模式是 续train.
-        # 续train需要满足的条件会由 _prepair_train 检查或满足. 
-        else:
-            self._build_vocab()
-
-        ctx = mp.get_context('fork') # spawn方法使得 跨平台一致
-
-        # 测算设定 block_size = 40 * buffer_size, 就使得最大块的内存需求落在同一个 block. 避免多次申请block.
-        # 根据本机64GB内存，8核, 每核内存8GB, 分6.4GB内存给计算, 那么 buffer_size=0.16GB
-        # 反推最佳 buffer_size = 0.16GB, 这样1个进程有1个内存block,占用6.4GB. 8核总共占据51.2GB.
-        memblock_size = 40 * self._buffer_size
-
-        with ProcessPoolExecutor(
-            max_workers=8,
-            mp_context=ctx,
-            initializer=_worker_init,
-            initargs=(memblock_size,)
-        ) as executor:
-            # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
-            # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
-            tokens_dir_start = self._prepare_train(num_merges, executor)
-            
-            start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
-
-            self._train_loop(tokens_dir_start, start, end, executor, keep_window, verbose)
-
-        # set down others
-        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
-        self._register_special_tokens()
-
-
-
-
-
-import itertools
-
-# 多进程BBPE-train: 工作进程独立完成 分片读row_group / 并行算count&merge / 独立写pcounts&merged
-# count 之后有一个reduce过程: aggregate --> find max-occurrence pair
-# merge 之后也有一个reduce过程: concate all batches of merged tokens
-
-class mpBBPETokenizer(bufferBBPETokenizer):
+class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
     '''
-    以 map-reduce 风格重写 多进程 BBPE train
-    train_bpe 提供两种模式:
-        1. corpora != None, 从头train模式: 初始化tokenizer状态, 初始化 tokens parquet file at 0 merge
-           初始化 tokens parquet file at 0 merge 有两种方式:
-           一是从corpora生产到 _buffer_tokens_dir/0, 二是从 backup_init_tokens_dir 复制到 _buffer_tokens_dir/0
-        1. corpora = None, 续train模式: 
-           _prepare_train 检查 num_merges 和 explicit_n_vocabs/merge_ranks size 之家的冲突, 返回 训练起点的 tokens file
-           <_buffer_tokens_dir/start>, 用来执行 merge_rank = start(即第start+1次merge), 此时 merge_rank size = start
-    多进程分片读取只能 分片读取 row group(多个), 故 buffer_size(batch_size) 应该是 row_group_size 的整数倍, 手动sharding
-    以保证 每个工作进程 每次读取多个row groups(总行数正好 batch_size)作为batch 以控制 batch文件总数
-    
-    在生成 tokens_pq 文件时, write_table 的 row_group_size (目前看set to maximum 67108864), 包括初始化 tokens parquet file at 0 merge
-
-    故 map过程中:
-        read读取: sharding 不重叠读取 row groups 组成 batch
-        write写入 write table of tokens_pq 时, row_group_size 是buffer_size因数 即可, 保证下一epoch 在read 时可以sharding读取row groups
-
-        续train模式, 或 init_tokens_pq 来自 backup 时, tokens_pq file 无法控制 row_group_size, 按 row group 分片读取即可因为下一个
-        epoch就不会有问题了. 总结: 手动 sharding 分片 row groups 以控制 batch 总数
-    #TODO: 用 parquet.Dataset 而不是 table 存储 map 结果, 可以天然避免 reduce, 预计会极大加速 ---> 需要重新设计 buffer 文件
+    多进程运行缓冲的BBPE小词表分词器(uint16 token)
     '''
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    token_dtype = pa.uint16()
 
-
-    def _set_config(self):
-        '''
-        1. 单个工作进程 单次读取 num_groups_per_batch 个 row group 以组成 1 个 batch, 以控制 全流程batch总数 num_batches
-        2. num_workers 个工作进程 单次共处理 num_workers 个 batch 时, 要控制 总内存耗用低于 系统总内存
-        3. row_group_size 应该是 batch_size 的因子, 且越大越好, 使得 num_groups_per_batch 小
-        '''
-
-        os.makedirs(self._buffer_dir, exist_ok=True)
-        
-        buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
-        os.makedirs(buffer_tokens_dir, exist_ok=True)
-        
-        buffer_pcounts_dir = os.path.join(self._buffer_dir, 'p_counts')
-        os.makedirs(buffer_pcounts_dir, exist_ok=True)
-
-        self._buffer_tokens_dir = buffer_tokens_dir
-        self._buffer_pcounts_dir = buffer_pcounts_dir
-
-        self._func_count_pair_batch = pair_count_merge.count_pair_batch
-        self._func_merge_pair_batch = pair_count_merge.merge_pair_batch
-
-        self._num_workers = 6
-
-        # buffer_size * 128(en) or 1024(zh) * num_workers = total_memory_size
-        self._buffer_size = int(64*0.8*1024**3) // self._num_workers // 128 # 只占用8成总内存, 只考虑英文语料
-
-        # parquet 参数以保证高效多进程读取/写入. row_group_size 最大值为 64*1024*1024, 且必须小于 buffer_size
-        self._ROW_GROUP_SIZE = 32*1024*1024
-
-        self._NUM_ROW_GROUPS_PER_BATCH = self._buffer_size // self._ROW_GROUP_SIZE
-        assert self._NUM_ROW_GROUPS_PER_BATCH >= 1, f'buffer_size(batch_size) must be larger than row_group_size'
-
-        self._buffer_size = self._NUM_ROW_GROUPS_PER_BATCH * self._ROW_GROUP_SIZE # 确保是 _ROW_GROUP_SIZE 的倍数
-
-
-    classmethod
-    def _map_task_read_count_write(cls, row_groups, tokens_pq_path, count_func, save_dir, src_fname):
-        '''
-        MAP 工作之 count:
-            每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 count_func, 
-            把生成的 pair-count-table 写入目标路径(由save_dir/src_fname/row_groups确定)
-        '''
-        # 读取数据, 解析成 pair count function 的输入: 把所有 RG 一次读成 recordBatch
-        pq_f = pq.ParquetFile(tokens_pq_path)
-        batch = next(pq_f.reader.iter_batches(batch_size=pq_f.metadata.num_rows, row_groups=row_groups))
-
-        # batch['tokens'] --> pa.LargeListArray
-        # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
-        tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
-        offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
-        b_order = tuple(row_groups)
-
-        tokens_offsets_border = (tokens_flat, offsets), b_order
-
-        # 计算 pair count
-        b_pcounts, b_order = count_func(tokens_offsets_border)
-        
-        data = {
-            cls.p_counts_schema[0].name: b_pcounts[0], # L: L_tokens
-            cls.p_counts_schema[1].name: b_pcounts[1], # R: R_tokens
-            cls.p_counts_schema[2].name: b_pcounts[2], # counts: counts
-        }
-
-        table = pa.Table.from_pydict(data, cls.p_counts_schema)
-
-        if not table:
-            return None
-        
-        pcnts_save_path = os.path.join(save_dir, f'{src_fname}-part-{'-'.join(list(map(str, b_order)))}.parquet')
-
-        pq.write_table(table, pcnts_save_path)
-        return pcnts_save_path
-
-
-
-    classmethod
-    def _map_task_read_merge_write(cls, row_groups, tokens_pq_path, merge_func, L, R, new_token, save_dir, src_fname):
-        '''
-        MAP 工作之 merge:
-            每一个 工作进程负责 从 tokens_pq_path 读取 row groups(由row_groups指定), 执行 merge_func, 
-            把生成的 merged-tokens-table 写入目标路径(由save_dir/src_fname/row_groups确定)
-        '''
-        # 读取数据, 解析成 pair merge function 的输入: 把所有 RG 一次读成 recordBatch
-        pq_f = pq.ParquetFile(tokens_pq_path)
-        batch = next(pq_f.reader.iter_batches(batch_size=pq_f.metadata.num_rows, row_groups=row_groups))
-        
-        # b_table['tokens'] --> pa.LargeListArray
-        # pa.LargeListArray .values --> 得到原类型array的数据; .offsets --> 得到 int64array 的偏移量
-        tokens_flat = batch[cls.tokens_schema[0].name].values.to_numpy()
-        offsets = batch[cls.tokens_schema[0].name].offsets.to_numpy()
-        b_order = tuple(row_groups)
-
-        tokens_offsets_border = (tokens_flat, offsets), b_order
-
-        # 计算 pair merge
-        (merged_tokens_flat, merged_offsets), b_order = merge_func(tokens_offsets_border, L, R, new_token)
-        merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
-        
-        data = {
-            cls.tokens_schema[0].name: merged_tokens, # tokens: chunks of tokens
-        }
-
-        table = pa.Table.from_pydict(data, cls.tokens_schema)
-
-        if not table:
-            return None
-        
-        merged_save_path = os.path.join(save_dir, f'{src_fname}-part-{'-'.join(list(map(str, b_order)))}.parquet')
-        
-        pq.write_table(table, merged_save_path)
-        return merged_save_path
+    paircounts_schema = pa.schema([
+        pa.field('L', token_dtype),
+        pa.field('R', token_dtype),
+        pa.field('counts', pa.uint64()),
+        ])
     
+    tokens_schema = pa.schema([
+        pa.field( 'tokens', pa.large_list(pa.field('token', token_dtype)) ),
+        ])
+
 
     @classmethod
-    def _reduce_task_count(cls, part_pair_counts_pq_files):
-        '''
-        REDUCE 工作之 count:
-            收集所有 pair-count table, 按列 L, R 计数并累加, 返回 累加值最大的 pair(L, R) 及其 累加值
-        这部分工作可以 跨文档: 即对所有不同 parquet 文件的 所有 part_pcounts, 一次性 reduce 得到 max_occur_pair
-        本身这部分 reduce 就必须要 对所有 parquet 文件的所有 part_pcounts 执行
-        '''
-        tables = [pq.read_table(f) for f in part_pair_counts_pq_files]
-        concatenation = pa.concat_tables(tables)
+    def _map_to_process_read_count_write(cls, src_tgt_paths):
+        fragment_path, save_path = src_tgt_paths
 
-        L, R, counts = cls.p_counts_schema[0].name, cls.p_counts_schema[1].name, cls.p_counts_schema[2].name
+        tokens_col = pq.read_table(fragment_path, schema = cls.tokens_schema).column(0)
+        if tokens_col.num_chunks == 1:
+            tokens_arr = tokens_col.chunk(0)
+        else:
+            tokens_arr = tokens_col.combine_chunks()
         
-        # group sum 会提升精度防止溢出, counts_sum dtype=uint64
-        agg_pcounts = concatenation.group_by([L, R]).aggregate([(counts, 'sum')]) # counts 列 --> counts_sum 列
-        agg_colname = '_'.join([counts, 'sum'])
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
 
-        max_occur = pc.max(agg_pcounts[agg_colname]).as_py()
-        filter_mask = pc.equal(agg_pcounts[agg_colname], max_occur)
+        L, R, counts = count_u16pair_batch((tokens_flat, offsets))
+        table = pa.Table.from_arrays([
+            pa.array(L, type = cls.token_dtype),
+            pa.array(R, type = cls.token_dtype),
+            pa.array(counts, type = cls.paircounts_schema.field('counts').type),
+            ], schema = cls.paircounts_schema)
 
+        if table:
+            pq.write_table(table, save_path)
+
+
+    @classmethod
+    def _map_to_process_read_merge_write(cls, src_tgt_paths, L, R, new_token):
+        fragment_path, save_path = src_tgt_paths
+
+        tokens_col = pq.read_table(fragment_path, schema = cls.tokens_schema).column(0)
+        if tokens_col.num_chunks == 1:
+            tokens_arr = tokens_col.chunk(0)
+        else:
+            tokens_arr = tokens_col.combine_chunks()
+
+        tokens_flat = tokens_arr.values.to_numpy()
+        offsets = tokens_arr.offsets.to_numpy()
+
+        merged_tokens_flat, merged_offsets = merge_u16pair_batch((tokens_flat, offsets), L, R, new_token)
+        merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
+
+        table = pa.Table.from_arrays([
+            pa.array(merged_tokens, type = cls.tokens_schema.field('tokens').type),
+        ], schema = cls.tokens_schema)
+
+        if table:
+            pq.write_table(table, save_path)
+
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+    def _set_config(self, language=t.Literal['en', 'zh'], batch_size_level=t.Literal['min', 'medium', 'high', 'max'], memory_utilization=0.8):
+        '''
+        小词表
+        en corpus --> batch_size=(16~64)M, mem_need = batch_size* 160, num_workers = memory_size*alpha/(batch_size* 160), mem_pool = batch_size* 128
+        zh corpus --> batch_size=( 2~ 8)M, mem_need = batch_size*1280, num_workers = memory_size*alpha/(batch_size*1280), mem_pool = batch_size*1024
+        为了简化运算, batch_size 只在 16/32/48/64(en corpus) 或 2/4/6/8(zh corpus) 中选择, 分别对应 level 'min'/'medium'/'high'/'max'
+        '''
+        # 只考虑 64GB 内存的机器
+        memory_size = 64 * 1024 **3
+        batch_size = 2 * 1024**2
+        if batch_size_level == 'min':
+            pass
+        elif batch_size_level == 'medium':
+            batch_size *= 2
+        elif batch_size_level == 'high':
+            batch_size *= 3
+        elif batch_size_level == 'max':
+            batch_size *= 4
+        else:
+            raise ValueError(f"wrong batch_size_level for {batch_size_level}. must be one of 'min'/'medium'/'high'/'max'.")
+        
+        if language == 'zh':
+            memory_batchsize_coef = 1280 # memory_need = batch_size* 1280
+            self.__pool_batch_size_coef = 1024 # mem_pool = batch_size* 1024
+        elif language == 'en':
+            batch_size *= 8
+            memory_batchsize_coef = 160 # memory_need = batch_size* 160
+            self.__pool_batch_size_coef = 128 # mem_pool = batch_size* 128
+        else:
+            raise ValueError(f"wrong language for {language}. must be one of 'en'/'zh'.")
+        
+        self._batch_size = batch_size
+        self._num_workers = int( memory_size * memory_utilization / (batch_size*memory_batchsize_coef) )
+
+        # set the parquet dataset/file directories
+        os.makedirs(self._buffer_dir, exist_ok=True)
+
+        self._buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
+        os.makedirs(self._buffer_tokens_dir, exist_ok=True)
+
+        self._buffer_paircounts_dir = os.path.join(self._buffer_dir, 'paircounts')
+        os.makedirs(self._buffer_paircounts_dir, exist_ok=True)
+
+
+    # 从多个 init_tokens(parquet格式), 切分成 batches 到 fragments of init dataset: tokens/0
+    def _init_tokens_dataset(self, init_tokens_pq_files: t.List[str]):
+        # 0. 检查 总的batch数量不能超过 10000
+        num_total_rows = sum( [pq.read_metadata(init_tokens_pq).num_rows for init_tokens_pq in init_tokens_pq_files] )
+        assert num_total_rows // self._batch_size < 10000, \
+            f'batch_size {self._batch_size} too small for parquet files {init_tokens_pq_files}, which leads more than 10000 fragments in dataset.'
+        
+        print(f'initalizing tokens dataset at merge 0: {num_total_rows//self._batch_size} fragments with batch_size {self._batch_size}')
+
+        # 1. 创建并清空 init_tokens_ds
+        init_tokens_ds = os.path.join(self._buffer_tokens_dir, '0')
+        os.makedirs(init_tokens_ds, exist_ok=True)
+
+        # 清空但保留 init_tokens_ds 文件夹
+        clean_folder(init_tokens_ds, method='all', keep=True)
+
+        # 2. 写入 common_metadata
+        pq.write_metadata(self.tokens_schema, os.path.join(init_tokens_ds, "_common_metadata"))
+
+        # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
+        # TODO: 改造成多线程/多进程 以加速
+        for init_tokens_pq in init_tokens_pq_files:
+            pq_file = pq.ParquetFile(init_tokens_pq)
+            for i, batch in enumerate( pq_file.iter_batches(self._batch_size, columns=[self.tokens_schema[0].name]) ):
+                b_table = pa.Table.from_batches([batch], self.tokens_schema)
+                b_path = os.path.join(init_tokens_ds, f'{os.path.basename(init_tokens_pq)}-part-{i:04d}.parquet')
+                pq.write_table(b_table, b_path)
+        
+        # 4. 写入完整 metadata --> 省略
+
+
+    def _start_tokens_ds(self, num_merges, executor):
+        # 检查 num_merges 和 explicit_n_vocabs 和 merge_ranks 的size 之间的冲突. 确定 num_train_epochs
+        super()._prepare_train(num_merges)
+
+        # 确定 buffer_dir/tokens/ 不为空, 至少存在一个 dataset
+        assert os.listdir(self._buffer_tokens_dir), f'empty buffer directory of tokens {self._buffer_tokens_dir}'
+
+        # 如果 merge_ranks 的 size = 0, 那么本次 BPE 是从头开始train, 起始dataset 是 tokens/0/
+        if len(self._merge_ranks) == 0:
+            tokens_ds_0 = os.path.join(self._buffer_tokens_dir, '0')
+            assert len(os.listdir(tokens_ds_0)) > 1, f'initial dataset tokens/0 {tokens_ds_0} empty. check.' # 确认 tokens dataset 0 不为空
+            return tokens_ds_0
+        
+        # 根据最新的 tokens dataset 和 merge_ranks.size, 确认 起始dataset
+        latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
+        tokens_ds_latest = os.path.join(self._buffer_tokens_dir, f'{latest}')
+
+        # 如果 merge_ranks 的 size > 0, 那么本次 BPE 是续train. merge_ranks.size == num_merged
+        # 情况1: merge_ranks.size == latest dataset  -->  latest dataset 直接作为 起始dataset
+        if latest == len(self._merge_ranks):
+            return tokens_ds_latest
+        # 情况2: merge_ranks.size == latest + 1 dataset --> 上次 top_pair 和 new_token 更新到 tokenizer 之后, 没有作 merge
+        # 用 latest merge pair & merged_token, 对 tokens/latest 作一次 merge --> 作为 起始dataset
+        elif latest + 1 == len(self._merge_ranks):
+            (L, R), new_token = max( self._merge_ranks.items(), key=lambda item: item[1] )
+            return self._next_tokens_ds(executor, tokens_ds_latest, L, R, new_token)
+        # 情况3: 报错
+        else:
+            raise RuntimeError(
+                f"current merge_ranks size {len(self._merge_ranks)} not match with latest buffered tokens dataset "
+                f"{self._buffer_tokens_dir}/{latest}:\nmerge_ranks size shall be equal to latest, or latest + 1")
+    
+
+    def _next_tokens_ds(self, executor, tokens_ds, L, R, new_token):
+        # 此时 pair merge 已经发生, merge_ranks 已经更新添加了 L, R -> merged_token
+        next_rank = int( os.path.basename(tokens_ds) ) + 1
+        assert next_rank == len(self._merge_ranks)
+
+        next_tokens_ds = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
+        os.makedirs(next_tokens_ds, exist_ok = True)
+        clean_folder(next_tokens_ds, method='all', keep=True)
+
+        pq.write_metadata(self.tokens_schema, os.path.join(next_tokens_ds, "_common_metadata"))
+
+        # 生成器: 生成 tokens_ds 中的 fragment 路径, 以及其对应的 merged tokens fragment 路径
+        def src_tgt_path_gen(tokens_ds):
+            for f in ds.dataset(tokens_ds, self.tokens_schema, format="parquet").get_fragments():
+                yield (f.path, os.path.join(next_tokens_ds, os.path.basename(f.path)))
+
+        stream_parallel_process_with_pending(
+            executor = executor,
+            data_gen = src_tgt_path_gen(tokens_ds),
+            process_fn = self._map_to_process_read_merge_write,
+            result_handler = None,
+            max_pending = 8,
+            process_args = (L, R, new_token)
+        )
+
+        return next_tokens_ds
+    
+
+    def _merge_info(self, executor, tokens_ds):
+        # 此时 pair merge 尚未发生
+        num_merged_epochs = int(os.path.basename(tokens_ds))
+        assert num_merged_epochs == len(self._merge_ranks)
+
+        # tokens_ds tokens/i  ---paircount---> paircounts_ds paircounts/i
+        paircounts_ds = os.path.join(self._buffer_paircounts_dir, f'{num_merged_epochs}')
+        os.makedirs(paircounts_ds, exist_ok = True)
+        clean_folder(paircounts_ds, method='all', keep=True)
+
+        pq.write_metadata(self.paircounts_schema, os.path.join(paircounts_ds, "_common_metadata"))
+
+        # 生成器: 生成 tokens_ds 中的 fragment 路径, 以及其对应的 pair-counts fragment 路径
+        def src_tgt_path_gen(tokens_ds):
+            for f in ds.dataset(tokens_ds, format="parquet").get_fragments():
+                yield (f.path, os.path.join(paircounts_ds, os.path.basename(f.path)))
+
+        stream_parallel_process_with_pending(
+            executor = executor,
+            data_gen = src_tgt_path_gen(tokens_ds),
+            process_fn = self._map_to_process_read_count_write,
+            result_handler = None,
+            max_pending = 8,
+        )
+
+        if len(os.listdir(paircounts_ds)) == 1: # 如果除了 _common_metadat 没有其它 parquet 文件写入
+            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
+            raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
+        
+        pcounts_concats = ds.dataset(paircounts_ds, format="parquet").to_table()
+        agg_pcounts = pcounts_concats.group_by(['L', 'R']).aggregate([('counts', 'sum')])
+        
+        max_occurrence = pc.max(agg_pcounts['counts_sum'])
+
+        filter_mask = pc.equal(agg_pcounts['counts_sum'], max_occurrence)
         _row = agg_pcounts.filter(filter_mask).slice(0, 1)
 
-        occur_most_pair: tuple[int, int] = (_row[L][0].as_py(), _row[R][0].as_py())
-        return occur_most_pair, max_occur
-    
+        return _row['L'][0], _row['R'][0], max_occurrence
 
-
-    @classmethod
-    def _reduce_task_merge(cls, part_merged_tokens_pq_files, concat_path, row_group_size):
-        '''
-        REDUCE 工作之 merge:
-            收集所有 pair-merge table, 拼接列 tokens, 落盘合并后的 table, 并删除 part pq files
-        这部分工作不可以 跨文档: 即对所有不同 parquet 文件的 merged tokens, 还是要 concatenate 回各不同的 merged parquet 文件
-        因为希望保持文档之间的结构, 不希望所有文档拼接成一个
-        '''
-        concate_parquet_files(part_merged_tokens_pq_files, concat_path, True, row_group_size)
-
-    
-    def _get_merge_info(self, tokens_dir, executor):
-        # 从当前 tokens_dir, 统计得到 next merge pair 和 new token
-        num_merged_epochs = len(self._merge_ranks)
-        assert num_merged_epochs == int(os.path.basename(tokens_dir))
-
-        # 创建 本次 rank 的 buffer_pcounts_dir
-        pcounts_save_dir = os.path.join(self._buffer_pcounts_dir, str(num_merged_epochs))
-        os.makedirs(pcounts_save_dir, exist_ok=True)
-
-        # compute pair_counts for every batch of tokens parquet into p_counts parquet, and collect them
-        b_pcounts_pqs = []
-        for src_fname in os.listdir(tokens_dir):
-            tokens_pq = os.path.join(tokens_dir, src_fname)
-            num_row_groups = pq.ParquetFile(tokens_pq).num_row_groups
-
-            if num_row_groups // self._NUM_ROW_GROUPS_PER_BATCH >= 200:
-                raise RuntimeError(f'Num of Batches {num_row_groups // self._NUM_ROW_GROUPS_PER_BATCH} exceeds 200.')
-
-            if not os.path.exists(tokens_pq):
-                raise FileNotFoundError(
-                    f'buffer parquet {tokens_pq} for merge epoch {num_merged_epochs+1} not found'
-                    )
-            
-            # MAP task:
-            stream_parallel_process_with_pending(
-                executor = executor,
-                data_gen = itertools.batched(range(num_row_groups), self._NUM_ROW_GROUPS_PER_BATCH),
-                process_fn = self._map_task_read_count_write,
-                result_handler = lambda b_pcounts_path: b_pcounts_path is not None and b_pcounts_pqs.append(b_pcounts_path),
-                max_pending = 16,
-                process_args = (tokens_pq, self._func_count_pair_batch, pcounts_save_dir, src_fname)
-            )
-
-        # 当 所有 tokens pq files 的所有 batch 都是 length 1 chunks 时, 说明一个 pair 都找不出来了. 此时 b_pcounts_pqs 为空
-        if not b_pcounts_pqs:
-            # 在raise error前先保存已经train好的tokenizer
-            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
-
-            raise_run_out_corpus_error(num_merged_epochs, len(self._special_marks))
-
-        # REDUCE task:
-        occur_most_pair, max_occurence = self._reduce_task_count(b_pcounts_pqs)
-
-        return occur_most_pair, max_occurence
-
-
-    def _next_tokens_dir(
-            self,
-            tokens_dir_this:str,
-            occur_most_pair:t.Tuple,
-            new_token:int,
-            executor
-            ):
-        next_rank = len(self._merge_ranks)
-        assert next_rank == int( os.path.basename(tokens_dir_this) ) + 1
-        
-        tokens_dir_next = os.path.join(self._buffer_tokens_dir, f'{next_rank}')
-        os.makedirs(tokens_dir_next, exist_ok=True)
-
-        L, R = map(self.token_dtype.to_pandas_dtype(), occur_most_pair)
-        new_token = self.token_dtype.to_pandas_dtype()(new_token)
-
-        for src_fname in os.listdir(tokens_dir_this):
-            tokens_pq = os.path.join(tokens_dir_this, src_fname)
-            num_row_groups = pq.ParquetFile(tokens_pq).num_row_groups
-            
-            # MAP task:
-            b_merged_tokens_pqs = []
-            stream_parallel_process_with_pending(
-                executor = executor,
-                data_gen = itertools.batched(range(num_row_groups), self._NUM_ROW_GROUPS_PER_BATCH),
-                process_fn = self._map_task_read_merge_write,
-                result_handler = lambda b_merged_path: b_merged_path is not None and b_merged_tokens_pqs.append(b_merged_path),
-                max_pending = 16,
-                process_args = (tokens_pq, self._func_merge_pair_batch, L, R, new_token, tokens_dir_next, src_fname)
-            )
-
-            # REDUCE task:
-            self._reduce_task_merge(b_merged_tokens_pqs, os.path.join(tokens_dir_next, src_fname), self._ROW_GROUP_SIZE)
-
-        return tokens_dir_next # update
-    
 
     def train_bpe(self,
-                  num_merges:int|None = None,               # global num merges for the tokenizer
+                  num_merges:int|None = None,                                   # global num merges for the tokenizer
                   *,
-                  corpora:t.List[str]|str|None,             # None 代表从 buffer_dir 续train; 可以是直接输入文本str; 可以是parquet路径; 可以混合
-                  colnames:t.List[str|None]|None = None,    # 和 corpora 对应, 指定 parquet 文件里 文本 列名
-                  backup_init_tokens_dir:str|None = None,   # backup the init tokens files of corpus
-                  keep_window:int = 3,                      # max reserved tokens_pq file in disk
+                  corpora:t.List[str]|str|None,                                 # None -> 从buffer_dir续train. str|parquet_paths -> 基于语料从头train
+                  column:t.List[str]|str|None,                                  # 指明corpora(if parquet)数据表的列名
+                  format:t.Literal['byte','text'],                              # 指明corpora(if parquet)数据类型 byte -> 0-255值; text -> string
+                  language:t.Literal['en','zh'],                                # 语料的语言类型
+                  batch_size_level:t.Literal['min','medium','high','max'],      # batch_size的大小档次
+                  memory_utilization:float=0.8,                                 # 对本机内存的占用水位
+                  keep_window:int = 3,                                          # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
         
         assert keep_window >= 0
-        if isinstance(corpora, str):
-            corpora = [corpora]
-            colnames = [None]
-        
-        self._set_config()
 
-        # corpora 为 t.List[str], 模式是 从头train
-        # backup_init_tokens_dir如果是空文件夹，那么生成init tokens后在这里保存一份
-        # backup_init_tokens_dir如果有和corpora等长的文件个数，那么从backup_init_tokens_dir读取init tokens
+        self._set_config(language, batch_size_level, memory_utilization)
+
+        # 当 corpora is not None --> 作为语料从头train. 预处理语料 并 生成第一个tokens dataset: tokens/0
         if corpora is not None:
             self._clear()
-            self._init_tokens(corpora, colnames, backup_init_tokens_dir, row_group_size=self._ROW_GROUP_SIZE)
-        # corpora 为 None 时, 模式是 续train.
-        # 续train需要满足的条件会由 _prepair_train 检查或满足. 
+            if format == 'text':
+                corpora = text_corpora_preprocess(corpora, column, self._buffer_dir, self.tokens_schema, self._batch_size)
+            else:
+                assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora])
+            
+            self._init_tokens_dataset(corpora)
+        # 当 corpora is None --> 续train
         else:
-            self._build_vocab()
+            self._build_vocab() # vocab: token_ID --> bytes 的映射
 
-        ctx = mp.get_context('spawn') # pyarrow not fork-safe: 当涉及子进程 读/写 时, spawn 更稳定
-
-        # 使得最大块的内存需求落在同一个 block. 避免多次申请block: memblock_size 内存块大小, 字节数量
-        # buffer_size 是批次大小(单批次的行数/tokens-chunks数量), 一行(1 chunk of tokens)大概(平均)5-10个英文字母, 或20+个中文汉字
-        # 因为 GPT4 的 预切分正则能把 英文单词 和 中文单句(因为中文里没有空格) 和 英文标点 和 中文标点 大概切分开.
-        # 考虑 中文, 意味着 一行为 60+ 字节(一个中文汉字3字节), 一个字节作为一个token, 即在初始tokens 的parquet文件里, 一行有至少 60+ token
-        # merge部分内存池需要: merged_tokens_lens: batch_size个int64, filter: num_tokens个bool, merged_tokens_flat: num_tokens个uint16
-        # count部分内存池需要: 令 L = num_tokens-num_chunks, keys需要L个uint32, L/R uniqs分别需要L个uint16, counts需要L个uint64
-        # 总结: merge部分内存池需要 8*batch_size+4*num_tokens, count部分内存池需要 16*(num_tokens-batch_size)
-        # 可复用->只需考虑更大部分, 故内存池只需要 16*num_tokens = 16*(P-1)*batch_size, 这里P=num_tokens_per_chunk, 英文约为5-10, 中文约为60
-        # 中文语料取P=65, 这样单进程 memory need = 1024*batch_size；英文语料取P=9, 这样单进程 memory need = 128*batch_size
-        memblock_size = 64 * self._buffer_size # 英文corpus -> 2个block; 中文corpus -> 16个block
+        ctx = mp.get_context('spawn')
+        memblock_size = self.__pool_batch_size_coef // 2 * self._batch_size  # // 2 是允许多一次内存块申请
 
         with ProcessPoolExecutor(
-            max_workers=self._num_workers,
-            mp_context=ctx,
-            initializer=_worker_init,
-            initargs=(memblock_size,)
+            max_workers = self._num_workers,
+            mp_context = ctx,
+            initializer = _worker_init,
+            initargs = (memblock_size,)
         ) as executor:
-            # 检查 num_merges 和 explicit_n_vocabs / merge_ranks_size 和 buffer_dir_tokens 是否匹配
-            # 确定 _num_train_epochs, 返回匹配的训练起点文件夹 tokens_dir_start
-            tokens_dir_start = self._prepare_train(num_merges, executor)
+            # 确定BPE起始的 dataset: _start_tokens_ds 会检测buffer目录里tokens_ds和num_merges, 返回符合条件的 start dataset
+            tokens_ds_start = self._start_tokens_ds(num_merges, executor)
             
+            # 确定BPE起始和终止的 rank: 起始 start, 终止 end(不含)
             start, end = len(self._merge_ranks), len(self._merge_ranks) + self._num_train_epochs
             
-            self._train_loop(tokens_dir_start, start, end, executor, keep_window, verbose)
+            curr_tokens_ds = tokens_ds_start
+            for rank in range(start, end):
+                print(f'merge rank {rank} / {start} to {end-1}')
+                try:
+                    L, R, max_occurrence = self._merge_info(executor, curr_tokens_ds)
+                    # L, R, max_occurrence: pa.lib.UInt16Scalar, pa.lib.UInt16Scalar, pa.lib.UInt64Scalar
+                    new_token, occurrence = rank + 256, int(max_occurrence) if verbose else None
+
+                    self._update_tokenizer((int(L), int(R)), new_token, occurrence)
+                    if rank == end - 1:
+                        break
+                    # cython-extension function 对 L, R, new_token 的输入要求是 np.uint16, np.uint16, np.uint16
+                    curr_tokens_ds = self._next_tokens_ds(executor, curr_tokens_ds, np.uint16(L), np.uint16(R), np.uint16(new_token))
+                    
+                finally:
+                    to_remove = rank - keep_window
+                    if to_remove > 0: # 不删除 tokens/0
+                        clean_folder(os.path.join(self._buffer_paircounts_dir, f'{to_remove}'), False)
+                        clean_folder(os.path.join(self._buffer_tokens_dir,     f'{to_remove}'), False)
 
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
+
+
+
+
+# 大词表
+# en corpus --> batch_size=( 8~32)M, mem_need = batch_size* 256, num_workers = memory_size*alpha/(batch_size* 256), mem_pool = batch_size* 192
+# zh corpus --> batch_size=( 1~ 4)M, mem_need = batch_size*2048, num_workers = memory_size*alpha/(batch_size*2048), mem_pool = batch_size*1536
