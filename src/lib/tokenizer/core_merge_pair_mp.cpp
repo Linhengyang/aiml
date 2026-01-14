@@ -3,7 +3,7 @@
 #include <omp.h>
 #include <cstddef>
 #include <cstdint>
-#include <pair_count_merge.h>
+#include <mp_pair_count_merge.h>
 
 extern "C" {
 

@@ -63,49 +63,49 @@ clean_folder(buffer, method='all')
 # tests
 
 
-# # test encode/decode identity for a few different strings
-# @pytest.mark.parametrize("tokenizer_factory", [mpbufferBBPE_u16Tokenizer,])
-# @pytest.mark.parametrize("text", test_strings)
-# def test_encode_decode_identity(tokenizer_factory, text):
-#     text = unpack(text)
-#     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab = 261) # 256 + 5, zero-merge
-#     tokenizer.train_bpe(corpora='', column=None, format='text', language='en', batch_size_level='min')
-#     ids = tokenizer.encode(text)
-#     decoded = tokenizer.decode(ids)
-#     assert text == decoded
-#     clean_folder(buffer, method='all')
+# test encode/decode identity for a few different strings
+@pytest.mark.parametrize("tokenizer_factory", [mpbufferBBPE_u16Tokenizer,])
+@pytest.mark.parametrize("text", test_strings)
+def test_encode_decode_identity(tokenizer_factory, text):
+    text = unpack(text)
+    tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab = 261) # 256 + 5, zero-merge
+    tokenizer.train_bpe(corpora='', column=None, format='text', language='en', batch_size_level='min')
+    ids = tokenizer.encode(text)
+    decoded = tokenizer.decode(ids)
+    assert text == decoded
+    clean_folder(buffer, method='all')
 
 
-# # test bpe basic logic
-# @pytest.mark.parametrize("tokenizer_factory", [mpbufferBBPE_u16Tokenizer,])
-# def test_wikipedia_example(tokenizer_factory):
-#     """
-#     Quick unit test, following along the Wikipedia example:
-#     https://en.wikipedia.org/wiki/Byte_pair_encoding
+# test bpe basic logic
+@pytest.mark.parametrize("tokenizer_factory", [mpbufferBBPE_u16Tokenizer,])
+def test_wikipedia_example(tokenizer_factory):
+    """
+    Quick unit test, following along the Wikipedia example:
+    https://en.wikipedia.org/wiki/Byte_pair_encoding
 
-#     According to Wikipedia, running bpe on the input string:
-#     "aaabdaaabac"
+    According to Wikipedia, running bpe on the input string:
+    "aaabdaaabac"
 
-#     for 3 merges will result in string:
-#     "XdXac"
+    for 3 merges will result in string:
+    "XdXac"
 
-#     where:
-#     X=ZY
-#     Y=ab
-#     Z=aa
+    where:
+    X=ZY
+    Y=ab
+    Z=aa
 
-#     Keep in mind that for us a=97, b=98, c=99, d=100 (ASCII values)
-#     so Z will be 256, Y will be 257, X will be 258.
+    Keep in mind that for us a=97, b=98, c=99, d=100 (ASCII values)
+    so Z will be 256, Y will be 257, X will be 258.
 
-#     So we expect the output list of ids to be [258, 100, 258, 97, 99]
-#     """
-#     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab=256+3+5)
-#     corpus = "aaabdaaabac"
-#     tokenizer.train_bpe(3, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
-#     tokens = tokenizer.encode(corpus)
-#     assert tokens == [258, 100, 258, 97, 99]
-#     assert tokenizer.decode(tokens) == corpus
-#     clean_folder(buffer, method='all')
+    So we expect the output list of ids to be [258, 100, 258, 97, 99]
+    """
+    tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab=256+3+5)
+    corpus = "aaabdaaabac"
+    tokenizer.train_bpe(3, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
+    tokens = tokenizer.encode(corpus)
+    assert tokens == [258, 100, 258, 97, 99]
+    assert tokenizer.decode(tokens) == corpus
+    clean_folder(buffer, method='all')
 
 
 # test save/load/view
@@ -136,32 +136,32 @@ def test_save_load(tokenizer_factory, special_marks):
 
 
 
-# # test save/load
-# @pytest.mark.parametrize("tokenizer_factory", [mpbufferBBPE_u16Tokenizer,])
-# @pytest.mark.parametrize("text", [llama_text, ])
-# @pytest.mark.parametrize("special_marks", [  list(special_tokens.keys()) ])
-# def test_complicated_text(tokenizer_factory, text, special_marks):
-#     num_specials = len(special_marks)
-#     tokenizer = tokenizer_factory(name='llama', special_marks=special_marks, buffer_dir=buffer)
-#     # test on llama_text & timemachine.txt, with 495 merges
-#     corpus = unpack(text)
-#     num_merges = 295
-#     tokenizer.train_bpe(num_merges, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
-#     # verify the vocab_size
-#     assert tokenizer.vocab_size == num_merges+num_specials+256
-#     # verify that save/load work as expected
-#     # save the tokenizer (use a proper temporary directory)
-#     tokenizer.save("temp/test_llama.tok")
-#     # re-load the tokenizer
-#     tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
-#     tokenizer.load("temp/test_llama.tok")
-#     # verify that reload is good as well
-#     tokenizer.train_bpe(495, corpora=None, column=None, format='byte', language='en', batch_size_level='min')
-#     tokens = tokenizer.encode(text, 'all')
-#     assert tokenizer.decode(tokens) == text
-#     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
-#     assert tokenizer.encode(text, 'all') == tokens
-#     # clean_folder(buffer, method='all')
+# test save/load
+@pytest.mark.parametrize("tokenizer_factory", [mpbufferBBPE_u16Tokenizer,])
+@pytest.mark.parametrize("text", [llama_text, ])
+@pytest.mark.parametrize("special_marks", [  list(special_tokens.keys()) ])
+def test_complicated_text(tokenizer_factory, text, special_marks):
+    num_specials = len(special_marks)
+    tokenizer = tokenizer_factory(name='llama', special_marks=special_marks, buffer_dir=buffer)
+    # test on llama_text & timemachine.txt, with 495 merges
+    corpus = unpack(text)
+    num_merges = 295
+    tokenizer.train_bpe(num_merges, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
+    # verify the vocab_size
+    assert tokenizer.vocab_size == num_merges+num_specials+256
+    # verify that save/load work as expected
+    # save the tokenizer (use a proper temporary directory)
+    tokenizer.save("temp/test_llama.tok")
+    # re-load the tokenizer
+    tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
+    tokenizer.load("temp/test_llama.tok")
+    # verify that reload is good as well
+    tokenizer.train_bpe(495, corpora=None, column=None, format='byte', language='en', batch_size_level='min')
+    tokens = tokenizer.encode(text, 'all')
+    assert tokenizer.decode(tokens) == text
+    assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
+    assert tokenizer.encode(text, 'all') == tokens
+    # clean_folder(buffer, method='all')
 
 
 

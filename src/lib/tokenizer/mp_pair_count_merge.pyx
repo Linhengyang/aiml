@@ -12,7 +12,7 @@ np.import_array()
 cdef extern from *:
     ctypedef bint bool
 
-cdef extern from "pair_count_merge.h":
+cdef extern from "mp_pair_count_merge.h":
 
     # 初始化进程环境: 单例内存池 / 基于单例内存池的可复用计数器
     void init_process(size_t block_size, size_t alignment, size_t capacity)
@@ -34,7 +34,7 @@ cdef extern from "pair_count_merge.h":
     u16token_pair_counts_ptrs c_local_count_u16pair_batch(
         const uint16_t* L_tokens,
         const uint16_t* R_tokens,
-        const int64_t len
+        const size_t len
     )
 
     # 声明 C++ 中的 u16token_filter_len_ptrs 结构体

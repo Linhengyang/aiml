@@ -1,5 +1,5 @@
-// pair_count_merge.h
-// statement for pair_count_merge_api.cpp
+// multi-process: mp_pair_count_merge.h
+// statement for mp_pair_count_merge_api.cpp
 
 
 #pragma once
@@ -123,7 +123,7 @@ struct u16token_pair_counts_ptrs {
 
 // 给单一进程用的 count uint16_t token-pair batch data 的 core
 size_t local_count_u16pair_core(
-    const uint32_t* keys,
+    uint32_t* keys,
     const size_t len,
     uint16_t* L_uniq, // in-place change in this function
     uint16_t* R_uniq, // in-place change in this function
@@ -135,7 +135,7 @@ size_t local_count_u16pair_core(
 u16token_pair_counts_ptrs c_local_count_u16pair_batch(
     const uint16_t* L_tokens,
     const uint16_t* R_tokens,
-    const int64_t len
+    const size_t len
 );
 
 

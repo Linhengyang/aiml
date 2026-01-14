@@ -3,12 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <pair_count_merge.h>
+#include <mp_pair_count_merge.h>
 
 extern "C" {
 
 size_t local_count_u16pair_core(
-    const uint32_t* keys,
+    uint32_t* keys,
     const size_t len,
     uint16_t* L_uniq, // in-place change in this function
     uint16_t* R_uniq, // in-place change in this function
