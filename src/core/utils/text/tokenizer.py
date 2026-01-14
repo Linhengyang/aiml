@@ -961,11 +961,11 @@ import pair_count_merge
 
 def _worker_init(block_size: int):
     # 子进程启动时, 执行 cython 包里的 initialize
-    pair_count_merge.initialize(block_size)
+    pair_count_merge.initialize_process(block_size)
 
     # 注册 进程退出时的清理程序
-    Finalize(None, pair_count_merge.close, exitpriority=10)
-    atexit.register(pair_count_merge.close)
+    Finalize(None, pair_count_merge.close_process, exitpriority=10)
+    atexit.register(pair_count_merge.close_process)
 
 
 import pyarrow.dataset as ds

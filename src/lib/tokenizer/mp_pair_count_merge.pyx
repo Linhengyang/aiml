@@ -60,7 +60,7 @@ cdef extern from "mp_pair_count_merge.h":
 
 
 # 创建内存池/计数器接口给python. block_size size_t 从python侧传入, alignment设为64
-cpdef initialize(size_t block_size):
+cpdef initialize_process(size_t block_size):
     init_process(block_size, 64, 536870912)
 
 
@@ -68,15 +68,15 @@ cpdef initialize(size_t block_size):
 
 
 # 只是给python提供了reset进程的接口，但实际上count_pair_batch和merge_pair_batch每一次执行前都reset了
-cpdef reset():
+cpdef reset_process():
     reset_process()
 
 
 
 
 
-
-cpdef close():
+# 关闭并清理资源接口给python
+cpdef close_process():
     release_process()
 
 
