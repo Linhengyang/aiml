@@ -123,20 +123,25 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
             const uint32_t r = static_cast<uint32_t>(R_tokens[i]) & 0xFFFFu;
             keys[i] = ( l<<16 ) | r;
         }
-
-        // u16token_pair_counts_ptrs result = local_count_u16pair_core(
-        //     keys,
-        //     len,
-        //     pool
-        // );
-        u16token_pair_counts_ptrs result = _local_count_u16pair_core(
-            keys,
-            len,
-            pool,
-            local_counter
-        );
-
-        return result;
+        
+        // 根据是否有 counter 来决定使用哪一个计数函数
+        if (local_counter) {
+            u16token_pair_counts_ptrs result = local_dict_count_u16pair_core(
+                keys,
+                len,
+                pool,
+                local_counter
+            );
+            return result;
+        }
+        else {
+            u16token_pair_counts_ptrs result = local_sort_count_u16pair_core(
+                keys,
+                len,
+                pool
+            );
+            return result;
+        }
     }
     catch(const std::exception& e)
     {

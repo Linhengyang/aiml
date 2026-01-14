@@ -122,7 +122,7 @@ struct u16token_pair_counts_ptrs {
 
 
 // 给单一进程用的 count uint16_t token-pair batch data 的 core: 采用 sort for count
-u16token_pair_counts_ptrs local_count_u16pair_core(
+u16token_pair_counts_ptrs local_sort_count_u16pair_core(
     uint32_t* keys,
     const size_t len,
     singleton_mempool& pool
@@ -130,7 +130,7 @@ u16token_pair_counts_ptrs local_count_u16pair_core(
 
 
 // 给单一进程用的 count uint16_t token-pair batch data 的 core: 采用 counter for count
-u16token_pair_counts_ptrs _local_count_u16pair_core(
+u16token_pair_counts_ptrs local_dict_count_u16pair_core(
     uint32_t* keys,
     const size_t len,
     singleton_mempool& pool,
