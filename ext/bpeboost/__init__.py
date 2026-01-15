@@ -9,7 +9,7 @@ if _bin_dir not in sys.path:
     sys.path.insert(0, _bin_dir)
 
 
-from pair_count_merge import initialize_process, count_u16pair_batch, merge_u16pair_batch, close_process
+from mp_pair_count_merge import initialize_process, count_u16pair_batch, merge_u16pair_batch, close_process
 
 
 __all__ = ['initialize_process', 'count_u16pair_batch', 'merge_u16pair_batch', 'close_process']
