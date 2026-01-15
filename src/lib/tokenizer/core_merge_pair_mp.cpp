@@ -76,9 +76,6 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
     int64_t _LENGTH = offsets[num_chunks];
 
     uint16_t* merged_tokens_flat = static_cast<uint16_t*>(pool.allocate(_LENGTH*sizeof(uint16_t)));
-    // for (int64_t i = 0; i < _LENGTH; ++i) {
-    //     output_tokens_flat[i] = -1; // 全部初始化为 -1
-    // }
 
     // merged_offsets 和 offsets 一样, 都是 各chunk首token的 index，末尾append一个最终长度
     // 所用 总共有 num_chunks+1 个值, 第一个值是 0, 最后一个值是 merged_tokens 的总数
