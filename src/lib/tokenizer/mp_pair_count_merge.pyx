@@ -53,6 +53,22 @@ cdef extern from "mp_pair_count_merge.h":
         const uint16_t new_token
     )
 
+    # 声明 C++ 中的 merged_u16token_offset_ptrs 结构体 for merge_pair_func V2
+    struct merged_u16token_offset_ptrs:
+        uint16_t* merged_tokens_flat_ptr
+        int64_t* merged_offsets_ptr
+
+    # 声明 C++ 中的 c_merge_pair_batch_v2 函数
+    merged_u16token_offset_ptrs c_local_merge_u16pair_batch_v2(
+        const uint16_t* tokens_flat,
+        const int64_t* offsets,
+        const size_t num_chunks,
+        const uint16_t pair_L,
+        const uint16_t pair_R,
+        const uint16_t new_token,
+        const bool if_filter_len1
+    )
+
 
 
 

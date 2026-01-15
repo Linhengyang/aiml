@@ -178,8 +178,7 @@ merged_u16token_filter_len_ptrs c_local_merge_u16pair_batch(
     const size_t num_chunks,
     const uint16_t pair_L,
     const uint16_t pair_R,
-    const uint16_t new_token,
-    const bool if_filter_len1
+    const uint16_t new_token
 );
 
 // 给单一进程用的 merge uint16_t token-pair batch data 的 core
