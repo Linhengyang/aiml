@@ -956,20 +956,20 @@ import multiprocessing as mp
 import atexit
 from multiprocessing.util import Finalize
 
-import pair_count_merge
+import ext.bpeboost as bpeboost
+import pyarrow.dataset as ds
+from ext.bpeboost import count_u16pair_batch, merge_u16pair_batch
+
 
 
 def _worker_init(block_size: int):
     # 子进程启动时, 执行 cython 包里的 initialize
-    pair_count_merge.initialize_process(block_size)
+    bpeboost.initialize_process(block_size)
 
     # 注册 进程退出时的清理程序
-    Finalize(None, pair_count_merge.close_process, exitpriority=10)
-    atexit.register(pair_count_merge.close_process)
+    Finalize(None, bpeboost.close_process, exitpriority=10)
+    atexit.register(bpeboost.close_process)
 
-
-import pyarrow.dataset as ds
-from pair_count_merge import count_u16pair_batch, merge_u16pair_batch
 
 
 class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):

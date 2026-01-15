@@ -63,7 +63,14 @@ set env:
 cd ./aiml
 export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
 ```
-
+or use python(usually in `ext.{package}.__init__.py`) like following:
+```
+import sys
+_bin_dir = os.path.join(os.path.dirname(__file__), '../../bin')
+_bin_dir = os.path.abspath(_bin_dir)
+if _bin_dir not in sys.path:
+    sys.path.insert(0, _bin_dir)
+```
 ---
     aiml
     ├── src
@@ -101,6 +108,7 @@ export PYTHONPATH=$(pwd)/bin:$PYTHONPATH
     │       ├── transformer
     │       └── vit
     ├── bin
+    ├── ext
     ├── tests
     ├── notebooks
     ├── README.md
