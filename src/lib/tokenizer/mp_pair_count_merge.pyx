@@ -313,18 +313,20 @@ cpdef merge_u16pair_batch_v2(
     )
 
     cdef size_t merged_num_chunks = result.merged_num_chunks
+
+    if merged_num_chunks == 0:
+        return (pynp.array([], dtype=pynp.uint16), pynp.array([0], dtype=pynp.int64))
+
     cdef int64_t* raw_merged_offsets_ptr = result.merged_offsets_ptr # 接受C指针
     cdef uintptr_t merged_offsets_addr = <uintptr_t><void*> raw_merged_offsets_ptr # C pointer ->void* 转换, 然后是平台安全的指针->地址整数转换
     py_merged_offsets_ptr = ctypes.cast(merged_offsets_addr, ctypes.POINTER(ctypes.c_int64))
     merged_offsets = pynp.ctypeslib.as_array(py_merged_offsets_ptr, shape=(merged_num_chunks+1,))
 
-    cdef int64_t _MERGED_LENGTH = merged_offsets[-1]
+    cdef int64_t _MERGED_LENGTH = merged_offsets[merged_num_chunks] # merged_offsets 长度是 merged_num_chunks+1, 这里取最后一个
     cdef uint16_t* raw_tokens_ptr = result.merged_tokens_flat_ptr # 接受C指针
     cdef uintptr_t tokens_addr = <uintptr_t><void*> raw_tokens_ptr # C pointer ->void* 转换, 然后是平台安全的指针->地址整数转换
     py_tokens_ptr = ctypes.cast(tokens_addr, ctypes.POINTER(ctypes.c_uint16))
     merged_tokens_flat = pynp.ctypeslib.as_array(py_tokens_ptr, shape=(_MERGED_LENGTH,))
-
-    
 
     # 打包, pack merged info with batch order
     return (merged_tokens_flat, merged_offsets)

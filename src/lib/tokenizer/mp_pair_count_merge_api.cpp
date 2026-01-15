@@ -203,11 +203,24 @@ merged_u16token_offset_ptrs c_local_merge_u16pair_batch_v2(
             pair_L,
             pair_R,
             new_token,
+            if_filter_len1,
             pool
         );
 
         if(if_filter_len1) {
             /*过滤 merge 后 length = 1 的chunk*/
+            int64_t* merged_filtered_offsets = static_cast<int64_t*>(pool.allocate((num_chunks+1)*sizeof(int64_t)));
+
+            size_t j = 0;
+            for(size_t i = 0; i < num_chunks; i++) {
+                if(result.merged_offsets_ptr[i] != result.merged_offsets_ptr[i+1]) {
+                    merged_filtered_offsets[j] = result.merged_offsets_ptr[i];
+                    ++j;
+                }
+            }
+            merged_filtered_offsets[j] = result.merged_offsets_ptr[num_chunks];
+
+            return merged_u16token_offset_ptrs{result.merged_tokens_flat_ptr, merged_filtered_offsets, j};
         }
 
         return result;

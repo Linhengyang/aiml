@@ -70,6 +70,7 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
     const uint16_t pair_L,
     const uint16_t pair_R,
     const uint16_t new_token,
+    const bool if_filter_len1,
     singleton_mempool& pool
 ) {
     // offsets 的最后一个值是 tokens_flat 的长度，也是 output_tokens_flat 的长度
@@ -83,6 +84,7 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
     merged_offsets[0] = 0;
 
     int64_t num_merges = 0;
+    int64_t num_filtered = 0;
 
     // 遍历所有 chunk: chunk_1 --> chunk_k --> chunk_num_chunks
     for(size_t k = 1; k <= num_chunks; ++k) {
@@ -90,18 +92,24 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
         for(size_t j = offsets[k-1]; j < offsets[k];) {
             // 匹配到了 pair
             if(j < offsets[k]-1 && tokens_flat[j] == pair_L && tokens_flat[j+1] == pair_R) {
-                merged_tokens_flat[j-num_merges] = new_token;
+                merged_tokens_flat[j-num_merges-num_filtered] = new_token;
                 j += 2;
                 num_merges += 1;
             }
             // 没有匹配到 pair
             else {
-                merged_tokens_flat[j-num_merges] = tokens_flat[j];
+                merged_tokens_flat[j-num_merges-num_filtered] = tokens_flat[j];
                 j += 1;
             }
         }
         // chunk_k 遍历结束: 确定 chunk_k 的边界
         merged_offsets[k] = offsets[k] - num_merges;
+
+        // 过滤 len=1 chunk
+        if(if_filter_len1 && (merged_offsets[k] - merged_offsets[k-1] == 1)) {
+            merged_offsets[k] -= 1;
+            num_filtered += 1;
+        }
     }
     // 所有 chunk 遍历结束
     return merged_u16token_offset_ptrs{merged_tokens_flat, merged_offsets, num_chunks};

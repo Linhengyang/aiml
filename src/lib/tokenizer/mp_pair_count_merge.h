@@ -190,6 +190,7 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
     const uint16_t pair_L,
     const uint16_t pair_R,
     const uint16_t new_token,
+    const bool if_filter_len1,
     singleton_mempool& pool
 );
 
