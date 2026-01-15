@@ -1,13 +1,16 @@
+# step1
 # 在 tokenizer/ 文件夹目录下, 执行打包编译 .so 文件.
 cd ../tokenizer
 
+
+
+
+# step2
 # 如果 setup.py 内部没有重新定义 build_ext, 那么采用以下命令。 *.so文件将在 tokenizer/ 目录下生成
 python setup.py build_ext --inplace
 
 # 然后移动 *.so 文件到指定位置（比如 aiml/bin），并将 .so 文件所在目录添加到 PYTHONPATH 环境变量, 或 sys.path 环境变量列表内
 # 这样 ext.package_name.__init__.py 中, 才能有效 from import 或 import
-
-
 
 
 

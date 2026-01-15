@@ -37,14 +37,14 @@ cdef extern from "mp_pair_count_merge.h":
         const size_t len
     )
 
-    # 声明 C++ 中的 u16token_filter_len_ptrs 结构体
-    struct u16token_filter_len_ptrs:
+    # 声明 C++ 中的 merged_u16token_filter_len_ptrs 结构体
+    struct merged_u16token_filter_len_ptrs:
         uint16_t* output_tokens_flat_ptr
         bool* output_filter_ptr
         int64_t* output_tokens_lens_ptr
 
     # 声明 C++ 中的 c_merge_pair_batch 函数
-    u16token_filter_len_ptrs c_local_merge_u16pair_batch(
+    merged_u16token_filter_len_ptrs c_local_merge_u16pair_batch(
         const uint16_t* tokens_flat,
         const int64_t* offsets,
         const size_t num_chunks,
@@ -200,7 +200,7 @@ cpdef merge_u16pair_batch(
     cdef const int64_t* offsets_ptr = &offsets_view[0]
 
     # 在进程内部 调用 c_local_merge_u16pair_batch,
-    cdef u16token_filter_len_ptrs result = c_local_merge_u16pair_batch(
+    cdef merged_u16token_filter_len_ptrs result = c_local_merge_u16pair_batch(
         tokens_flat_ptr,
         offsets_ptr,
         num_chunks,

@@ -150,58 +150,70 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
 }
 
 
-
-u16token_filter_len_ptrs c_local_merge_u16pair_batch(
+merged_u16token_filter_len_ptrs c_local_merge_u16pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks, // num_chunks = len(offsets) - 1
     const uint16_t pair_L,
     const uint16_t pair_R,
-    const uint16_t new_token
+    const uint16_t new_token,
+    const bool if_filter_len1
 ) {
     try
     {
         auto& pool = singleton_mempool::get();
 
-        // num_chunks = len(offsets) - 1 = len(output_tokens_lens)
-        // need size = sizeof(long) * num_chunks
-        int64_t* output_tokens_lens = static_cast<int64_t*>(pool.allocate(num_chunks*sizeof(int64_t)));
-
-        // 初始化数组
-        for (size_t i = 0; i < num_chunks; ++i) {
-            output_tokens_lens[i] = offsets[i+1] - offsets[i];
-        }
-
-        // offsets 的最后一个值是 tokens_flat 的长度，也是 output_tokens_flat/output_filter 的长度
-        int64_t _LENGTH = offsets[num_chunks];
-
-        // _LENGTH 长度
-        // need size = sizeof(bool) * _LENGTH
-        bool* output_filter = static_cast<bool*>(pool.allocate(_LENGTH*sizeof(bool)));
-        for (int64_t i = 0; i < _LENGTH; ++i) {
-            output_filter[i] = false; // 全部初始化为 false
-        }
-
-        // _LENGTH 长度
-        // need size = sizeof(int) * _LENGTH
-        uint16_t* output_tokens_flat = static_cast<uint16_t*>(pool.allocate(_LENGTH*sizeof(uint16_t)));
-        for (int64_t i = 0; i < _LENGTH; ++i) {
-            output_tokens_flat[i] = -1; // 全部初始化为 -1
-        }
-
-        local_merge_u16pair_core(
+        merged_u16token_filter_len_ptrs result = local_merge_u16pair_core(
             tokens_flat,
             offsets,
             num_chunks,
             pair_L,
             pair_R,
             new_token,
-            output_tokens_flat,
-            output_filter,
-            output_tokens_lens
+            pool
         );
-        
-        u16token_filter_len_ptrs result = u16token_filter_len_ptrs{output_tokens_flat, output_filter, output_tokens_lens};
+
+        if(if_filter_len1) {
+            /*过滤 merge 后 length = 1 的chunk*/
+        }
+
+        return result;
+    }
+    catch(const std::exception& e)
+    {
+        throw std::runtime_error("Error in c_local_merge_u16pair_batch");
+    }
+}
+
+
+
+
+merged_u16token_offset_ptrs c_local_merge_u16pair_batch_v2(
+    const uint16_t* tokens_flat,
+    const int64_t* offsets,
+    const size_t num_chunks, // num_chunks = len(offsets) - 1
+    const uint16_t pair_L,
+    const uint16_t pair_R,
+    const uint16_t new_token,
+    const bool if_filter_len1
+) {
+    try
+    {
+        auto& pool = singleton_mempool::get();
+
+        merged_u16token_offset_ptrs result = local_merge_u16pair_core_v2(
+            tokens_flat,
+            offsets,
+            num_chunks,
+            pair_L,
+            pair_R,
+            new_token,
+            pool
+        );
+
+        if(if_filter_len1) {
+            /*过滤 merge 后 length = 1 的chunk*/
+        }
 
         return result;
     }
