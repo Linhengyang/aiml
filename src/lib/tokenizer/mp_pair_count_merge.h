@@ -157,6 +157,7 @@ struct merged_u16token_filter_len_ptrs {
 struct merged_u16token_offset_ptrs {
     uint16_t* merged_tokens_flat_ptr;
     int64_t* merged_offsets_ptr;
+    size_t merged_num_chunks;
 };
 
 // 给单一进程用的 merge uint16_t token-pair batch data 的 core

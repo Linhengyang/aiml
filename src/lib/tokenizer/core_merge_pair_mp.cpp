@@ -106,7 +106,7 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
         merged_offsets[k] = offsets[k] - num_merges;
     }
     // 所有 chunk 遍历结束
-    return merged_u16token_offset_ptrs{merged_tokens_flat, merged_offsets};
+    return merged_u16token_offset_ptrs{merged_tokens_flat, merged_offsets, num_chunks};
 }
 
 
