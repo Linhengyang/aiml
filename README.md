@@ -107,12 +107,11 @@ if _bin_dir not in sys.path:
     │       ├── gpt2
     │       ├── transformer
     │       └── vit
-    ├── bin
     ├── ext
+    │   └── bpeboost
+    ├── bin
     ├── tests
-    ├── notebooks
     ├── README.md
-    ├── learn.py
     ├── main.py
     ├── test.py
     artifact
