@@ -103,7 +103,7 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
             }
         }
         // chunk_k 遍历结束: 确定 chunk_k 的边界
-        merged_offsets[k] = offsets[k] - num_merges;
+        merged_offsets[k] = offsets[k] - num_merges - num_filtered;
 
         // 过滤 len=1 chunk
         if(if_filter_len1 && (merged_offsets[k] - merged_offsets[k-1] == 1)) {

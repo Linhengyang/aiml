@@ -301,7 +301,7 @@ cpdef merge_u16pair_batch_v2(
     cdef const int64_t* offsets_ptr = &offsets_view[0]
 
     # 在进程内部 调用 c_local_merge_u16pair_batch_v2
-    cdef bool if_filter_len1 = False
+    cdef bool if_filter_len1 = True
     cdef merged_u16token_offset_ptrs result = c_local_merge_u16pair_batch_v2(
         tokens_flat_ptr,
         offsets_ptr,
