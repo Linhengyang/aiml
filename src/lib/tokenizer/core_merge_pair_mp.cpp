@@ -95,6 +95,7 @@ merged_u16token_offset_ptrs local_merge_u16pair_core_v2(
             if(j < offsets[k]-1 && tokens_flat[j] == pair_L && tokens_flat[j+1] == pair_R) {
                 merged_tokens_flat[j-num_merges] = new_token;
                 j += 2;
+                num_merges += 1;
             }
             // 没有匹配到 pair
             else {
