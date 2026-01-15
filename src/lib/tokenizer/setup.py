@@ -5,15 +5,29 @@ from Cython.Build import cythonize
 import numpy as np
 import os
 
+
+
 tokenizer_dir = os.path.abspath(os.path.dirname(__file__))
 share_dir = os.path.abspath("../share")
 include_dirs = [np.get_include(), share_dir, tokenizer_dir]
 print("Include dirs:", include_dirs)
 
 
+
+# 将 bin/ 目录添加到 build_ext, 使得 .so 文件直接输出到 bin/
+_bin_dir = os.path.join(tokenizer_dir, '../../../bin')
+_bin_dir = os.path.abspath(_bin_dir)
+# 自定义 build_ext, 输出到 bin/
+from setuptools.command.build_ext import build_ext
+class BuildExtToBin(build_ext):
+    def initialize_options(self):
+        super().initialize_options()
+        self.build_lib = _bin_dir
+
+
 ext_modules = [
     Extension(
-        name="pair_count_merge",  # 输出模块名 (import 时用的名字)
+        name="mp_pair_count_merge",  # 输出模块名 (.so文件名, 也是 import .so文件时 时用的名字)
         sources=[
             "mp_pair_count_merge.pyx",
             "mp_pair_count_merge_api.cpp",
@@ -29,8 +43,11 @@ ext_modules = [
     )
 ]
 
+
+
+
 setup(
-    name="pair_count_merge",
+    name="bpeboost",
     ext_modules=cythonize(
         ext_modules,
         build_dir="build/cython_temp",
@@ -40,4 +57,5 @@ setup(
             "wraparound": True
         },
     ),
+    cmdclass = {'build_ext': BuildExtToBin}
 )
