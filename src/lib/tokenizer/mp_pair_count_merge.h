@@ -146,31 +146,68 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
 );
 
 
+// 结构体，用于封装 merge_u16pair_core 函数返回的 merged tokens_flat/offsets 指针
+// 这里的 token 是 uint16_t 类型, 表示范围 0-65535  --> 不适用于超过此规模的 大号词表
+struct merged_u16token_offset_ptrs {
+    uint16_t* merged_tokens_flat_ptr;
+    int64_t* merged_offsets_ptr;
+    size_t merged_num_chunks;
+};
+
+
 // 给单一进程用的 merge uint16_t token-pair batch data 的 core
-void local_merge_u16pair_core(
+merged_u16token_offset_ptrs local_merge_u16pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
     const uint16_t pair_L,
     const uint16_t pair_R,
     const uint16_t new_token,
-    uint16_t* output_tokens_flat, // all -1 init. in-place change in this function
-    bool* output_filter, // all false init. in-place change in this function
-    int64_t* output_tokens_lens // input tokens lens init. in-place change in this function
+    const bool if_filter_len1,
+    singleton_mempool& pool
 );
 
 
-// 结构体，用于封装 merge_u16pair_core 函数返回的多个data指针
-// 这里的 token 是 uint16_t 类型, 表示范围 0-65535  --> 不适用于超过此规模的 大号词表
-struct u16token_filter_len_ptrs {
+// 给单一进程用的 merge uint16_t token-pair batch data 的函数
+merged_u16token_offset_ptrs c_local_merge_u16pair_batch(
+    const uint16_t* tokens_flat,
+    const int64_t* offsets,
+    const size_t num_chunks,
+    const uint16_t pair_L,
+    const uint16_t pair_R,
+    const uint16_t new_token,
+    const bool if_filter_len1
+);
+
+
+
+
+
+
+
+// 废弃的 local_merge_u16pair 相关代码
+#if 0
+struct merged_u16token_filter_len_ptrs {
     uint16_t* output_tokens_flat_ptr;
     bool* output_filter_ptr;
     int64_t* output_tokens_lens_ptr;
 };
 
 
+// 给单一进程用的 merge uint16_t token-pair batch data 的 core
+merged_u16token_filter_len_ptrs _deprecated_local_merge_u16pair_core(
+    const uint16_t* tokens_flat,
+    const int64_t* offsets,
+    const size_t num_chunks,
+    const uint16_t pair_L,
+    const uint16_t pair_R,
+    const uint16_t new_token,
+    singleton_mempool& pool
+);
+
+
 // 给单一进程用的 merge uint16_t token-pair batch data 的函数
-u16token_filter_len_ptrs c_local_merge_u16pair_batch(
+merged_u16token_filter_len_ptrs _deprecated_c_local_merge_u16pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
@@ -178,6 +215,6 @@ u16token_filter_len_ptrs c_local_merge_u16pair_batch(
     const uint16_t pair_R,
     const uint16_t new_token
 );
-
+#endif
 
 } // end of extern C

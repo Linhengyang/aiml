@@ -19,3 +19,4 @@ def merge_u16pair_batch(
 
 def close_process() -> None:
     ...
+    

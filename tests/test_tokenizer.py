@@ -103,7 +103,7 @@ def test_wikipedia_example(tokenizer_factory):
     corpus = "aaabdaaabac"
     tokenizer.train_bpe(3, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
     tokens = tokenizer.encode(corpus)
-    assert tokens == [258, 100, 258, 97, 99]
+    assert tokens == [258, 100, 258, 97, 99], f'tokens as {tokens}'
     assert tokenizer.decode(tokens) == corpus
     clean_folder(buffer, method='all')
 
