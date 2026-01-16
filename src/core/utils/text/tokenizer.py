@@ -958,8 +958,7 @@ from multiprocessing.util import Finalize
 
 import ext.bpeboost as bpeboost
 import pyarrow.dataset as ds
-from ext.bpeboost import count_u16pair_batch
-from ext.bpeboost import merge_u16pair_batch_v2 as merge_u16pair_batch
+from ext.bpeboost import count_u16pair_batch, merge_u16pair_batch
 
 
 

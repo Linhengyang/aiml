@@ -16,13 +16,7 @@ def merge_u16pair_batch(
     new_token:np.uint16
     ):
     ...
-def merge_u16pair_batch_v2(
-    tokens_offsets_border,
-    pair_L:np.uint16,
-    pair_R:np.uint16,
-    new_token:np.uint16
-    ):
-    ...
+
 def close_process() -> None:
     ...
     
