@@ -150,40 +150,8 @@ u16token_pair_counts_ptrs c_local_count_u16pair_batch(
 }
 
 
-merged_u16token_filter_len_ptrs c_local_merge_u16pair_batch(
-    const uint16_t* tokens_flat,
-    const int64_t* offsets,
-    const size_t num_chunks, // num_chunks = len(offsets) - 1
-    const uint16_t pair_L,
-    const uint16_t pair_R,
-    const uint16_t new_token
-) {
-    try
-    {
-        auto& pool = singleton_mempool::get();
 
-        merged_u16token_filter_len_ptrs result = local_merge_u16pair_core(
-            tokens_flat,
-            offsets,
-            num_chunks,
-            pair_L,
-            pair_R,
-            new_token,
-            pool
-        );
-
-        return result;
-    }
-    catch(const std::exception& e)
-    {
-        throw std::runtime_error("Error in c_local_merge_u16pair_batch");
-    }
-}
-
-
-
-
-merged_u16token_offset_ptrs c_local_merge_u16pair_batch_v2(
+merged_u16token_offset_ptrs c_local_merge_u16pair_batch(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks, // num_chunks = len(offsets) - 1
@@ -196,7 +164,7 @@ merged_u16token_offset_ptrs c_local_merge_u16pair_batch_v2(
     {
         auto& pool = singleton_mempool::get();
 
-        merged_u16token_offset_ptrs result = local_merge_u16pair_core_v2(
+        merged_u16token_offset_ptrs result = local_merge_u16pair_core(
             tokens_flat,
             offsets,
             num_chunks,
@@ -230,6 +198,43 @@ merged_u16token_offset_ptrs c_local_merge_u16pair_batch_v2(
         throw std::runtime_error("Error in c_local_merge_u16pair_batch");
     }
 }
+
+
+
+
+
+
+#if 0
+merged_u16token_filter_len_ptrs _deprecated_c_local_merge_u16pair_batch(
+    const uint16_t* tokens_flat,
+    const int64_t* offsets,
+    const size_t num_chunks, // num_chunks = len(offsets) - 1
+    const uint16_t pair_L,
+    const uint16_t pair_R,
+    const uint16_t new_token
+) {
+    try
+    {
+        auto& pool = singleton_mempool::get();
+
+        merged_u16token_filter_len_ptrs result = _deprecated_local_merge_u16pair_core(
+            tokens_flat,
+            offsets,
+            num_chunks,
+            pair_L,
+            pair_R,
+            new_token,
+            pool
+        );
+
+        return result;
+    }
+    catch(const std::exception& e)
+    {
+        throw std::runtime_error("Error in c_local_merge_u16pair_batch");
+    }
+}
+#endif
 
 
 } // end extern "C"
