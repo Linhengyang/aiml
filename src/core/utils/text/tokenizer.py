@@ -186,8 +186,9 @@ class baseBBPETokenizer(Tokenizer):
             **kwargs):
 
         self.name = name
-        assert os.path.isdir(buffer_dir)
         self._buffer_dir = buffer_dir
+        # set the parquet dataset/file directories
+        os.makedirs(self._buffer_dir, exist_ok=True)
         self.pat_str = pat_str
         self._merge_ranks = merge_ranks
         self._special_marks = special_marks
@@ -1040,6 +1041,13 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # buffered tokenzier 需要在 buffer 目录里创建 tokens & paircounts 两个文件目录, 以暂存中间步骤的结果
+        self._buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
+        os.makedirs(self._buffer_tokens_dir, exist_ok=True)
+
+        self._buffer_paircounts_dir = os.path.join(self._buffer_dir, 'paircounts')
+        os.makedirs(self._buffer_paircounts_dir, exist_ok=True)
+
 
     def _set_config(self, language=t.Literal['en', 'zh'], batch_size_level=t.Literal['min', 'medium', 'high', 'max'], memory_utilization=0.8):
         '''
@@ -1074,15 +1082,6 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
         
         self._batch_size = batch_size
         self._num_workers = int( memory_size * memory_utilization / (batch_size*memory_batchsize_coef) )
-
-        # set the parquet dataset/file directories
-        os.makedirs(self._buffer_dir, exist_ok=True)
-
-        self._buffer_tokens_dir = os.path.join(self._buffer_dir, 'tokens')
-        os.makedirs(self._buffer_tokens_dir, exist_ok=True)
-
-        self._buffer_paircounts_dir = os.path.join(self._buffer_dir, 'paircounts')
-        os.makedirs(self._buffer_paircounts_dir, exist_ok=True)
 
 
     # 从多个 init_tokens(parquet格式), 切分成 batches 到 fragments of init dataset: tokens/0
@@ -1224,7 +1223,7 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
                   column:t.List[str]|str|None,                                  # 指明corpora(if parquet)数据表的列名
                   format:t.Literal['byte','text'],                              # 指明corpora(if parquet)数据类型 byte -> 0-255值; text -> string
                   language:t.Literal['en','zh'],                                # 语料的语言类型
-                  batch_size_level:t.Literal['min','medium','high','max'],      # batch_size的大小档次
+                  batch_size_level:t.Literal['min','medium','high','max']='max',# batch_size的大小档次
                   memory_utilization:float=0.8,                                 # 对本机内存的占用水位
                   keep_window:int = 3,                                          # max reserved tokens_pq file in disk
                   verbose:bool = False
@@ -1232,10 +1231,9 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
         
         assert keep_window >= 0
 
-        self._set_config(language, batch_size_level, memory_utilization)
-
         # 当 corpora is not None --> 作为语料从头train. 预处理语料 并 生成第一个tokens dataset: tokens/0
         if corpora is not None:
+            self._set_config(language, batch_size_level, memory_utilization) # 直接由输入参数确定 batch_size/num_workers/pool_batch_size_coef
             self._clear()
             if format == 'text':
                 corpora = text_corpora_preprocess(corpora, column, self._buffer_dir, self.tokens_schema, self._batch_size)
@@ -1245,6 +1243,21 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
             self._init_tokens_dataset(corpora)
         # 当 corpora is None --> 续train
         else:
+            # 从tokens/latest 推断 batch_size_level
+            latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
+            tokens_ds_latest = ds.dataset(os.path.join(self._buffer_tokens_dir, f'{latest}'), format="parquet")
+            avg_fragments_size = tokens_ds_latest.count_rows() // tokens_ds_latest.nfiles // 1024**2
+            if language == 'zh':
+                avg_fragments_size *= 8
+            if avg_fragments_size <= 16:
+                batch_size_level = 'min'
+            elif avg_fragments_size <= 32:
+                batch_size_level = 'medium'
+            elif avg_fragments_size <= 48:
+                batch_size_level = 'high'
+            else:
+                batch_size_level = 'max'
+            self._set_config(language, batch_size_level, memory_utilization) # 确定 batch_size/num_workers/pool_batch_size_coef
             self._build_vocab() # vocab: token_ID --> bytes 的映射
 
         ctx = mp.get_context('spawn')
