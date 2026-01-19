@@ -1,0 +1,1 @@
+// core function for count pair using non-singleton memory pool

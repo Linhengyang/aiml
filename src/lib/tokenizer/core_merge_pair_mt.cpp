@@ -1,0 +1,1 @@
+// core function for merge pair using non-singleton memory pool
