@@ -1246,7 +1246,7 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
             # 从tokens/latest 推断 batch_size_level
             latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
             tokens_ds_latest = ds.dataset(os.path.join(self._buffer_tokens_dir, f'{latest}'), format="parquet")
-            avg_fragments_size = tokens_ds_latest.count_rows() // tokens_ds_latest.nfiles // 1024**2
+            avg_fragments_size = tokens_ds_latest.count_rows() // len(tokens_ds_latest.files) // 1024**2
             if language == 'zh':
                 avg_fragments_size *= 8
             if avg_fragments_size <= 16:
