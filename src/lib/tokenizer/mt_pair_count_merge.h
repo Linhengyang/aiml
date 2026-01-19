@@ -22,7 +22,7 @@ struct hasher {
     }
 };
 
-using counter_tls = counter<counter_key_type, false, mempool, hasher>;
+using counter_st = counter<counter_key_type, false, mempool, hasher>;
 
 
 extern "C" {
@@ -56,7 +56,7 @@ u16token_pair_counts_ptrs tls_dict_count_u16pair_core(
     uint32_t* keys,
     const size_t len,
     mempool& pool,
-    counter_tls* counter
+    counter_st* counter
 );
 
 
