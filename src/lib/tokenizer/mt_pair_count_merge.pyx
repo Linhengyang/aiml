@@ -77,7 +77,7 @@ cpdef count_u32pair_batch(
 
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[-1]:
-        sys.exit(1)
+        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offset {offsets[-1]}")
     
     # 制作 L_tokens: token pair 左边的 tokens 和 R_tokens: token pair 右边的 tokens 
     mask = np.full(shape=(_LENGTH,), fill_value=True)
@@ -182,7 +182,7 @@ cpdef merge_u32pair_batch(
     
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
-        sys.exit(1)
+        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offset {offsets[num_chunks]}")
     
     # const uint32_t[::1]保证 memoryview是只读+内存连续的
     # 因为tokens_flat来自 np.array(..., dtype=..., copy=False) 共享了只读数据

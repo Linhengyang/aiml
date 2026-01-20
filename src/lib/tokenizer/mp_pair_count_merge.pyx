@@ -99,7 +99,7 @@ cpdef count_u16pair_batch(
 
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[-1]:
-        sys.exit(1)
+        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offset {offsets[-1]}")
     
     # 制作 L_tokens: token pair 左边的 tokens 和 R_tokens: token pair 右边的 tokens 
     mask = pynp.full(shape=(_LENGTH,), fill_value=True)
@@ -120,10 +120,10 @@ cpdef count_u16pair_batch(
     mask_cp[chunk_starts_] = False
     cdef np.ndarray[np.uint16_t, ndim=1, mode="c"] R_tokens = tokens_flat[mask_cp] # 可以为空
 
-    # 检查 L_tokens 和 R_tokens 长度.
+    # 检查 L_tokens 和 R_tokens 长度
     cdef size_t len = L_tokens.shape[0]
     if len != R_tokens.shape[0]:
-        sys.exit(1)
+        raise ValueError(f"Left & Right tokens length mismatch")
     
     if len == 0:
         return (pynp.array([], dtype=pynp.uint16),
