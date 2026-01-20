@@ -9,20 +9,20 @@
 
 extern "C" {
 
-std::pair<uint16_t*, int64_t*> tls_merge_u16pair_core(
-    const uint16_t* tokens_flat,
+std::pair<uint32_t*, int64_t*> tls_merge_u32pair_core(
+    const uint32_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
-    const uint16_t pair_L,
-    const uint16_t pair_R,
-    const uint16_t new_token,
+    const uint32_t pair_L,
+    const uint32_t pair_R,
+    const uint32_t new_token,
     const bool if_filter_len1,
     mempool& pool
 ) {
     // offsets 的最后一个值是 tokens_flat 的长度，也是 output_tokens_flat 的长度
     int64_t _LENGTH = offsets[num_chunks];
 
-    uint16_t* merged_tokens_flat = static_cast<uint16_t*>(pool.allocate(_LENGTH*sizeof(uint16_t)));
+    uint32_t* merged_tokens_flat = static_cast<uint32_t*>(pool.allocate(_LENGTH*sizeof(uint32_t)));
 
     // merged_offsets 和 offsets 一样, 都是 各chunk首token的 index，末尾append一个最终长度
     // 所用 总共有 num_chunks+1 个值, 第一个值是 0, 最后一个值是 merged_tokens 的总数

@@ -40,6 +40,20 @@ ext_modules = [
         language="c++",
         include_dirs=include_dirs,  # 包含 numpy 的头文件路径
         extra_compile_args=["-O3", "-std=c++17"],       # 优化编译选项
+    ),
+    Extension(
+        name="mt_pair_count_merge",  # 输出模块名 (.so文件名, 也是 import .so文件时 时用的名字)
+        sources=[
+            "mt_pair_count_merge.pyx",
+            "mt_pair_count_merge_api.cpp",
+            "core_merge_pair_mt.cpp",
+            "core_count_pair_mt.cpp",
+            os.path.join(share_dir,"memory_block.cpp"),
+            os.path.join(share_dir,"memory_pool.cpp"),
+            ],  # 包含 .pyx 和所有涉及到的 C++ 源文件
+        language="c++",
+        include_dirs=include_dirs,  # 包含 numpy 的头文件路径
+        extra_compile_args=["-O3", "-std=c++17"],       # 优化编译选项
     )
 ]
 

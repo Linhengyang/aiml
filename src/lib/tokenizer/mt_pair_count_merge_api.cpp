@@ -73,30 +73,30 @@ void release_thread() {
 
 
 
-u16token_pair_counts_ptrs c_tls_count_u16pair_batch(
-    const uint16_t* L_tokens,
-    const uint16_t* R_tokens,
+u32token_pair_counts_ptrs c_tls_count_u32pair_batch(
+    const uint32_t* L_tokens,
+    const uint32_t* R_tokens,
     const size_t len
 ) {
     try
     {
         if (len <= 0) {
-            return u16token_pair_counts_ptrs{nullptr, nullptr, nullptr, 0};
+            return u32token_pair_counts_ptrs{nullptr, nullptr, nullptr, 0};
         }
 
         auto& pool = get_tls_pool();
-        // keys 数组储存 len 个 L(uint16)R(uint16) 组成的 uint32
-        uint32_t* keys = static_cast<uint32_t*>(pool.allocate(len*sizeof(uint32_t)));
+        // keys 数组储存 len 个 L(uint32)R(uint32) 组成的 uint64
+        uint64_t* keys = static_cast<uint64_t*>(pool.allocate(len*sizeof(uint64_t)));
 
         for (size_t i = 0; i < len; ++i) {
-            const uint32_t l = static_cast<uint32_t>(L_tokens[i]) & 0xFFFFu;
-            const uint32_t r = static_cast<uint32_t>(R_tokens[i]) & 0xFFFFu;
-            keys[i] = ( l<<16 ) | r;
+            const uint64_t l = static_cast<uint64_t>(L_tokens[i]);
+            const uint64_t r = static_cast<uint64_t>(R_tokens[i]);
+            keys[i] = ( l << 32 ) | r;
         }
         
         // 根据是否有 counter 来决定使用哪一个计数函数
         if (counter_tls) {
-            u16token_pair_counts_ptrs result = tls_dict_count_u16pair_core(
+            u32token_pair_counts_ptrs result = tls_dict_count_u32pair_core(
                 keys,
                 len,
                 pool,
@@ -105,7 +105,7 @@ u16token_pair_counts_ptrs c_tls_count_u16pair_batch(
             return result;
         }
         else {
-            u16token_pair_counts_ptrs result = tls_sort_count_u16pair_core(
+            u32token_pair_counts_ptrs result = tls_sort_count_u32pair_core(
                 keys,
                 len,
                 pool
@@ -115,26 +115,26 @@ u16token_pair_counts_ptrs c_tls_count_u16pair_batch(
     }
     catch(const std::exception& e)
     {
-        throw std::runtime_error("Error in c_tls_count_u16pair_batch");
+        throw std::runtime_error("Error in c_tls_count_u32pair_batch");
     }
 }
 
 
 
-merged_u16token_offset_ptrs c_tls_merge_u16pair_batch(
-    const uint16_t* tokens_flat,
+merged_u32token_offset_ptrs c_tls_merge_u32pair_batch(
+    const uint32_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks, // num_chunks = len(offsets) - 1
-    const uint16_t pair_L,
-    const uint16_t pair_R,
-    const uint16_t new_token,
+    const uint32_t pair_L,
+    const uint32_t pair_R,
+    const uint32_t new_token,
     const bool if_filter_len1
 ) {
     try
     {
         auto& pool = get_tls_pool();
 
-        auto [merged_tokens_flat_ptr, merged_offsets_ptr] = tls_merge_u16pair_core(
+        auto [merged_tokens_flat_ptr, merged_offsets_ptr] = tls_merge_u32pair_core(
             tokens_flat,
             offsets,
             num_chunks,
@@ -158,14 +158,14 @@ merged_u16token_offset_ptrs c_tls_merge_u16pair_batch(
             }
             merged_filtered_offsets[j] = merged_offsets_ptr[num_chunks];
 
-            return merged_u16token_offset_ptrs{merged_tokens_flat_ptr, merged_filtered_offsets, j, merged_filtered_offsets[j]};
+            return merged_u32token_offset_ptrs{merged_tokens_flat_ptr, merged_filtered_offsets, j, merged_filtered_offsets[j]};
         }
 
-        return merged_u16token_offset_ptrs{merged_tokens_flat_ptr, merged_offsets_ptr, num_chunks, merged_offsets_ptr[num_chunks]};
+        return merged_u32token_offset_ptrs{merged_tokens_flat_ptr, merged_offsets_ptr, num_chunks, merged_offsets_ptr[num_chunks]};
     }
     catch(const std::exception& e)
     {
-        throw std::runtime_error("Error in c_tls_merge_u16pair_batch");
+        throw std::runtime_error("Error in c_tls_merge_u32pair_batch");
     }
 }
 
