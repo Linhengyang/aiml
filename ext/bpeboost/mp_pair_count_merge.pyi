@@ -5,12 +5,12 @@ def initialize_process(block_size: int) -> None:
     ...
 
 def count_u16pair_batch(
-    tokens_offsets_border,
+    tokens_offsets,
     ):
     ...
 
 def merge_u16pair_batch(
-    tokens_offsets_border,
+    tokens_offsets,
     pair_L:np.uint16,
     pair_R:np.uint16,
     new_token:np.uint16
