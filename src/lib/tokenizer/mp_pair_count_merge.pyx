@@ -190,7 +190,7 @@ cpdef merge_u16pair_batch(
     
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
-        sys.exit(1)
+        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offsets {offsets[num_chunks]}")
     
     # const uint16_t[::1]保证 memoryview是只读+内存连续的
     # 因为tokens_flat来自 np.array(..., dtype=..., copy=False) 共享了只读数据

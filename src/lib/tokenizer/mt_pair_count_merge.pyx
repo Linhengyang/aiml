@@ -101,7 +101,7 @@ cpdef count_u32pair_batch(
     # 检查 L_tokens 和 R_tokens 长度.
     cdef size_t len = L_tokens.shape[0]
     if len != R_tokens.shape[0]:
-        sys.exit(1)
+        raise ValueError(f"Left & Right tokens length mismatch")
     
     if len == 0:
         return (np.array([], dtype=np.uint32),
