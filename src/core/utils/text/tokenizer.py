@@ -1598,7 +1598,6 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
             self._set_config(language, batch_size_level, memory_utilization) # 确定 batch_size/num_workers/pool_batch_size_coef
             self._build_vocab() # vocab: token_ID --> bytes 的映射
 
-        ctx = mp.get_context('spawn')
         memblock_size = self.__pool_batch_size_coef // 2 * self._batch_size  # // 2 是允许多一次内存块申请
 
         with ThreadPoolExecutor(
