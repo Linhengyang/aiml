@@ -28,6 +28,12 @@ using counter_st = counter<counter_key_type, false, mempool, hasher>;
 extern "C" {
 
 
+void init_tls_pool(size_t block_size, size_t alignment);
+
+
+mempool& get_tls_pool();
+
+
 // 线程初始化（只做一次即可，允许重复调用作“已初始化”检查）
 void init_thread(size_t block_size, size_t alignment, size_t capacity);
 
@@ -36,7 +42,7 @@ void init_thread(size_t block_size, size_t alignment, size_t capacity);
 void reset_thread();
 
 
-// 销毁线程局部的 内存池 / 基于该内存池的可复用计数器，准备退出程序
+// 销毁线程局部的 内存池 / 基于该内存池的可复用计数器，准备退出程序.
 void release_thread();
 
 
@@ -60,6 +66,14 @@ u16token_pair_counts_ptrs tls_dict_count_u16pair_core(
 );
 
 
+// 给单一线程的 thread-local-storage count uint16_t token-pair batch data 的 core: 采用 sort for count
+u16token_pair_counts_ptrs tls_sort_count_u16pair_core(
+    uint32_t* keys,
+    const size_t len,
+    mempool& pool
+);
+
+
 // 给单一线程的 thread-local-storage count uint16_t token-pair batch data 的函数
 u16token_pair_counts_ptrs c_tls_count_u16pair_batch(
     const uint16_t* L_tokens,
@@ -74,11 +88,12 @@ struct merged_u16token_offset_ptrs {
     uint16_t* merged_tokens_flat_ptr;
     int64_t* merged_offsets_ptr;
     size_t merged_num_chunks;
+    int64_t merged_num_tokens;
 };
 
 
 // 给单一线程的 thread-local-storage merge uint16_t token-pair batch data 的 core
-merged_u16token_offset_ptrs tls_merge_u16pair_core(
+std::pair<uint16_t*, int64_t*> tls_merge_u16pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,

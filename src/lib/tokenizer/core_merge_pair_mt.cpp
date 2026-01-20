@@ -5,10 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <mt_pair_count_merge.h>
+#include <utility>
 
 extern "C" {
 
-merged_u16token_offset_ptrs tls_merge_u16pair_core(
+std::pair<uint16_t*, int64_t*> tls_merge_u16pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,
@@ -57,7 +58,7 @@ merged_u16token_offset_ptrs tls_merge_u16pair_core(
         }
     }
     // 所有 chunk 遍历结束
-    return merged_u16token_offset_ptrs{merged_tokens_flat, merged_offsets, num_chunks};
+    return {merged_tokens_flat, merged_offsets};
 }
 
 } // end of extern C
