@@ -1,11 +1,12 @@
 # distutils: language = c++
-# cython: language_level=3, boundscheck=True, wraparound=True
+# cython: language_level=3, boundscheck=False, wraparound=False
 
 import numpy as np
 import sys
 cimport numpy as cnp
 from libc.stdint cimport uint32_t, int64_t, uint64_t, uintptr_t
 import ctypes
+import cython
 
 cnp.import_array()
 
@@ -66,8 +67,12 @@ cpdef initialize_thread(size_t block_size):
 
 
 
-cpdef count_u32pair_batch(
-    object tokens_offsets
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef tuple count_u32pair_batch(
+    tuple tokens_offsets
 ):
     # reset 进程tls内存池 / 基于tls内存池的计数器
     reset_thread()
@@ -162,8 +167,12 @@ cpdef count_u32pair_batch(
 
 
 
-cpdef merge_u32pair_batch(
-    object tokens_offsets,
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef tuple merge_u32pair_batch(
+    tuple tokens_offsets,
     cnp.uint32_t pair_L,
     cnp.uint32_t pair_R,
     cnp.uint32_t new_token,

@@ -1,11 +1,12 @@
 # distutils: language = c++
-# cython: language_level=3, boundscheck=True, wraparound=True
+# cython: language_level=3, boundscheck=False, wraparound=False
 
 import numpy as pynp
 import sys
 cimport numpy as np
 from libc.stdint cimport uint16_t, int64_t, uint64_t, uintptr_t
 import ctypes
+import cython
 
 np.import_array()
 
@@ -86,10 +87,11 @@ cpdef close_process():
 
 
 
-# with GIL 版本 且去掉 b_order 版本, 给 工作进程 使用 以绕开 GIL
-# 返回np.array of L_tokens/R_tokens/counts 给python
-cpdef count_u16pair_batch(
-    object tokens_offsets
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef tuple count_u16pair_batch(
+    tuple tokens_offsets
 ):
     # reset 进程单例内存池 / 基于单例内存池的计数器
     reset_process()
@@ -168,10 +170,11 @@ cpdef count_u16pair_batch(
 
 
 
-# with GIL 版本, 给 工作进程 使用 以绕开 GIL
-# 返回np.array of merged_tokens_flat/offsets给python
-cpdef merge_u16pair_batch(
-    object tokens_offsets,
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef tuple merge_u16pair_batch(
+    tuple tokens_offsets,
     np.uint16_t pair_L,
     np.uint16_t pair_R,
     np.uint16_t new_token,
