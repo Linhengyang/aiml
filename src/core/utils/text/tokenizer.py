@@ -959,7 +959,7 @@ from multiprocessing.util import Finalize
 
 import ext.bpeboost as bpeboost
 import pyarrow.dataset as ds
-from ext.bpeboost import thread_count_u16pair_batch, thread_merge_u16pair_batch, process_count_u16pair_batch, process_merge_u16pair_batch
+from ext.bpeboost import process_count_u16pair_batch, process_merge_u16pair_batch
 
 
 
@@ -1302,11 +1302,7 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
 
 
 
-# 大词表
-# en corpus --> batch_size=( 8~32)M, mem_need = batch_size* 256, num_workers = memory_size*alpha/(batch_size* 256), mem_pool = batch_size* 192
-# zh corpus --> batch_size=( 1~ 4)M, mem_need = batch_size*2048, num_workers = memory_size*alpha/(batch_size*2048), mem_pool = batch_size*1536
-
-
+from ext.bpeboost import thread_count_u32pair_batch, thread_merge_u32pair_batch
 
 def _thread_init(block_size: int):
     # 子线程启动时, 执行 cython 包里的 initialize
@@ -1315,11 +1311,11 @@ def _thread_init(block_size: int):
 
 
 
-class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
+class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
     '''
-    多进程运行缓冲的BBPE小词表分词器(uint16 token)
+    多线程运行缓冲的BBPE大词表分词器(uint32 token)
     '''
-    token_dtype = pa.uint16()
+    token_dtype = pa.uint32()
 
     paircounts_schema = pa.schema([
         pa.field('L', token_dtype),
@@ -1345,7 +1341,7 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
         tokens_flat = tokens_arr.values.to_numpy()
         offsets = tokens_arr.offsets.to_numpy()
 
-        L, R, counts = thread_count_u16pair_batch((tokens_flat, offsets))
+        L, R, counts = thread_count_u32pair_batch((tokens_flat, offsets))
         table = pa.Table.from_arrays([
             pa.array(L, type = cls.token_dtype),
             pa.array(R, type = cls.token_dtype),
@@ -1369,7 +1365,7 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
         tokens_flat = tokens_arr.values.to_numpy()
         offsets = tokens_arr.offsets.to_numpy()
 
-        merged_tokens_flat, merged_offsets = thread_merge_u16pair_batch((tokens_flat, offsets), L, R, new_token)
+        merged_tokens_flat, merged_offsets = thread_merge_u32pair_batch((tokens_flat, offsets), L, R, new_token)
         merged_tokens = pa.ListArray.from_arrays(merged_offsets, merged_tokens_flat)
 
         table = pa.Table.from_arrays([
@@ -1393,14 +1389,14 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
 
     def _set_config(self, language=t.Literal['en', 'zh'], batch_size_level=t.Literal['min', 'medium', 'high', 'max'], memory_utilization=0.8):
         '''
-        小词表
-        en corpus --> batch_size=(16~64)M, mem_need = batch_size* 160, num_workers = memory_size*alpha/(batch_size* 160), mem_pool = batch_size* 128
-        zh corpus --> batch_size=( 2~ 8)M, mem_need = batch_size*1280, num_workers = memory_size*alpha/(batch_size*1280), mem_pool = batch_size*1024
+        大词表
+        en corpus --> batch_size=( 8~32)M, mem_need = batch_size* 256, num_workers = memory_size*alpha/(batch_size* 256), mem_pool = batch_size* 192
+        zh corpus --> batch_size=( 1~ 4)M, mem_need = batch_size*2048, num_workers = memory_size*alpha/(batch_size*2048), mem_pool = batch_size*1536
         为了简化运算, batch_size 只在 16/32/48/64(en corpus) 或 2/4/6/8(zh corpus) 中选择, 分别对应 level 'min'/'medium'/'high'/'max'
         '''
         # 只考虑 64GB 内存的机器
         memory_size = 64 * 1024 **3
-        batch_size = 2 * 1024**2
+        batch_size = 1024**2
         if batch_size_level == 'min':
             pass
         elif batch_size_level == 'medium':
@@ -1413,12 +1409,12 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
             raise ValueError(f"wrong batch_size_level for {batch_size_level}. must be one of 'min'/'medium'/'high'/'max'.")
         
         if language == 'zh':
-            memory_batchsize_coef = 1280 # memory_need = batch_size* 1280
-            self.__pool_batch_size_coef = 1024 # mem_pool = batch_size* 1024
+            memory_batchsize_coef = 2048 # memory_need = batch_size* 2048
+            self.__pool_batch_size_coef = 1536 # mem_pool = batch_size* 1536
         elif language == 'en':
             batch_size *= 8
-            memory_batchsize_coef = 160 # memory_need = batch_size* 160
-            self.__pool_batch_size_coef = 128 # mem_pool = batch_size* 128
+            memory_batchsize_coef = 256 # memory_need = batch_size* 256
+            self.__pool_batch_size_coef = 192 # mem_pool = batch_size* 192
         else:
             raise ValueError(f"wrong language for {language}. must be one of 'en'/'zh'.")
         
@@ -1511,7 +1507,7 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
             data_gen = src_tgt_path_gen(tokens_ds),
             process_fn = self._map_to_thread_read_merge_write,
             result_handler = None,
-            max_pending = 8,
+            max_pending = 16,
             process_args = (L, R, new_token)
         )
 
@@ -1540,7 +1536,7 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
             data_gen = src_tgt_path_gen(tokens_ds),
             process_fn = self._map_to_thread_read_count_write,
             result_handler = None,
-            max_pending = 8,
+            max_pending = 16,
         )
 
         if len(os.listdir(paircounts_ds)) == 1: # 如果除了 _common_metadat 没有其它 parquet 文件写入
@@ -1566,7 +1562,7 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
                   format:t.Literal['byte','text'],                              # 指明corpora(if parquet)数据类型 byte -> 0-255值; text -> string
                   language:t.Literal['en','zh'],                                # 语料的语言类型
                   batch_size_level:t.Literal['min','medium','high','max']='max',# batch_size的大小档次
-                  memory_utilization:float=0.8,                                 # 对本机内存的占用水位
+                  memory_utilization:float=0.9,                                 # 对本机内存的占用水位
                   keep_window:int = 3,                                          # max reserved tokens_pq file in disk
                   verbose:bool = False
                   ):
@@ -1621,14 +1617,14 @@ class mtbufferBBPE_u16Tokenizer(baseBBPETokenizer):
                 print(f'merge rank {rank} / {start} to {end-1}')
                 try:
                     L, R, max_occurrence = self._merge_info(executor, curr_tokens_ds)
-                    # L, R, max_occurrence: pa.lib.UInt16Scalar, pa.lib.UInt16Scalar, pa.lib.UInt64Scalar
+                    # L, R, max_occurrence: pa.lib.UInt32Scalar, pa.lib.UInt32Scalar, pa.lib.UInt64Scalar
                     new_token, occurrence = rank + 256, int(max_occurrence) if verbose else None
 
                     self._update_tokenizer((int(L), int(R)), new_token, occurrence)
                     if rank == end - 1:
                         break
-                    # cython-extension function 对 L, R, new_token 的输入要求是 np.uint16, np.uint16, np.uint16
-                    curr_tokens_ds = self._next_tokens_ds(executor, curr_tokens_ds, np.uint16(L), np.uint16(R), np.uint16(new_token))
+                    # cython-extension function 对 L, R, new_token 的输入要求是 np.uint32, np.uint32, np.uint32
+                    curr_tokens_ds = self._next_tokens_ds(executor, curr_tokens_ds, np.uint32(L), np.uint32(R), np.uint32(new_token))
                     
                 finally:
                     to_remove = rank - keep_window
