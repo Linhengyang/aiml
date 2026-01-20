@@ -1,7 +1,7 @@
 import numpy as np
 import typing as t
 
-def initialize_process(block_size: int) -> None:
+def initialize_thread(block_size: int) -> None:
     ...
 
 def count_u16pair_batch(
@@ -15,8 +15,5 @@ def merge_u16pair_batch(
     pair_R:np.uint16,
     new_token:np.uint16
     ):
-    ...
-
-def close_process() -> None:
     ...
     

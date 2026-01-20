@@ -12,9 +12,6 @@ u16token_pair_counts_ptrs local_sort_count_u16pair_core(
     uint32_t* keys,
     const size_t len,
     singleton_mempool& pool
-    // uint16_t* L_uniq, // in-place change in this function
-    // uint16_t* R_uniq, // in-place change in this function
-    // uint64_t* counts // in-place change in this function
 ) {
     uint16_t* L_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
     uint16_t* R_uniq = static_cast<uint16_t*>(pool.allocate(len*sizeof(uint16_t)));
@@ -39,8 +36,7 @@ u16token_pair_counts_ptrs local_sort_count_u16pair_core(
     L_uniq[size] = static_cast<uint16_t>(prev >> 16);
     R_uniq[size] = static_cast<uint16_t>(prev & 0xFFFF);
     counts[size] = cnt; ++size;
-
-    // return size;
+    
     return u16token_pair_counts_ptrs{L_uniq, R_uniq, counts, size};
 }
 

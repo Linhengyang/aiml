@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 import os
 import regex as re
-from ...core.utils.text.tokenizer import mpbufferBBPE_u16Tokenizer
+from ...core.utils.text.tokenizer import mpbufferBBPE_u16Tokenizer, mtbufferBBPE_u32Tokenizer
 
 configs = yaml.load(open('src/apps/bpe_build/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -12,7 +12,7 @@ configs = yaml.load(open('src/apps/bpe_build/configs.yaml', 'rb'), Loader=yaml.F
 
 
 ################# buffer/save in workspace/cache ##################
-buffer_dir = os.path.join( configs['cache_dir'], 'temp/buffer/' )
+buffer_dir = os.path.join( configs['cache_dir'], 'bpe_build/buffer/' )
 tokenizer_save_dir = os.path.join( configs['artifact_dir'], configs['app_name'], 'tokenizer' )
 vocab_cache_dir = os.path.join( configs['artifact_dir'], configs['app_name'], 'vocab' )
 
@@ -35,11 +35,11 @@ def bpe_train():
     for folder in [buffer_dir, tokenizer_save_dir, vocab_cache_dir]:
         os.makedirs(folder, exist_ok=True)
         
-    tok = mpbufferBBPE_u16Tokenizer(name=save_tok_name, buffer_dir=buffer_dir)
+    tok = mtbufferBBPE_u32Tokenizer(name=save_tok_name, buffer_dir=buffer_dir)
     corpora = [valid_pq, train_pq]
     column = ['text']*len(corpora)
 
-    tok.train_bpe(num_merges,
+    tok.train_bpe(num_merges = 3,
                   corpora = corpora,
                   column = column,
                   format = 'text',
@@ -63,7 +63,7 @@ def bpe_train():
 
 def bpe_continue(tok_path:str|None):
     print('continue to run BPE on dataset TinyStories')
-    tok = mpbufferBBPE_u16Tokenizer(name='init', buffer_dir='../cache/temp/buffer')
+    tok = mtbufferBBPE_u32Tokenizer(name='init', buffer_dir='../cache/bpe_build/buffer')
 
     if tok_path and os.path.isfile(tok_path):
         tok.load(tok_path)
@@ -78,6 +78,7 @@ def bpe_continue(tok_path:str|None):
                   format = 'byte',
                   language = 'en',
                   batch_size_level = 'medium',
+                  memory_utilization = 0.9,
                   keep_window = 3,
                   verbose = True
                   )
