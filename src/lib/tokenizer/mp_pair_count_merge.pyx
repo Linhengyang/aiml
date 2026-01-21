@@ -100,13 +100,14 @@ cpdef tuple count_u16pair_batch(
     cdef np.ndarray[np.int64_t, ndim=1, mode="c"] offsets = tokens_offsets[1]
 
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
-    if _LENGTH != offsets[-1]:
-        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offset {offsets[-1]}")
+    cdef size_t num_chunks = offsets.shape[0] - 1 # num_chunks
+    if _LENGTH != offsets[num_chunks]:
+        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offset {offsets[num_chunks]}")
     
     # 制作 L_tokens: token pair 左边的 tokens 和 R_tokens: token pair 右边的 tokens 
     mask = pynp.full(shape=(_LENGTH,), fill_value=True)
     chunk_ends_ = (offsets-1)[1:]
-    chunk_starts_ = offsets[:-1]
+    chunk_starts_ = offsets[:num_chunks]
 
     # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. filter out
     _where_equal_ = chunk_ends_ == chunk_starts_
