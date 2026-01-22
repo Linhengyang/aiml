@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 import os
 import regex as re
-from ...core.utils.text.tokenizer import mpbufferBBPE_u16Tokenizer, mtbufferBBPE_u32Tokenizer
+from src.utils.text.tokenizer import mpbufferBBPE_u16Tokenizer, mtbufferBBPE_u32Tokenizer
 
 configs = yaml.load(open('src/apps/bpe_build/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 

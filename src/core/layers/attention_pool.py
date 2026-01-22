@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import math
-from ...base.functions.mask import mask_on_last_dim
+from src.core.functional import create_mask_on_last_dim
 
 
 
@@ -40,7 +40,7 @@ def masked_softmax(S, valid_lens, where_valid='left'):
     else:
         raise ValueError(f'wrong where_valid')
 
-    mask = mask_on_last_dim(S.shape[-1], valid_lens, mask_flag)
+    mask = create_mask_on_last_dim(S.shape[-1], valid_lens, mask_flag)
 
     # mask tensor shape: (batch_size, n_query, n_kv)
 
@@ -324,7 +324,7 @@ class MultiHeadAttention(nn.Module):
 # attention中提供是否rope选择:
 #   yes则在计算self-attention时, apply_rope on q/k， no则在计算self-attention时，直接计算 qk
 
-from ..root_layers.position_encoding import RoPEConfig, RotaryPosEnc
+from src.core.layers.position_encoding import RoPEConfig, RotaryPosEnc
 from typing import Tuple
 import torch.nn.functional as F
 

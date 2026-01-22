@@ -2,7 +2,7 @@ import torch
 import math
 from typing import Tuple
 from torch import nn
-from ..root_layers.attention_pool import CasualMHA
+from src.core.layers.attention_pool import CasualMHA
 
 
 class GeLU(nn.Module):

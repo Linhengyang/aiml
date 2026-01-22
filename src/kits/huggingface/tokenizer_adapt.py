@@ -1,6 +1,5 @@
 # tokenizer_adapt 里修改 自有tokenizer, 以加载 huggingface/tokenizer 库标准的 tokenizer.json, 实现 custom tokenizer 对齐 huggingface/tokenizer
-
-from ...core.utils.text.tokenizer import boostBBPETokenizer, merge_pair
+from src.utils.text.tokenizer import mpbufferBBPE_u16Tokenizer, merge_pair
 import json
 import typing as t
 
@@ -34,7 +33,7 @@ def bytes_to_unicode() -> dict[int, str]:
 
 
 
-class gpt2Tokenizer(boostBBPETokenizer):
+class gpt2Tokenizer(mpbufferBBPE_u16Tokenizer):
 
     GPT2_TOKENIZER_REGEX = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 

@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from ..root_layers.attention_pool import MultiHeadAttention
+from src.core.layers.attention_pool import MultiHeadAttention
 
 
 

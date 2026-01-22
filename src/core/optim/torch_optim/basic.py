@@ -85,6 +85,7 @@ class SGD(Optimizer):
 # 2. 合成更新 状态 velocity & variance & step, 并用 step 对 velocity & variance 作矫正
 # 3. update <-- adj_velocity / sqrt(adj_variance)
 # 4. param <-- param - lr * update
+
 class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False):
         if lr < 0: raise ValueError(f'learning rate must be positive. now {lr}')

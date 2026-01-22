@@ -1,4 +1,4 @@
-
+# single-cpu / single-gpu infra
 class easyTrainer(object):
     '''
     components: 
