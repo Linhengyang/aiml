@@ -5,7 +5,7 @@ import torch
 import typing as t
 import pandas as pd
 import yaml
-from ...core.utils.text.tokenizer import ENDOFTEXT, boostBBPETokenizer
+from src.utils.text.tokenizer import ENDOFTEXT, mpbufferBBPE_u16Tokenizer
 from .network import gpt2Config, gpt2
 from .loss import gpt2_pretrain_loss
 from .dataset import mtDataset
@@ -65,7 +65,7 @@ def build_tokenizer_job():
     if not os.path.exists(tokenizer_path):
         # create tokenizer
         print('bpe train begin')
-        gpt_tokenizer = boostBBPETokenizer(name='mt', buffer_dir=buffer_dir, special_marks=specials)
+        gpt_tokenizer = mpbufferBBPE_u16Tokenizer(name='mt', buffer_dir=buffer_dir, special_marks=specials)
         gpt_tokenizer.train_bpe(num_merges, corpora=corpus, verbose=True)
         print('bpe train close')
         gpt_tokenizer.save(tokenizer_path)
@@ -87,7 +87,7 @@ def tokenize_corpus(mt_text_path, tok_path, data_path):
     with open(mt_text_path, 'r', encoding='utf-8') as f:
         raw_text = f.read()
 
-    tok = boostBBPETokenizer(name='.', buffer_dir='.')
+    tok = mpbufferBBPE_u16Tokenizer(name='.', buffer_dir='.')
     tok.load(tok_path)
 
     lines = raw_text.split('\n')
@@ -158,7 +158,7 @@ def generate_job():
     net.load_state_dict(torch.load(saved_params_path, map_location=device))
 
     tok_path = os.path.join(tokenizer_dir, 'mt.tok')
-    tok = boostBBPETokenizer(name='.', buffer_dir='.')
+    tok = mpbufferBBPE_u16Tokenizer(name='.', buffer_dir='.')
     tok.load(tok_path)
 
     prompt = tok.encode("I don't mind it.	")

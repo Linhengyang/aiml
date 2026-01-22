@@ -41,7 +41,7 @@
 
 
 import torch.nn as nn
-from ...core.loss.mask_ce_loss import MaskedCrossEntropyLoss
+from src.core.loss.mask_ce_loss import MaskedCrossEntropyLoss
 from torch import Tensor
 
 class gpt2_pretrain_loss(nn.Module):
