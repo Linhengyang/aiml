@@ -7,7 +7,6 @@ from torch import Tensor
 import typing as t
 
 
-
 class Timer:  #@save
     """Record multiple running times."""
     def __init__(self):

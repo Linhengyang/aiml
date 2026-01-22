@@ -1,4 +1,4 @@
-from ...core.nn_components.meta_frames import Encoder, Decoder, EncoderDecoder
+from ...core.architectures import Encoder, Decoder, EncoderDecoder
 from ...core.nn_components.root_layers.position_encoding import TrigonoAbsPosEnc
 from ...core.nn_components.sub_modules._transformer import TransformerEncoderBlock, TransformerDecoderBlock
 from ...core.loss.mask_ce_loss import MaskedCrossEntropyLoss

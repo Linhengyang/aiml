@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from ...core.interface.simple import easyPredictor
+from ...core.interface.infra_easy import easyPredictor
 from ...core.utils.data.batchify import truncate_pad
 
 

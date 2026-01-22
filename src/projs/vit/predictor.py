@@ -3,7 +3,7 @@ import typing as t
 import pandas as pd
 import random
 from torch import nn
-from ...core.interface.simple import easyPredictor
+from ...core.interface.infra_easy import easyPredictor
 from ...core.evaluation.evaluate import accuracy
 from ...core.utils.image.display import display_images_with_labels
 from ...core.utils.image.mnist import decode_idx3_ubyte, decode_idx1_ubyte

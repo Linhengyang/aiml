@@ -1,6 +1,6 @@
 # evaluator.py for gpt2
 from ...core.evaluation.evaluate import Timer, Accumulator, metric_summary
-from ...core.interface.simple import epochEvaluator
+from ...core.interface.infra_easy import epochEvaluator
 import torch
 import yaml
 
