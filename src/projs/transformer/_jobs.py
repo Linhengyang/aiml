@@ -9,8 +9,8 @@ from .trainer import transformerTrainer
 from .evaluator import transformerEpochEvaluator
 from .predictor import sentenceTranslator
 import yaml
-from ...core.utils.text.vocabulize import Vocab
-from ...core.utils.text.glossary import get_BPE_glossary
+from src.utils.text.vocabulize import Vocab
+from src.utils.text.glossary import get_BPE_glossary
 
 configs = yaml.load(open('src/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -33,19 +33,8 @@ log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
 
 
-
-
-
-
-
-
-
 ################## data-params ##################
 num_steps = configs['num_steps']
-
-
-
-
 
 
 
@@ -54,21 +43,14 @@ num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256,
 
 
 
-
-
-
-
 ################## train-params ##################
 num_epochs, batch_size, lr = 5, 512, 0.00005
-
-
 
 
 
 # num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
 # batch_size
 # ---------------------> 4GB 显存
-
 
 
 
@@ -141,9 +123,6 @@ def prepare_job():
     return eng_vocab_path, fra_vocab_path
 
 
-
-
-
 def train_job(eng_vocab_path, fra_vocab_path):
     print('train job begin')
     # [timetag]
@@ -198,12 +177,6 @@ def train_job(eng_vocab_path, fra_vocab_path):
 
     print('train job complete')
     return saved_params_fpath
-
-
-
-
-
-
 
 
 def infer_job(saved_params_fpath, eng_vocab_path, fra_vocab_path):

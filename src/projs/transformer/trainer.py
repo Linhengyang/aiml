@@ -2,7 +2,7 @@ import torch
 from torch import nn as nn
 import typing as t
 from torch.utils.data.dataloader import default_collate
-from ...core.interface.infra_easy import easyTrainer
+from src.core.interface.infra_easy import easyTrainer
 
 
 
@@ -94,7 +94,6 @@ class transformerTrainer(easyTrainer):
         l = loss(Y_hat, Y_label, Y_valid_lens)
 
         return l, Y_hat
-
 
 
     def resolve_net(self, need_resolve=False):
@@ -196,28 +195,20 @@ class transformerTrainer(easyTrainer):
         for epoch in range(self.num_epochs):
             # model set to train
             self.net.train()
-
             # evaluator determine if this epoch to reveal train situation /  evaluate current network
             self.epoch_evaluator.judge_epoch(epoch)
-
 
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
 
                 self.optimizer.zero_grad()
-
                 l, Y_hat = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
-
                 # bp
                 l.sum().backward()
-
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
-
                 self.optimizer.step()
-
                 with torch.no_grad():
                     self.epoch_evaluator.record_batch(net_inputs_batch, loss_inputs_batch, Y_hat, l)
-
             with torch.no_grad():
                 # 如果 valid_iter 非 None, 那么在确定要 evaluate model 的 epoch, 将遍历 整个 valid_iter 得到 validation loss
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter, self.FP_step)
