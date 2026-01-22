@@ -1,4 +1,4 @@
-from ...core.architectures import Encoder
+from src.core.architectures import Encoder
 from src.core.layers.position_encoding import LearnAbsPosEnc
 from src.core.layers.patchify import Patchify
 from src.core.blocks.vit import ViTEncoderBlock
