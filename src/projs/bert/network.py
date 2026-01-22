@@ -1,11 +1,8 @@
 import torch.nn as nn
 import torch
-from ...core.nn_components.sub_modules._transformer import TransformerEncoderBlock
-from ...core.nn_components.root_layers.position_encoding import LearnAbsPosEnc, TrigonoAbsPosEnc
-from ...core.loss.mask_ce_loss import MaskedCrossEntropyLoss
-
-
-
+from src.core.blocks.transformer import TransformerEncoderBlock
+from src.core.layers.position_encoding import LearnAbsPosEnc, TrigonoAbsPosEnc
+from src.core.loss.mask_ce_loss import MaskedCrossEntropyLoss
 
 
 # Encoder 组件: 所有预训练 encoder 组件应该干同一样事情: 把shape为 (batch_size, seq_length) 的序列数据, 转换为 (batch_size, seq_length, num_hiddens)
@@ -49,7 +46,6 @@ class BERTEncoder(nn.Module):
             X = blk(X, valid_lens)
 
         return X # 输出 shape: (batch_size, seq_len, num_hiddens)
-
 
 
 # pretrain 任务组件
@@ -97,14 +93,6 @@ class MLM(nn.Module):
         # pad 过程中, position pad 0时, label 也会被 pad 一个tokenID. 但这部分的预测没有意义, 应该在loss中忽略, 所以mlm任务的loss要用masked ce loss
 
 
-
-
-
-
-
-
-
-
 # pretrain 任务组件
 # 输入来自 encoder 组件的 tensor (batch_size, seq_len, num_hiddens), 以及 task 指定的 额外输入
 # 输出 task 指定
@@ -120,11 +108,6 @@ class NSP(nn.Module):
     def forward(self, token_embd):
         # token_embd shape: (batch_size, seq_len, d_dim) embed后的 sequence
         return self.head( self.mlp(token_embd[:, 0, :]) ) # output shape: (batch_size, 2)
-
-
-
-
-
 
 
 # 组装 encoder + pretrain tasks --> combined loss
@@ -171,7 +154,6 @@ class BERT(nn.Module):
 
         return embd_X, mlm_Y_hat, nsp_Y_hat
     
-
 
 class BERTLoss(nn.Module):
     '''

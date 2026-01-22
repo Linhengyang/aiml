@@ -2,11 +2,9 @@ import torch
 import random
 import copy
 import pandas as pd
-from ...core.utils.text.vocabulize import Vocab
-from ...core.utils.text.string_segment import sentence_segment_greedy
-from ...core.utils.data.batchify import truncate_pad
-
-
+from src.utils.text.vocabulize import Vocab
+from src.utils.text.string_segment import sentence_segment_greedy
+from src.core.data.assemble import truncate_pad
 
 
 def _read_shuffle(parquet_fpath):
@@ -22,39 +20,23 @@ def _read_shuffle(parquet_fpath):
     return corpus
 
 
-
-
-
 def _preprocess_tokenize(corpus, glossary, UNK_token,
                          need_lower=True, separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|'):
-    
     # corpus: 2-D list
-
     tokens_corpus = []
-
     for paragraph in corpus:
         # paragraph: 1-D list of at least two sentences
         if not paragraph:
             continue
-
         _tokens_paragraph = []
-        
         for sentence in paragraph:
             if sentence:
                 tokens = sentence_segment_greedy(sentence, glossary, UNK_token, flatten=True,
                                                  need_preprocess=True, need_lower=need_lower, separate_puncs=separate_puncs)[0]
                 _tokens_paragraph.append( tokens )
-        
-
         tokens_corpus.append( _tokens_paragraph )
 
-
     return tokens_corpus
-
-
-
-
-
 
 
 def _concate_tokenlist_pair(tokens_a, tokens_b=None,
@@ -74,16 +56,6 @@ def _concate_tokenlist_pair(tokens_a, tokens_b=None,
     return tokens, segments
 
 
-
-
-
-
-
-
-
-
-
-
 def _if_next_sentence(sentence, next_sentence, corpus):
     # corpus: lists of list of at least 2 sentences.
     if random.random() < 0.5:
@@ -93,12 +65,6 @@ def _if_next_sentence(sentence, next_sentence, corpus):
         is_next = False
 
     return sentence, next_sentence, is_next # 输出1个sentence, next sentence, 是否连接flag
-
-
-
-
-
-
 
 
 # for nsp data whose datapoint is [token list, segments, nsp_label]
@@ -139,9 +105,6 @@ def _get_tokens_segments_nsplabels(corpus, max_len,
             nsp_data.append( [tokens, segments, is_next] )
     
     return nsp_data # list of [tokens, segments, is_next]
-
-
-
 
 
 # for mlm data whose datapoint is [token list, mask_labels, mask positions]
@@ -193,11 +156,6 @@ def _mask_mapping_on_tokenList(tokens, vocab, donot_mask_tokens, mask_token='<ma
 
 
     return vocab[mlm_tokens], vocab[mlm_label_tokens], mask_positions # token IDs, masked true label token IDs, 和对应的 mask positions
-
-
-
-
-
 
 
 # toknIDs_segments_maskpositions_mlmlabels_nsplabels
@@ -270,8 +228,6 @@ def _build_dataset(data, max_len, pad_tokenID, cls_tokenID, mask_ratio=0.15):
     return tokenID_sample, valid_lens, segments_sample, mask_positions_sample, mlm_valid_lens, mlm_labels_sample, nsp_labels_sample
 
 
-
-
 class wikitextDataset(torch.utils.data.Dataset):
     def __init__(self, fpath, vocab_path, max_len, cls_token='<cls>', eos_token='<sep>', mask_token='<mask>', mask_ratio=0.15):
         super().__init__()
@@ -321,7 +277,6 @@ class wikitextDataset(torch.utils.data.Dataset):
         self._tokenID, self._valid_lens, self._segment, self._mask_position, self._mlm_valid_lens, self._mlm_label, self._nsp_label = \
             _build_dataset(data = sample, max_len = max_len, pad_tokenID = self._vocab['<pad>'],
                            cls_tokenID = self._vocab['<cls>'], mask_ratio=mask_ratio)
-        
 
 
     def __getitem__(self, index):

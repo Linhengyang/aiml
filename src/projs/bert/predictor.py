@@ -1,12 +1,7 @@
 import torch
 import numpy as np
-from ...core.interface.infra_easy import easyPredictor
-from ...core.utils.data.batchify import truncate_pad
-
-
-
-
-
+from src.core.interface.infra_easy import easyPredictor
+from src.core.data.assemble import truncate_pad
 
 
 
@@ -50,14 +45,6 @@ def get_bert_embedding(
     return embd_.squeeze(0).cpu().numpy() # (max_len, num_hiddens) move to cpu & numpy
 
 
-
-
-
-
-
-
-
-
 class tokensEncoder(easyPredictor):
     def __init__(self,
                  vocab, # 语言的词汇表
@@ -85,7 +72,6 @@ class tokensEncoder(easyPredictor):
         self.eval_fn = None
 
 
-
     def predict(self, tokens, tokens_next=None, cls_token='<cls>', eos_token='<sep>', pad_tokne='<pad>'):
 
         # (max_len, num_hiddens) cpu & numpy --extract 1 to len(tokens)--> where tokens embedding
@@ -97,11 +83,9 @@ class tokensEncoder(easyPredictor):
         return self.embed_array
         
 
-
     def evaluate(self):
         pass
     
-
 
     @property
     def pred_scores(self):
