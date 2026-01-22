@@ -23,41 +23,24 @@ cache_dir = os.path.join( configs['cache_dir'], configs['proj_name'] )
 image_args = os.path.join( cache_dir, 'image_args.json' )
 
 
-
 ################## params saved in workspace/model ##################
 model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
-
 
 
 ################## log file in workspace/logs ##################
 log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
 
-
-
-
-
-
-
-
-
 ################## data-params ##################
 patch_size = (7, 7)
-
 
 
 ################## network-params ##################
 num_blks, num_heads, num_hiddens, emb_dropout, blk_dropout, mlp_num_hiddens = 2, 4, 64, 0.1, 0.1, 128
 
 
-
-
-
 ################## train-params ##################
 num_epochs, batch_size, lr = 2, 128, 0.0005
-
-
-
 
 
 
@@ -72,9 +55,6 @@ def prepare_job():
         print(f'directory {dir_name} created')
 
     print('prepare job complete')
-
-
-
 
 
 def train_job(data_source):
@@ -139,12 +119,6 @@ def train_job(data_source):
     print('train job complete')
 
     return saved_params_fpath
-
-
-
-
-
-
 
 
 def infer_job(saved_params_fpath):

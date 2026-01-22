@@ -1,7 +1,7 @@
 import os
-from ...core.evaluation.evaluate import Timer, Accumulator, accuracy, metric_summary
-from ...core.interface.infra_easy import epochEvaluator
-from ...core.base.tool.visualize import Animator
+from src.core.evaluation.evaluate import Timer, Accumulator, accuracy, metric_summary
+from src.core.interface.infra_easy import epochEvaluator
+from src.utils.visualize import Animator
 import yaml
 configs = yaml.load(open('src/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 reveal_cnt_in_train, eval_cnt_in_train= configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']

@@ -1,7 +1,7 @@
 import torch
 import torchvision
 from torchvision import transforms
-from ...core.utils.image.mnist import decode_idx3_ubyte, decode_idx1_ubyte
+from src.utils.image.mnist import decode_idx3_ubyte, decode_idx1_ubyte
 
 
 
@@ -21,9 +21,6 @@ class FMNISTDatasetOnline(torch.utils.data.Dataset):
     @property
     def img_shape(self):
         return self._img_shape
-
-
-
 
 
 class FMNISTDatasetLocal(torch.utils.data.Dataset):

@@ -3,10 +3,10 @@ import typing as t
 import pandas as pd
 import random
 from torch import nn
-from ...core.interface.infra_easy import easyPredictor
-from ...core.evaluation.evaluate import accuracy
-from ...core.utils.image.display import display_images_with_labels
-from ...core.utils.image.mnist import decode_idx3_ubyte, decode_idx1_ubyte
+from src.core.interface.infra_easy import easyPredictor
+from src.core.evaluation.evaluate import accuracy
+from src.utils.image.display import display_images_with_labels
+from src.utils.image.mnist import decode_idx3_ubyte, decode_idx1_ubyte
 
 
 
@@ -51,8 +51,6 @@ class fmnistClassifier(easyPredictor):
 
         self.net = net
 
-
-
     def predict(self, imgdata_fpath, select_size, view=False):
 
         sample_imgTensor = decode_idx3_ubyte(imgdata_fpath).type(torch.float32) # tensor shape:(numImgs, 1, numRows, numCols)
@@ -82,8 +80,6 @@ class fmnistClassifier(easyPredictor):
             print("display prediction")
             display_images_with_labels(self._input_imgTensor, pred_labels)
     
-
-
     def evaluate(self, imglabel_fpath, view=True):
         assert hasattr(self, 'pred_classes'), f'predicted class not found'
 
@@ -105,11 +101,6 @@ class fmnistClassifier(easyPredictor):
 
         return self.eval_fn(pred_imgclsTensor, input_imgclsTensor) / input_imgclsTensor.size(0)
     
-
-
-
-
-
     @property
     def pred_scores(self) -> t.List[float]:
         return self._pred_scores
