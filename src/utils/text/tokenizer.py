@@ -624,8 +624,8 @@ import pyarrow.compute as pc
 import numpy as np
 from collections import defaultdict
 from multiprocessing import get_context, Manager
-from ..file.remove import clean_folder
-from ...design.stream_outline import stream_parallel_process_with_pending
+from src.utils.file_utils.remove import clean_folder
+from src.common.stream_control import stream_parallel_process_with_pending
 
 # count_pair_batch 和 merge_pair_batch 分别是完成 统计batch的token-pair occurrence信息/合并batch的token-pair到new_token 的核心函数.
 # 接口设计:

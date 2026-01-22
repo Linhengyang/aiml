@@ -6,7 +6,7 @@
 # import os
 # import typing as t
 import sys
-from src.core.utils.text.tokenizer import mpbufferBBPE_u16Tokenizer
+from src.utils.text.tokenizer import mpbufferBBPE_u16Tokenizer
 
 
 if __name__ == "__main__":
