@@ -156,7 +156,7 @@ struct merged_u16token_offset_ptrs {
 
 
 // 给单一进程用的 merge uint16_t token-pair batch data 的 core
-merged_u16token_offset_ptrs local_merge_u16pair_core(
+std::pair<uint16_t*, int64_t*> local_merge_u16pair_core(
     const uint16_t* tokens_flat,
     const int64_t* offsets,
     const size_t num_chunks,

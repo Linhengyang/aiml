@@ -1,11 +1,12 @@
 # distutils: language = c++
-# cython: language_level=3, boundscheck=True, wraparound=True
+# cython: language_level=3, boundscheck=False, wraparound=False
 
 import numpy as np
 import sys
 cimport numpy as cnp
 from libc.stdint cimport uint32_t, int64_t, uint64_t, uintptr_t
 import ctypes
+import cython
 
 cnp.import_array()
 
@@ -66,8 +67,12 @@ cpdef initialize_thread(size_t block_size):
 
 
 
-cpdef count_u32pair_batch(
-    object tokens_offsets
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef tuple count_u32pair_batch(
+    tuple tokens_offsets
 ):
     # reset 进程tls内存池 / 基于tls内存池的计数器
     reset_thread()
@@ -76,13 +81,14 @@ cpdef count_u32pair_batch(
     cdef cnp.ndarray[cnp.int64_t, ndim=1, mode="c"] offsets = tokens_offsets[1]
 
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
-    if _LENGTH != offsets[-1]:
-        sys.exit(1)
+    cdef size_t num_chunks = offsets.shape[0] - 1 # num of chunks
+    if _LENGTH != offsets[num_chunks]:
+        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offset {offsets[num_chunks]}")
     
     # 制作 L_tokens: token pair 左边的 tokens 和 R_tokens: token pair 右边的 tokens 
     mask = np.full(shape=(_LENGTH,), fill_value=True)
     chunk_ends_ = (offsets-1)[1:]
-    chunk_starts_ = offsets[:-1]
+    chunk_starts_ = offsets[:num_chunks]
 
     # ends_ == starts_ 的，说明chunk长度为1, 不需要统计paircounts. filter out
     _where_equal_ = chunk_ends_ == chunk_starts_
@@ -101,7 +107,7 @@ cpdef count_u32pair_batch(
     # 检查 L_tokens 和 R_tokens 长度.
     cdef size_t len = L_tokens.shape[0]
     if len != R_tokens.shape[0]:
-        sys.exit(1)
+        raise ValueError(f"Left & Right tokens length mismatch")
     
     if len == 0:
         return (np.array([], dtype=np.uint32),
@@ -162,8 +168,12 @@ cpdef count_u32pair_batch(
 
 
 
-cpdef merge_u32pair_batch(
-    object tokens_offsets,
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+cpdef tuple merge_u32pair_batch(
+    tuple tokens_offsets,
     cnp.uint32_t pair_L,
     cnp.uint32_t pair_R,
     cnp.uint32_t new_token,
@@ -182,7 +192,7 @@ cpdef merge_u32pair_batch(
     
     cdef int64_t _LENGTH = tokens_flat.shape[0] # token_flat's total length
     if _LENGTH != offsets[num_chunks]:
-        sys.exit(1)
+        raise ValueError(f"tokens_flat length {_LENGTH} mismatch with last offset {offsets[num_chunks]}")
     
     # const uint32_t[::1]保证 memoryview是只读+内存连续的
     # 因为tokens_flat来自 np.array(..., dtype=..., copy=False) 共享了只读数据

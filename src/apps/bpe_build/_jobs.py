@@ -63,7 +63,7 @@ def bpe_train():
 
 def bpe_continue(tok_path:str|None):
     print('continue to run BPE on dataset TinyStories')
-    tok = mtbufferBBPE_u32Tokenizer(name='init', buffer_dir='../cache/bpe_build/buffer')
+    tok = mpbufferBBPE_u16Tokenizer(name='init', buffer_dir='../cache/temp/buffer')
 
     if tok_path and os.path.isfile(tok_path):
         tok.load(tok_path)
@@ -78,7 +78,7 @@ def bpe_continue(tok_path:str|None):
                   format = 'byte',
                   language = 'en',
                   batch_size_level = 'medium',
-                  memory_utilization = 0.9,
+                  memory_utilization = 0.8,
                   keep_window = 3,
                   verbose = True
                   )

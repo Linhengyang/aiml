@@ -164,7 +164,7 @@ merged_u16token_offset_ptrs c_local_merge_u16pair_batch(
     {
         auto& pool = singleton_mempool::get();
 
-        merged_u16token_offset_ptrs result = local_merge_u16pair_core(
+        auto [merged_tokens_flat_ptr, merged_offsets_ptr] = local_merge_u16pair_core(
             tokens_flat,
             offsets,
             num_chunks,
@@ -181,17 +181,17 @@ merged_u16token_offset_ptrs c_local_merge_u16pair_batch(
 
             size_t j = 0;
             for(size_t i = 0; i < num_chunks; i++) {
-                if(result.merged_offsets_ptr[i] != result.merged_offsets_ptr[i+1]) {
-                    merged_filtered_offsets[j] = result.merged_offsets_ptr[i];
+                if(merged_offsets_ptr[i] != merged_offsets_ptr[i+1]) {
+                    merged_filtered_offsets[j] = merged_offsets_ptr[i];
                     ++j;
                 }
             }
-            merged_filtered_offsets[j] = result.merged_offsets_ptr[num_chunks];
+            merged_filtered_offsets[j] = merged_offsets_ptr[num_chunks];
 
-            return merged_u16token_offset_ptrs{result.merged_tokens_flat_ptr, merged_filtered_offsets, j};
+            return merged_u16token_offset_ptrs{merged_tokens_flat_ptr, merged_filtered_offsets, j};
         }
 
-        return result;
+        return merged_u16token_offset_ptrs{merged_tokens_flat_ptr, merged_offsets_ptr, num_chunks};
     }
     catch(const std::exception& e)
     {
