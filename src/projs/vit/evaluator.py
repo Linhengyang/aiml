@@ -1,6 +1,6 @@
 import os
-from ...core.base.tool.evaluate import Timer, Accumulator, accuracy, metric_summary
-from ...core.design.dl_interface import epochEvaluator
+from ...core.evaluation.evaluate import Timer, Accumulator, accuracy, metric_summary
+from ...core.interface.simple import epochEvaluator
 from ...core.base.tool.visualize import Animator
 import yaml
 configs = yaml.load(open('src/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)

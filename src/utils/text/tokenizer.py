@@ -63,7 +63,7 @@ import regex as re
 import os
 import functools
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed, Future
-from ..system.math import check_monotonic
+from ..math import check_monotonic
 
 
 GPT4_TOKENIZER_REGEX = \
@@ -624,7 +624,7 @@ import pyarrow.compute as pc
 import numpy as np
 from collections import defaultdict
 from multiprocessing import get_context, Manager
-from ..file.folder_op import clean_folder
+from ..file.remove import clean_folder
 from ...design.stream_outline import stream_parallel_process_with_pending
 
 # count_pair_batch 和 merge_pair_batch 分别是完成 统计batch的token-pair occurrence信息/合并batch的token-pair到new_token 的核心函数.
@@ -642,7 +642,7 @@ from ...design.stream_outline import stream_parallel_process_with_pending
 # 但是多线程的 count_pair_batch/merge_pair_batch 必须做到 release GIL, 不然无法得到有效加速. 不管是 Cython-extend, 还是 numpy, 都需要 no-gil 处理.
 # 故本项目暂时全面使用 多进程处理: 虽然多了一次 data 从主进程 IPC 到 进程池 的通信成本, 但是主逻辑的编写清晰很多(无论是cython/numpy).
 # 要注意: 无论是 count_pair_batch 还是 merge_pair_batch 的 result 落盘, 都直接在工作进程里完成, 不要把 result IPC回到主进程再 落盘减少一次 IPC 成本.
-# TODO: 多线程版本的 count_pair_batch/merge_pair_batch 是效率更高的 并行 办法
+
 
 
 def count_pair_batch(tokens_offsets):

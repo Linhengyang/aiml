@@ -62,3 +62,21 @@ def check_monotonic(
         return True # 遍历 第 0 至 len(seq) - 2 个元素 与其后一个的比较，若都是 >=，说明它是单调递减的
     else:
         raise ValueError(f'wrong mode for {mode}. must be increase/decrease')
+    
+
+
+
+def get_compression_ratio(string: str, indices: list[int]) -> float:
+    """
+    给定 string 和 对应的 tokenized integers 列表，计算 压缩率 = string utf-8字节数量 / tokens 数量
+    举例1:
+        全英文字符 string, unicode number as token ID, 这样 len(string) = utf-8字节数量 = unicode number 数量
+        故 压缩率 = 1
+    举例2:
+        全中文字符 string, unicode number as token ID, 这样 len(string) = utf-8字节数量 / 3 = unicode number 数量
+        故 压缩率 = 3
+    """
+    num_bytes = len(bytes(string, encoding="utf-8"))
+    num_tokens = len(indices)
+    
+    return num_bytes / num_tokens

@@ -36,9 +36,6 @@ class Timer:  #@save
         return np.array(self.times).cumsum().tolist()
 
 
-
-
-
 class Accumulator:  #@save
     """在n个变量上累加"""
     def __init__(self, n):
@@ -52,9 +49,6 @@ class Accumulator:  #@save
 
     def __getitem__(self, idx):
         return self.data[idx]
-
-
-
 
 
 def metric_summary(
@@ -73,9 +67,6 @@ def metric_summary(
     name_value_pairs = [name+str(val) for name, val in zip(names, vals)]
 
     return separator.join(name_value_pairs)
-
-
-
 
 
 def bleu(pred_seq, label_seq, k):
@@ -111,10 +102,6 @@ def bleu(pred_seq, label_seq, k):
     return score
 
 
-
-
-
-
 def accuracy(y_hat: Tensor, y: Tensor) -> float:
     """
     计算预测正确的数量, 类似nn.CrossEntropyLoss
@@ -129,10 +116,6 @@ def accuracy(y_hat: Tensor, y: Tensor) -> float:
     return float(cmp.type(y.dtype).sum())
 
 
-
-
-
-
 def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
     """
     计算二值预测中正确的数量, 类似nn.BCELoss(Binary Cross Entropy Loss)
@@ -145,9 +128,6 @@ def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
     return float(cmp.type(y.dtype).sum())
 
 
-
-
-
 # 二分类问题的四种预测结果
 # True Positive: 正确地判别成1, 即Truth为1的元素, 预测为1
 # False Negative: 错误地判别成0, 即Truth为1的元素, 预测为0
@@ -155,10 +135,7 @@ def binary_accuracy(y_hat: Tensor, y: Tensor, threshold=0.5):
 # False Positive: 错误地判别成1, 即Truth为0的元素, 预测为1
 
 
-
-
-
-def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
+def get_confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
     '''
     y_hat & y shape: (*), same shape
     y should be 0-1 tensor
@@ -174,23 +151,16 @@ def confuse_mat(y_hat: Tensor, y: Tensor, threshold=0.5):
     return {'TP':TP, 'FN':FN, 'TN':TN, 'FP':FP}
 
 
-
-
-
 def binary_classify_eval_rates(y_hat: Tensor, y: Tensor, threshold=0.5):
     '''
     y_hat & y shape: (*), same shape
     y should be 0-1 tensor
     '''
-    confuse_mat = confuse_mat(y_hat, y, threshold)
+    confuse_mat = get_confuse_mat(y_hat, y, threshold)
     TP, FN, TN, FP = confuse_mat['TP'], confuse_mat['FN'], confuse_mat['TN'], confuse_mat['FP']
     acc_rt, precision, recall = (TP+TN)/(TP+FN+TN+FP), TP/(TP+FP), TP/(TP+FN)
     FPR = FP/(FP+TN)
     return {'acc_rt':acc_rt, 'precision':precision, 'recall':recall, 'TPR':recall, 'FPR':FPR}
-
-
-
-
 
 
 # ROC曲线: 给定一个二分类器和阈值, 作用在样本V中, 关注预测为Positive的样本, 可得到TPR和FPR
@@ -201,13 +171,10 @@ def binary_classify_eval_rates(y_hat: Tensor, y: Tensor, threshold=0.5):
 # 当阈值为0时, 所有样本预测为1, 此时FN=TN=0, TPR=FPR=1, 点在(1, 1)
 # 当阈值为1时, 所有样本预测为0, 此时TP=FP=0, TPR=FPR=0, 点在(0, 0)
 # 当阈值从1到0时, 由于标准放低, 更多样本被预测为1, FN和TN都会减小或持平(二者之和会减小), 所以TPR和FPR都会变大或持平
+
+
 def roc_curve(net, sample):
     raise NotImplementedError
-
-
-
-
-
 
 
 # AUC指标: ROC曲线下面的面积, 代表「随机给定一对正负样本, 存在一个阈值可用在该分类器上将二者分开」的概率, 即「随机给定一对正负样本, 二者的预测序正确」的概率
