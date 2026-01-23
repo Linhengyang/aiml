@@ -5,7 +5,7 @@ import torch
 import typing as t
 import pandas as pd
 from .dataset import wikitextDataset
-from .network import BERT, BERTLoss
+from .pretrain import bert_pretrain, bert_pretrain_loss, bertConfig
 from .trainer import bertPreTrainer
 from .evaluator import bertEpochEvaluator
 from .predictor import tokensEncoder
@@ -16,39 +16,19 @@ from src.utils.math import cosine_similarity
 
 configs = yaml.load(open('src/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
-################## directories ##################
-# set train log file path / network resolve output path / params save path / source&targe vocabs path
-
 ################## symbols and vocabs in workspace/cache ##################
 glossary_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'glossary' )
 vocab_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'vocab' )
 
-
-
 ################## params saved in workspace/model ##################
 model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
-
-
 
 ################## log file in workspace/logs ##################
 log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
-
-################## data-params ##################
-max_len = configs['max_len']
-
-
-################## network-params ##################
-num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias = 2, 2, 128, 0.1, 256, False
-
-
 ################## train-params ##################
 num_epochs, batch_size, lr = 20, 512, 0.00015
 
-
-# num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
-# batch_size
-# ---------------------> 4GB 显存
 
 
 
@@ -62,7 +42,6 @@ def prepare_job():
         print(f'directory {dir_name} created')
 
     # generate glossary of source/target language and save them
-    # not use BPE
 
     # 读取全部语料 corpus
     train_df = pd.read_parquet(configs['train_data'])
@@ -72,7 +51,6 @@ def prepare_job():
     del train_df, valid_df, test_df
     
     corpus = ' '.join( full_df['text'].tolist() )
-
     uniq_size = len( set(corpus.split(' ')) )
     print(f'unique word size:{uniq_size}')
 
@@ -83,12 +61,11 @@ def prepare_job():
         # create wiki glossary
         glossary = get_BPE_glossary(corpus = corpus, EOW_token = "</w>", merge_times = 40000, save_path = glossary_path)
 
-
     # vocab
     # 当 vocab_path 文件不存在时, 生产并保存 wiki_vocab 到 vocab_dir/wiki.json
     vocab_path = os.path.join(vocab_dir, 'wiki.json')
     if not os.path.exists(vocab_path):
-        vocab = Vocab(corpus=corpus, glossary=glossary, need_lower=True, reserved_tokens=['<pad>', '<mask>', '<cls>', '<sep>'],
+        vocab = Vocab(corpus, glossary, need_lower=True, reserved_tokens=['<pad>', '<mask>', '<cls>', '<sep>'],
                       unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|', min_freq=5)
         vocab.save(vocab_path)
 
@@ -108,21 +85,19 @@ def pretrain_job(vocab_path):
 
     # /workspace/model/[proj_name]/saved_params[timetag].params
     saved_params_fpath = os.path.join( model_dir, f'saved_params_{now_minute}.pth' )
-
-    trainset = wikitextDataset(fpath=configs['train_data'], vocab_path = vocab_path, max_len = max_len,
-                               cls_token = '<cls>', eos_token = '<sep>', mask_token='<mask>')
-    validset = wikitextDataset(fpath=configs['valid_data'], vocab_path = vocab_path, max_len = max_len,
-                               cls_token = '<cls>', eos_token = '<sep>', mask_token='<mask>')
-    testset = wikitextDataset(fpath=configs['test_data'], vocab_path = vocab_path, max_len = max_len,
-                              cls_token = '<cls>', eos_token = '<sep>', mask_token='<mask>')
+    seq_len = configs['bertconfig'].seq_len
+    trainset = wikitextDataset(configs['train_data'], vocab_path, seq_len, '<cls>', '<sep>', '<mask>')
+    validset = wikitextDataset(configs['valid_data'], vocab_path, seq_len, '<cls>', '<sep>', '<mask>')
+    testset = wikitextDataset(configs['test_data'], vocab_path, seq_len, '<cls>', '<sep>', '<mask>')
 
 
-    # design net & loss
-    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout, "seq_len":max_len,
-                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blks":num_blks}
-    
-    net = BERT(vocab_size=len(testset.vocab), **net_args)
-    loss = BERTLoss()
+    # construct model
+    net_config = bertConfig(**configs['bertconfig'])
+    net_config.vocab_size = len(testset.vocab) # vocab_size 用实际 vocab from vocab_path 重设
+    net = bert_pretrain(net_config)
+
+    # loss for train task
+    loss = bert_pretrain_loss()
 
     # init trainer
     trainer = bertPreTrainer(net, loss, num_epochs, batch_size)
@@ -160,16 +135,15 @@ def embed_job(saved_params_fpath, vocab_path):
     device = torch.device('cpu')
   
     # construct model
-    net_args = {"num_heads":num_heads, "num_hiddens":num_hiddens, "dropout":dropout, "seq_len":max_len,
-                "use_bias":use_bias, "ffn_num_hiddens":ffn_num_hiddens, "num_blks":num_blks}
-    
-    net = BERT(vocab_size=len(vocab), **net_args).to(device)
+    net_config = bertConfig(**configs['bertconfig'])
+    net_config.vocab_size = len(vocab) # vocab_size 用实际 vocab from vocab_path 重设
+    net = bert_pretrain(net_config).to(device)
 
     # load params
     net.load_state_dict(torch.load(saved_params_fpath, map_location=device))
     net.eval()
 
-    bertEncoder = tokensEncoder(vocab, net, max_len, device)
+    bertEncoder = tokensEncoder(vocab, net, configs['bertconfig'].seq_len, device)
 
 
     tokens = ['a', 'crane', 'is', 'flying']
@@ -184,7 +158,3 @@ def embed_job(saved_params_fpath, vocab_path):
 
     print('similarity for word "a":', cosine_similarity(embd_output1[0], embd_output2[0]))
     print('similarity for word "crane":', cosine_similarity(embd_output1[1], embd_output2[1]))
-
-
-def finetune_jon():
-    pass
