@@ -2,11 +2,9 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
-import typing as t
-import pandas as pd
 import yaml
 from src.utils.text.tokenizer import ENDOFTEXT, mpbufferBBPE_u16Tokenizer
-from .network import gpt2Config, gpt2
+from src.core.models.gpt2 import gpt2Config, gpt2Model
 from .loss import gpt2_pretrain_loss
 from .dataset import mtDataset
 from .trainer import gpt2Trainer
@@ -127,7 +125,7 @@ def pretrain_job():
 
     # design net & loss
     net_config = gpt2Config(**configs['gpt2config'])
-    net = gpt2(net_config)
+    net = gpt2Model(net_config)
     loss = gpt2_pretrain_loss()
 
     # init trainer
@@ -153,7 +151,7 @@ def generate_job():
     device = torch.device('cuda')
     saved_params_path = os.path.join(model_dir, f'saved_params_2025-09-30_12:04.pth')
     net_config = gpt2Config(**configs['gpt2config'])
-    net = gpt2(net_config).to(device)
+    net = gpt2Model(net_config).to(device)
 
     net.load_state_dict(torch.load(saved_params_path, map_location=device))
 
