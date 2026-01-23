@@ -1,7 +1,7 @@
-from ...core.utils.text.text_preprocess import preprocess_space
-from ...core.utils.text.vocabulize import Vocab
-from ...core.utils.data.batchify import truncate_pad
-from ...core.utils.text.string_segment import sentence_segment_greedy
+from src.utils.text.text_preprocess import preprocess_space
+from src.utils.text.vocabulize import Vocab
+from src.core.data.assemble import truncate_pad
+from src.utils.text.string_segment import sentence_segment_greedy
 import torch
 import typing as t
 import re
@@ -75,12 +75,6 @@ def tokenize_seq2seqText(
     return source, target
 
 
-
-
-
-
-
-
 def tensorize_tokens(tokens, vocab, num_steps):
     """
     inputs:
@@ -106,10 +100,6 @@ def tensorize_tokens(tokens, vocab, num_steps):
     valid_len = (array != vocab['<pad>']).type(torch.int32).sum(1)
 
     return array, valid_len
-
-
-
-
 
 
 def build_seq2seqDataset(raw_text:str,
@@ -168,20 +158,6 @@ def build_seq2seqDataset(raw_text:str,
     tgt_array, tgt_valid_len = tensorize_tokens(target, tgt_vocab, num_steps)# all tgt data, shapes (num_examples, num_stpes), (num_examples,)
 
     return (src_array, src_valid_len, tgt_array, tgt_valid_len)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class seq2seqDataset(torch.utils.data.Dataset):

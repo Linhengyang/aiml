@@ -1,6 +1,6 @@
-from ...core.base.tool.evaluate import Timer, Accumulator, metric_summary
-from ...core.design.dl_interface import epochEvaluator
-from ...core.base.tool.visualize import Animator
+from src.core.evaluation.evaluate import Timer, Accumulator, metric_summary
+from src.core.interface.infra_easy import epochEvaluator
+from src.utils.visualize import Animator
 import yaml
 import typing as t
 

@@ -46,7 +46,7 @@
 
 import torch
 import typing as t
-from ...core.utils.data.batchify import pack_seq_to_batch_slide
+from src.core.data.assemble import chunk_seq_to_batch_slide
 
 
 
@@ -55,8 +55,8 @@ class mtDataset(torch.utils.data.Dataset):
         super().__init__()
         data = torch.load(data_path)
 
-        input_seq_seg = pack_seq_to_batch_slide(data[:, :-1], seq_len, overlap, pad_value) # [B, 2, seq_len]
-        label_seq_seg = pack_seq_to_batch_slide(data[:, 1:], seq_len, overlap, pad_value) # [B, 2, seq_len]
+        input_seq_seg = chunk_seq_to_batch_slide(data[:, :-1], seq_len, overlap, pad_value) # [B, 2, seq_len]
+        label_seq_seg = chunk_seq_to_batch_slide(data[:, 1:], seq_len, overlap, pad_value) # [B, 2, seq_len]
 
         self.input_seqs = input_seq_seg[:, 0, :] # [B, seq_len]
         self.input_segs = input_seq_seg[:, 1, :] # [B, seq_len]

@@ -1,8 +1,8 @@
 import pytest
 import os
 import shutil
-from src.core.utils.file.folder_op import clean_folder
-from src.core.utils.text.tokenizer import baseBBPETokenizer, mpbufferBBPE_u16Tokenizer, mtbufferBBPE_u32Tokenizer
+from src.utils.file_utils.remove import clean_folder
+from src.utils.text.tokenizer import baseBBPETokenizer, mpbufferBBPE_u16Tokenizer, mtbufferBBPE_u32Tokenizer
 
 # -----------------------------------------------------------------------------
 # common test data

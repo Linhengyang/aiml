@@ -10,9 +10,9 @@ from .trainer import bertPreTrainer
 from .evaluator import bertEpochEvaluator
 from .predictor import tokensEncoder
 import yaml
-from ...core.utils.text.vocabulize import Vocab
-from ...core.utils.text.glossary import get_BPE_glossary
-from ...core.utils.system.math import cosine_similarity
+from src.utils.text.vocabulize import Vocab
+from src.utils.text.glossary import get_BPE_glossary
+from src.utils.math import cosine_similarity
 
 configs = yaml.load(open('src/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
@@ -34,49 +34,21 @@ model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 ################## data-params ##################
 max_len = configs['max_len']
-
-
-
 
 
 ################## network-params ##################
 num_blks, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias = 2, 2, 128, 0.1, 256, False
 
 
-
-
-
-
 ################## train-params ##################
 num_epochs, batch_size, lr = 20, 512, 0.00015
-
-
-
-
-
-
 
 
 # num_blk, num_heads, num_hiddens, dropout, use_bias, ffn_num_hiddens = 2, 4, 256, 0.1, False, 64
 # batch_size
 # ---------------------> 4GB 显存
-
-
 
 
 
@@ -122,8 +94,6 @@ def prepare_job():
 
     print('prepare job complete')
     return vocab_path
-
-
 
 
 def pretrain_job(vocab_path):
@@ -179,16 +149,6 @@ def pretrain_job(vocab_path):
     return saved_params_fpath
 
 
-
-
-
-
-
-
-
-
-
-
 def embed_job(saved_params_fpath, vocab_path):
     print('embedding job begin')
 
@@ -224,8 +184,6 @@ def embed_job(saved_params_fpath, vocab_path):
 
     print('similarity for word "a":', cosine_similarity(embd_output1[0], embd_output2[0]))
     print('similarity for word "crane":', cosine_similarity(embd_output1[1], embd_output2[1]))
-
-
 
 
 def finetune_jon():

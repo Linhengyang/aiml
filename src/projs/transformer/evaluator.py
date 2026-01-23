@@ -1,6 +1,6 @@
-from ...core.base.tool.evaluate import Timer, Accumulator, metric_summary
-from ...core.design.dl_interface import epochEvaluator
-from ...core.base.tool.visualize import Animator
+from src.core.evaluation.evaluate import Timer, Accumulator, metric_summary
+from src.core.interface.infra_easy import epochEvaluator
+from src.utils.visualize import Animator
 import yaml
 import typing as t
 
@@ -38,7 +38,6 @@ class transformerEpochEvaluator(epochEvaluator):
                 self.legends.append('train_'+name)
             if self.eval_cnts != 0:
                 self.legends.append('valid_'+name)
-        
 
         # 图像显示器
         self.visual_flag = True if visualizer else False
@@ -47,7 +46,6 @@ class transformerEpochEvaluator(epochEvaluator):
 
         # 是否需要在控制台 打印训练日志
         self.verbose_flag = verbose
-
 
     # 确定当前 epcoh 要不要作 reveal train situation 或 evaluate current validation situation
     def judge_epoch(self, epoch):
@@ -63,7 +61,6 @@ class transformerEpochEvaluator(epochEvaluator):
         if self.reveal_flag:
             self.timer = Timer()
     
-
     # @train: record values for scalars
     def record_batch(self, net_inputs_batch, loss_inputs_batch, Y_hat, l):
         # net_inputs_batch = (X, Y_frontshift1, X_valid_lens)
@@ -74,7 +71,6 @@ class transformerEpochEvaluator(epochEvaluator):
             # 记录 batch loss, 和 target batch valid token 数量
             self.reveal_accumulator.add(l.sum(), loss_inputs_batch[1].sum())
     
-
     # @evaluation: record values for scalars
     def evaluate_model(self, net, loss, valid_iter, FP_step:t.Callable, num_batches=None):
         if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
@@ -92,8 +88,6 @@ class transformerEpochEvaluator(epochEvaluator):
 
                 # 记录 batch loss, 和 target batch valid token 数量
                 self.eval_accumulator.add(l.sum(), loss_inputs_batch[1].sum())
-
-
 
     def cast_metric(self):
 

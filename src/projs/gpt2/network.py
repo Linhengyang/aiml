@@ -1,6 +1,6 @@
-from ...core.nn_components.meta_frames import Decoder, DecoderOnly
-from ...core.nn_components.root_layers.position_encoding import LearnAbsPosEnc
-from ...core.nn_components.sub_modules._gpt2 import GPT2DecoderBlock
+from src.core.architectures import Decoder, DecoderOnly
+from src.core.layers.position_encoding import LearnAbsPosEnc
+from src.core.blocks.gpt2 import GPT2DecoderBlock
 from .function import get_segs_pos_attnmask_train, get_segs_pos_attnmask_prefill, get_segs_pos_attnmask_decode
 import torch.nn as nn
 import math
@@ -26,7 +26,6 @@ class gpt2Config:
     use_rope:bool
     ## number of decoder-block
     num_block:int
-
 
 
 class gpt2(DecoderOnly):

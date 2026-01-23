@@ -1,7 +1,7 @@
-from ...core.nn_components.meta_frames import Encoder, Decoder, EncoderDecoder
-from ...core.nn_components.root_layers.position_encoding import TrigonoAbsPosEnc
-from ...core.nn_components.sub_modules._transformer import TransformerEncoderBlock, TransformerDecoderBlock
-from ...core.loss.mask_ce_loss import MaskedCrossEntropyLoss
+from src.core.architectures import Encoder, Decoder, EncoderDecoder
+from src.core.layers.position_encoding import TrigonoAbsPosEnc
+from src.core.blocks.transformer import TransformerEncoderBlock, TransformerDecoderBlock
+from src.core.loss.mask_ce_loss import MaskedCrossEntropyLoss
 import torch.nn as nn
 import math
 import torch
@@ -62,10 +62,6 @@ class TransformerEncoder(Encoder):
             src_enc = blk(src_enc, src_valid_lens)
         
         return src_enc, src_valid_lens
-
-
-
-
 
 
 class TransformerDecoder(Decoder):
@@ -214,8 +210,6 @@ class Transformer(EncoderDecoder):
         #train: output[0] shape: (batch_size, num_steps, vocab_size) tensor of logits, output[2]: None
         #infer: output[0] shape: (1, 1, vocab_size) tensor of logits, output[2]: dict of (1, cur_infer_step i, d_dim) tensor
         return self.decoder(tgt_frontshift1, enc_info)
-
-
 
 
 class transformer_loss(nn.Module):
