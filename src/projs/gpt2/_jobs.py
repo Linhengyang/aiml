@@ -5,20 +5,17 @@ import torch
 import yaml
 from src.utils.text.tokenizer import ENDOFTEXT, mpbufferBBPE_u16Tokenizer
 from src.core.models.gpt2 import gpt2Config, gpt2Model
-from .loss import gpt2_pretrain_loss
+from .pretrain import gpt2_pretrain_loss
 from .dataset import mtDataset
 from .trainer import gpt2Trainer
 from .evaluator import gpt2EpochEvaluator
 
 configs = yaml.safe_load(open('src/projs/gpt2/configs.yaml', 'rb'))
 
-################## directories ##################
-# set train log file path / network resolve output path / params save path / source&targe vocabs path
-
 ################## tokenizer in workspace/artifact ##################
 tokenizer_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'tokenizer' )
 
-################## tokenizer in workspace/artifact ##################
+################## data in workspace/artifact ##################
 data_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'data' )
 
 ################## view vocab in workspace/tmp ##################
