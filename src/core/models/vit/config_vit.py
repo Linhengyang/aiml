@@ -4,7 +4,7 @@ from dataclasses import dataclass
 class vitConfig:
     ## pachify layer configs
     img_shape: tuple
-    patch_size: int
+    patch_size: int|tuple
     ## embedding config
     embd_p_drop: float
     num_hiddens: int

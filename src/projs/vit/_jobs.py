@@ -24,11 +24,6 @@ model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 ################## log file in workspace/logs ##################
 log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
-################## data-params ##################
-patch_size = (7, 7)
-
-################## network-params ##################
-num_blks, num_heads, num_hiddens, embd_p_drop, resid_p_drop, mlp_num_hiddens, use_bias = 2, 4, 64, 0.1, 0.1, 128, False
 
 ################## train-params ##################
 num_epochs, batch_size, lr = 2, 128, 0.0005
@@ -82,7 +77,7 @@ def train_job(data_source):
         json.dump(img_shape, f)
 
     # design net & loss
-    vit_config = vitConfig(img_shape, patch_size, embd_p_drop, num_hiddens, num_heads, use_bias, mlp_num_hiddens, resid_p_drop, num_blks)
+    vit_config = vitConfig(img_shape=img_shape, **configs['vitconfig'])
     vit = ViTClassifier(vit_config)
     loss = nn.CrossEntropyLoss(reduction='none')
     # init trainer
@@ -116,7 +111,7 @@ def infer_job(saved_params_fpath):
     # set device
     device = torch.device('cuda')
     ## construct classifier
-    vit_config = vitConfig(img_shape, patch_size, embd_p_drop, num_hiddens, num_heads, use_bias, mlp_num_hiddens, resid_p_drop, num_blks)
+    vit_config = vitConfig(img_shape=img_shape, **configs['vitconfig'])
     net = ViTClassifier(vit_config).to(device)
     net.load_state_dict(torch.load(saved_params_fpath, map_location=device))
     net.eval()

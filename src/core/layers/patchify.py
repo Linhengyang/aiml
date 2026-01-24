@@ -37,7 +37,6 @@ def minpad_to_divide(img_batch, patch_size, mode='constant', value=0):
     return nn.functional.pad(img_batch, pad=(pad_num_l, pad_num_r, pad_num_u, pad_num_d), mode=mode, value=value)
 
 
-
 def calc_patchifed_sizes(img_shape, patch_size):
     '''
     img_shape: (c, h, w), patch_size: (p_h, p_w)
@@ -50,7 +49,6 @@ def calc_patchifed_sizes(img_shape, patch_size):
     patch_flatlen = c * k_h * k_w
 
     return num_patches, patch_flatlen
-
 
 
 def patchify(img_batch, patch_size, pad_mode="constant", pad_value=0):
@@ -81,12 +79,10 @@ def patchify(img_batch, patch_size, pad_mode="constant", pad_value=0):
     #   shape: (B, 3, H, W)
     #   stride: (_ = 3*H*W, __ = H*W, W, 1)
 
-
     # unfold(dim=3, p_w, p_w):
     # shape (B, 3, H, W) -vanilla-> (B, 3, H, W//p_w, p_w)
     # stride (3*H*W, H*W, W, 1) -vanilla-> (3*H*W, H*W, W, p_w, 1)
     padImgBatch_unfold_W = padImgBatch.unfold(3, p_w, p_w)
-
 
     # switch unfolded dim(width) forward
     padImgBatch_unfold_W = padImgBatch_unfold_W.permute(0, 1, 3, 2, 4)
@@ -160,11 +156,8 @@ class Patchify(nn.Module):
             patch_size = (patch_size, patch_size)
         
         self.img_shape = img_shape
-
         self._patch_size, self.pad_mode, self.pad_value = patch_size, pad_mode, pad_value
-
         self._num_patches, self._patch_flatlen = calc_patchifed_sizes(img_shape, patch_size)
-
 
 
     def forward(self, img_batch):
@@ -175,16 +168,13 @@ class Patchify(nn.Module):
         
         return patchify(img_batch, self._patch_size, self.pad_mode, self.pad_value)
     
-
     @property
     def patch_size(self):
         return self._patch_size
 
-
     @property
     def num_patches(self):
         return self._num_patches
-    
     
     @property
     def patch_flatlen(self):
