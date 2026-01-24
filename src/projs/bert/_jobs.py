@@ -92,8 +92,7 @@ def pretrain_job(vocab_path):
     testset = wikitextDataset(configs['test_data'], vocab_path, seq_len, '<cls>', '<sep>', '<mask>')
 
     # construct model
-    net_config = bertConfig(**configs['bertconfig'])
-    net_config.vocab_size = len(testset.vocab) # vocab_size 用实际 vocab from vocab_path 重设
+    net_config = bertConfig(vocab_size=len(testset.vocab), **configs['bertconfig'])
     net = bert_pretrain(net_config)
     # loss for train task
     loss = bert_pretrain_loss()
@@ -130,8 +129,7 @@ def embed_job(saved_params_fpath, vocab_path):
     device = torch.device('cpu')
   
     # construct model
-    net_config = bertConfig(**configs['bertconfig'])
-    net_config.vocab_size = len(vocab) # vocab_size 用实际 vocab from vocab_path 重设
+    net_config = bertConfig(vocab_size=len(vocab), **configs['bertconfig'])
     net = BERTEncoder(net_config).to(device)
 
     # load params

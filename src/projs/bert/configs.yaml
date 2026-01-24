@@ -35,7 +35,6 @@ resource_dir: '../../resource'
 # network-params
 bertconfig:
   num_hiddens: 128
-  vocab_size: 40000
   embd_p_drop: 0.1
   use_abspos: False
   seq_len: 64
