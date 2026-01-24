@@ -236,12 +236,12 @@ class MultiHeadAttention(nn.Module):
 
 
 
-# 因果遮罩 casual mask: 当自回归式生成 N 个 token时, 意味着用 token1 生成 token2, token1-2 生成 token2, ..., token1-N 生成 tokenN
-# 1  0  0  0  0       ---> tok_1 = f(tok_1)
-# 1  1  0  0  0       ---> tok_2 = f(tok_1, tok_2)
-# 1  1  1  0  0       ---> tok_3 = f(tok_1, tok_2, tok_3)
-# 1  1  1  1  0       ---> tok_4 = f(tok_1, tok_2, tok_3, tok_4)
-# 1  1  1  1  1       ---> tok_5 = f(tok_1, tok_2, tok_3, tok_4, tok_5)
+# 因果遮罩 casual mask: 当自回归式生成 N 个 token时, 意味着用 token1 生成 token2, token1<->2 生成 token3, ..., token1<->N-1 生成 tokenN
+# 1  0  0  0  0       ---> tok_2 = f(tok_1)
+# 1  1  0  0  0       ---> tok_3 = f(tok_1, tok_2)
+# 1  1  1  0  0       ---> tok_4 = f(tok_1, tok_2, tok_3)
+# 1  1  1  1  0       ---> tok_5 = f(tok_1, tok_2, tok_3, tok_4)
+# 1  1  1  1  1       ---> tok_6 = f(tok_1, tok_2, tok_3, tok_4, tok_5)
 #                     ....
 # 上述右边的式子, 假设 f 是线性的, 那么系数矩阵可以看作左边的因果矩阵 hadmad-乘 全系数矩阵
 # 左边 因果遮罩 的构建方法:
@@ -258,8 +258,9 @@ class MultiHeadAttention(nn.Module):
 # 4 a  a  a  a    --> 5
 
 # 注意力遮罩 attention mask: 注意力矩阵 [B, H, L_q, L_kv] 在乘 v[B, H, L_kv, d] 之前, 要屏蔽掉一些 非法的 贡献项.
-# 首先 PAD 参与计算的就是非法贡献项
+# 这里屏蔽的意思就是: 前向计算中关键步骤的关键位置用0替代, 消除前向贡献; 反向计算中这些被替代的位置不应该参与更新其涉及的权重, 消除反向贡献.
 
+# 首先 PAD 参与计算的就是非法贡献项
 # 考虑 左PAD. 有时候有些模型会有一个序列起始符, 其实等价于在序列左端 PAD.
 # 现在考虑一个 总序列12345, 用1234生成2345, 但左PAD到定长6, L_q = 6, attention mask = [001111]
 # 显然有以下几个结论: 
@@ -302,8 +303,8 @@ class MultiHeadAttention(nn.Module):
 # encoding 都应该主动透传跨文档信息, 以便模型理解.
 
 
-# 通过 casual_mask/attention_mask/label_mask 三道屏蔽, 以及正确的数据对齐, 无论是左PAD还是右PAD, 在训练上差别不大. 但是在推理时, 如果作并发Batch推理, 
-# 由于始终会取Batch各序列的last token作为q, 那么右PAD的batch, 会导致某些序列在推理时传入了PAD作为q. 
+# 通过 casual_mask/attention_mask/label_mask 三道屏蔽, 以及正确的数据对齐, 无论是左PAD还是右PAD, 在训练上差别不大. 但是在推理时, 如果作凑批Batch推理, 
+# 由于始终会取Batch各序列的last token作为q, 那么右PAD的batch, 会导致某些序列在推理时传入了PAD作为q.
 # 所以推理时把batch各序列作左PAD对齐 比较好. 训练数据右PAD对齐，跟推理batch左PAD对齐不矛盾.
 
 
@@ -329,7 +330,7 @@ from typing import Tuple
 import torch.nn.functional as F
 
 # 由此，CasualMHA 在forward过程可以不依赖 max_context_size: casual_mask可以根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
-# 实际上，CasualMHA 还实现了 input sequence 变长：因为 RoPE 和 attention weights 都支持变长
+# 实际上，CasualMHA 还实现了 input sequence 变长(前后两次forward的sequence长度可以不一样)：因为 RoPE 和 attention weights 都支持变长
 
 # 不过, 在实际Model层面, 仍然会设定max_context_size参数，并保证所有input sequence 的长度都不大于这个值。原因如下:
 #   1. 在 CasualMHA层, casual_mask 和 attention weights在训练时, 涉及 O(L_q^2) 的显存空间占用. 如果不限制 L_q
@@ -337,7 +338,7 @@ import torch.nn.functional as F
 #   2. 很多模型在制作train dataset时，会切分长文档/拼接短文档，成固定长度的chunk。这里的固定长度就约等于模型的max_context_size，因为限制了外推能力.
 #      现代很多LLM的训练策略是curriculum-style: 训练epoch早期使用短序列，后期用长序列，训练时sequence length是动态变化的。
 #   3. RoPE的无限拓展只是理论上的，实际上theta=position_index*频率信号，当position很大时会失真。现代模型多会启用RoPE scaling，而这里
-#      RoPE scaling 依赖 max_context_size
+#      RoPE scaling 依赖 max_context_size. 为了保证 vanilla-RoPE 和 scaling-RoPE 之间接口的一致性, 应该始终保有 max_context_size 参数
 
 class CasualMHA(nn.Module):
     '''
@@ -389,7 +390,7 @@ class CasualMHA(nn.Module):
             self.register_buffer(
                 'casual_mask',
                 torch.triu(torch.ones(max_context_size, max_context_size, dtype=torch.bool), diagonal=1)[None, None, :, :],
-                persistent = False
+                persistent = False # False 指不作为 state_dict 的一部分
                 )
         
         if use_rope:
@@ -420,10 +421,10 @@ class CasualMHA(nn.Module):
             k_cache/v_cache 形状 [B, H, L_past, d], L_so_far = L_past+1
             k/v 使用 k_cache/v_cache 追加 x 信息, 即 k/v as all 1<->L_so_far
             CauslMHA 是计算 with (q: L_so_far, k: 1<->L_so_far, v: 1<->L_so_far), 生成 No. L_so_far+1 token, 得到 attn_w [..., 1, L_so_far].
-            这里 [1, L_so_far]: 代表对于 No. L_so_far token 的 x, 生成 No. L_so_far+1 token 的系数向量. 这里应该是全 1.
+            这里 [1, L_so_far]: 代表对于 No. L_so_far token 的 x, 生成 No. L_so_far+1 token 的系数向量. attn_mask在这里应该是全 1.
 
         return_cache: bool, 默认False
-            当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 L_so_far 所有.
+            当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 1<->L_so_far 所有.
 
         attention_mask: Tensor|None, 默认None, 否则为 tensor [B, L_q, L_so_far]bool
             作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法贡献. 对某 q, 涉及 PAD, 以及不与该 q same-text 的 k, 都是非法贡献, 要屏蔽.
@@ -441,13 +442,13 @@ class CasualMHA(nn.Module):
         相关关系在 训练 / 推理 的定义不同. 在训练时, 只有同一 TEXTDOC 的位置(包括ENDOFTEXT)才算具备相关关系. 在推理时, 全部非PAD位置都算具备相关关系
         
         在实操中, PAD-info/TEXTDOC-info 任一或全部都可以由 segments 表示, segments 可以一起产出 positions 和 attention_mask.
-        这里只考虑 二者同时输入tensor(不检查是否矛盾)/二者同时为 None 两种情况:
+        这里只考虑positions和attention_mask二者同时输入tensor(不检查是否矛盾)/二者同时为 None 两种情况:
             1.只要涉及 PAD, 那么就有 segments, 从而 positions 和 attention_mask 都有.
             2.如果 PAD-info 和 TEXTDOC-info 都没有, 那么 attention_mask 用 None 即可, positions 使用从 0 开始的递增编码即可.
         未来完成 positions/attention_mask 相互转换的函数后(elif分支), 使得本层可以处理 positions/attention_mask 恰只有其一输入的情况. 实操里不会单一输入.
         
         前向输出
-            y: Tensor, shape same as x [B, L_q, D]. next-token 取 y 的 last dim 2.
+            y: Tensor, shape same as x [B, L_q, D]. next-token 取 y 的 last element of dim 2.
 
             new_kv_cache: Tuple[Tensor, Tensor]|None. 当 return_cache == False, new_kv_cache 为 None
                 train 阶段: new_kv_cache = None
@@ -480,7 +481,7 @@ class CasualMHA(nn.Module):
 
         if hasattr(self, 'rope'):
             if positions is not None and attention_mask is not None:
-                pass
+                pass # positions: [B, L_so_far], attention_mask: [B, L_q, L_so_far]
             # elif positions is not None and attention_mask is None:
             #     attention_mask = get_attention_mask_from_position_ids(positions) # [B, H, L_q, L_so_far]
             # elif positions is None and attention_mask is not None:
@@ -522,7 +523,7 @@ class CasualMHA(nn.Module):
         if attention_mask is not None:
             # attention_mask: tensor [B, L_q, L_so_far]/bool. True --> valid_area, False --> invalid_area
             # 这里用 -1e9 填入 而不再用 -inf, 因为 casual_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
-            # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃.
+            # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃. 因为
             # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
             # 所以这里用 finite 大负数 -1e9 而不是 -inf. softmax能正确处理 大负数 和全大负数行.
             attn_w = attn_w.masked_fill((attention_mask == False).unsqueeze(1) , -1e9)
@@ -536,6 +537,80 @@ class CasualMHA(nn.Module):
 
         y = y.transpose(1, 2).reshape(-1, L_q, self.D) # --> [B, L_q, H, d] --> [B, L_q, D]
         y = self.resid_drop(self.W_o(y)) # [B, L_q, D] --> [B, L_q, D]
+
+        new_kv_cache = None
+        if return_cache:
+            new_kv_cache = (k, v)
+
+        return y, new_kv_cache
+
+
+
+class casual_mha(nn.Module):
+    def __init__(self,
+                 embd_size:int,
+                 num_head:int,
+                 use_bias:bool,
+                 max_context_size:int,
+                 attn_p_drop:float,
+                 resid_p_drop:float,
+                 use_cached_casual_mask:bool,
+                 use_rope:bool):
+        super().__init__()
+        self.D = embd_size
+        self.H = num_head
+        self.d = embd_size // num_head
+        self.scale = 1.0 / math.sqrt(self.d)
+        self.W_qkv = nn.Linear(embd_size, 3 * embd_size, bias=use_bias)
+        self.W_o = nn.Linear(embd_size, embd_size, bias=use_bias)
+        self.attn_p_drop = attn_p_drop
+        self.resid_drop = nn.Dropout(resid_p_drop)
+
+        if use_cached_casual_mask:
+            self.register_buffer(
+                'casual_mask',
+                torch.triu(torch.ones(max_context_size, max_context_size, dtype=torch.bool), diagonal=1)[None, None, :, :],
+                persistent = False
+                )
+        if use_rope:
+            self.rope = RotaryPosEnc(RoPEConfig(self.d))
+
+    def forward(self,
+                x:torch.Tensor,                                         # [B, L_q, D]
+                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None = None, # [B, H, L_past, D]
+                return_cache:bool = False,
+                attention_mask:torch.Tensor|None = None,                # [B, L_q, L_so_far=L_past+L_q]
+                positions:torch.Tensor|None = None,                     # [B, L_so_far]
+                ):
+        L_q = x.size(1)
+        qkv = self.W_qkv(x)
+        q, k, v = qkv.split(self.D, dim=-1)
+        q = q.view(-1, L_q, self.H, self.d).transpose(1, 2)
+        k = k.view(-1, L_q, self.H, self.d).transpose(1, 2)
+        v = v.view(-1, L_q, self.H, self.d).transpose(1, 2)
+        if kv_cache:
+            k_past, v_past = kv_cache
+            k, v = torch.cat([k_past, k], dim=2), torch.cat([v_past, v], dim=2)
+
+        L_so_far = k.size(2)
+        L_past = L_so_far - L_q
+
+        if hasattr(self, 'rope'):
+            if positions is not None and attention_mask is not None:
+                pass
+            else:
+                positions = torch.arange(0, L_so_far, dtype=torch.long, device=k.device)
+                attention_mask = None
+
+            cos, sin = self.rope.get_sin_cos(positions, broadcast_axis=1)
+            cos_q, sin_q = cos[:, :, L_past:L_so_far, :], sin[:, :, L_past:L_so_far, :]
+            q = self.rope.apply_rope(q, cos_q, sin_q)
+            k = self.rope.apply_rope(k, cos, sin)
+        
+        y = F.scaled_dot_product_attention(q, k, v, attention_mask, self.attn_p_drop, True, self.scale)
+
+        y = y.transpose(1, 2).reshape(-1, L_q, self.D)
+        y = self.resid_drop(self.W_o(y))
 
         new_kv_cache = None
         if return_cache:
