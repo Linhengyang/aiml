@@ -91,18 +91,14 @@ def pretrain_job(vocab_path):
     validset = wikitextDataset(configs['valid_data'], vocab_path, seq_len, '<cls>', '<sep>', '<mask>')
     testset = wikitextDataset(configs['test_data'], vocab_path, seq_len, '<cls>', '<sep>', '<mask>')
 
-
     # construct model
     net_config = bertConfig(**configs['bertconfig'])
     net_config.vocab_size = len(testset.vocab) # vocab_size 用实际 vocab from vocab_path 重设
     net = bert_pretrain(net_config)
-
     # loss for train task
     loss = bert_pretrain_loss()
-
     # init trainer
     trainer = bertPreTrainer(net, loss, num_epochs, batch_size)
-
     trainer.set_device(torch.device('cuda')) # set the device
     trainer.set_data_iter(trainset, validset, testset) # set the data iters
     trainer.set_optimizer(lr) # set the optimizer
@@ -114,10 +110,8 @@ def pretrain_job(vocab_path):
     if check_flag:
         trainer.log_topology(defined_net_fpath)## print the defined topology
         trainer.init_params()## init params
-
     # fit model
     trainer.fit()
-    
     # save
     trainer.save_model(saved_params_fpath)
 
@@ -143,19 +137,14 @@ def embed_job(saved_params_fpath, vocab_path):
     # load params
     net.load_state_dict(torch.load(saved_params_fpath, map_location=device))
     net.eval()
-
     bertEncoder = tokensEncoder(vocab, net, configs['bertconfig'].seq_len, device)
-
-
     tokens = ['a', 'crane', 'is', 'flying']
     embd_output1 = bertEncoder.predict(tokens)
     print('embedding output 1 shape: ', embd_output1.shape) # (4, num_hiddens)
-    
 
     tokens, tokens_next = ['a', 'crane', 'driver', 'came'], ['he', 'just', 'left']
     embd_output2 = bertEncoder.predict(tokens, tokens_next)
     print('embedding output 2 shape: ', embd_output2.shape) # (4, num_hiddens)
-
 
     print('similarity for word "a":', cosine_similarity(embd_output1[0], embd_output2[0]))
     print('similarity for word "crane":', cosine_similarity(embd_output1[1], embd_output2[1]))
