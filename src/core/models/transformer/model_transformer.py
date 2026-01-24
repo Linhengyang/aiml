@@ -1,7 +1,6 @@
 from src.core.architectures import Encoder, Decoder, EncoderDecoder
 from src.core.layers.position_encoding import TrigonoAbsPosEnc
 from src.core.blocks.transformer import TransformerEncoderBlock, TransformerDecoderBlock
-from src.core.loss.mask_ce_loss import MaskedCrossEntropyLoss
 import torch.nn as nn
 import math
 import torch
@@ -188,11 +187,6 @@ class TransformerDecoder(Decoder):
         return self.dense(tgt_query), KV_Caches
 
 
-
-
-
-
-
 class Transformer(EncoderDecoder):
     ## 整体两种实现模式:
     # 1是encoder和decoder一起训练, 但分开使用, 这样transformer本身只需考虑train batch input的场景, infer的循环放在pred函数里
@@ -212,16 +206,5 @@ class Transformer(EncoderDecoder):
         return self.decoder(tgt_frontshift1, enc_info)
 
 
-class transformer_loss(nn.Module):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.loss = MaskedCrossEntropyLoss(*args, **kwargs)
-    
-    def forward(self, Y_hat, Y_label, Y_valid_lens):
-        # Y_hat, tensor of logits(batch_size, num_steps, vocab_size)
-        # Y_label_batch: (batch_size, num_steps)
-        # Y_valid_lens_batch: (batch_size,)
 
-        valid_area = torch.arange(Y_label.size(1), dtype=torch.int32, device=Y_valid_lens.device).unsqueeze(0) < Y_valid_lens.unsqueeze(1)
-
-        return self.loss(Y_hat.permute(0,2,1), Y_label, valid_area)
+__all__ = ["Transformer"]
