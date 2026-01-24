@@ -196,7 +196,8 @@ class bertPreTrainer(easyTrainer):
     def save_model(self, modelfile_path, method='default'):
         '''保存模型参数 到 modelfile_path. 默认保存方式 method = 'default' .params格式'''
         if method == 'default':
-            torch.save(self.net.state_dict(), modelfile_path)
+            # bert模型只保存 encoder. mlm 和 nsp 部分不需要保存
+            torch.save(self.net.encoder.state_dict(), modelfile_path)
         else:
             raise NotImplementedError(f'save method {method} not implemented')
         

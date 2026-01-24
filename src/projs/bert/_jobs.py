@@ -5,11 +5,12 @@ import torch
 import typing as t
 import pandas as pd
 from .dataset import wikitextDataset
-from .pretrain import bert_pretrain, bert_pretrain_loss, bertConfig
+from .pretrain import bert_pretrain, bert_pretrain_loss
 from .trainer import bertPreTrainer
 from .evaluator import bertEpochEvaluator
 from .predictor import tokensEncoder
 import yaml
+from src.core.models.bert import bertConfig, BERTEncoder
 from src.utils.text.vocabulize import Vocab
 from src.utils.text.glossary import get_BPE_glossary
 from src.utils.math import cosine_similarity
@@ -137,7 +138,7 @@ def embed_job(saved_params_fpath, vocab_path):
     # construct model
     net_config = bertConfig(**configs['bertconfig'])
     net_config.vocab_size = len(vocab) # vocab_size 用实际 vocab from vocab_path 重设
-    net = bert_pretrain(net_config).to(device)
+    net = BERTEncoder(net_config).to(device)
 
     # load params
     net.load_state_dict(torch.load(saved_params_fpath, map_location=device))

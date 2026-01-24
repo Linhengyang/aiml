@@ -39,8 +39,7 @@ def get_bert_embedding(
     # segments: (batch_size, max_len)01 indicating seq1 & seq2 | None, None 代表当前 batch 不需要进入 NSP task
     # mask_positions: (batch_size, num_masktks) | None, None 代表当前 batch 不需要进入 MLM task
     with torch.no_grad():
-        embd_, _, _ = net(input, valid_lens, segments, None) # (batch_size, max_len, num_hiddens)
-
+        embd_ = net(input, valid_lens, segments, None) # (batch_size, max_len, num_hiddens)
 
     return embd_.squeeze(0).cpu().numpy() # (max_len, num_hiddens) move to cpu & numpy
 
