@@ -58,7 +58,6 @@ class vitTrainer(easyTrainer):
             return data_batch, label_batch
         
         self.train_iter = torch.utils.data.DataLoader(train_set, self.batch_size, True, collate_fn=move_to_cuda)
-
         # 是否输入 validate dataset
         if valid_set:
             self.valid_iter = torch.utils.data.DataLoader(valid_set, self.batch_size, False, collate_fn=move_to_cuda)
@@ -83,24 +82,18 @@ class vitTrainer(easyTrainer):
         if need_resolve:
             assert hasattr(self, 'test_iter') and self.test_iter, \
                 f'Please first set valid test_set dataset when deploying .set_data_iter'
-            
             self.net.train()
-
             # 取 inputs
             for X, y in self.test_iter:
                 break
             try:
                 self.optimizer.zero_grad()
                 Y_hat = self.net(X)
-
                 # get loss
                 l = self.loss(Y_hat, y).sum()
-                
                 del Y_hat, l
-
                 self.net_resolved = True
                 print('Net & Loss forward succeed. Net & Loss checked. Ready to fit')
-
             except:
                 self.net_resolved = False
                 raise AssertionError(
@@ -118,7 +111,6 @@ class vitTrainer(easyTrainer):
 
         assert hasattr(self, 'net_resolved') and self.net_resolved, \
             f'network unresolved. Must resolve network before applying init_params'
-
         def xavier_init_weights(m):
             if type(m) == nn.Linear:
                 nn.init.xavier_uniform_(m.weight)
@@ -183,18 +175,13 @@ class vitTrainer(easyTrainer):
             for X, y in self.train_iter:
                 self.optimizer.zero_grad()
                 Y_hat = self.net(X)
-
                 # get loss
                 l = self.loss(Y_hat, y)
-
                 # bp
                 l.sum().backward()
-
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
-
                 self.optimizer.step()
-
                 with torch.no_grad():
                     self.epoch_evaluator.record_batch(X, y, Y_hat, l)
 
