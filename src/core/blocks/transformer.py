@@ -1,114 +1,39 @@
 import torch
 from torch import nn
-from src.core.layers.attention_pool import MultiHeadAttention
+from typing import Tuple
+from src.core.layers.attention_pool import bidirect_mha, causal_mha
+from src.core.layers.feedforward import relu_ffn
 
 
-
-class AddLayerNorm(nn.Module):
-    '''
-    args: norm_shape, dropout
-        norm_shape: the length of tensor's dim for layer norm
-        dropout: dropout rate. Regularization on second input
-    
-    inputs: X, f_X
-        X: batch data
-        f_X: MLP(X) with same shape as X. Usually to achieve resildual connection
-
-    returns: denoted as O
-        O: same shape with input X
-    
-    explains:
-        Add(usually for residual connection), then layer normalize
-    '''
-    def __init__(self, norm_shape, dropout):
+class TransformerDecoderBlock(nn.Module):
+    def __init__(self,
+                 embd_size:int,
+                 num_heads:int,
+                 use_bias:bool,
+                 max_context_size:int,
+                 ffn_hidden_size:int,
+                 attn_p_drop:float,
+                 resid_p_drop:float
+                 ):
         super().__init__()
-        self.dropout = nn.Dropout(dropout)
-        self.ln = nn.LayerNorm(norm_shape)
-    
-    def forward(self, X, f_X):
-        return self.ln(X + self.dropout(f_X))
-    
+        self.causal_attention = causal_mha(embd_size, num_heads, use_bias, max_context_size,
+                                           attn_p_drop, resid_p_drop, False, False)
+        self.layer_norm1 = nn.LayerNorm(embd_size)
+        self.cross_attention = bidirect_mha(embd_size, num_heads, attn_p_drop, use_bias)
+        self.layer_norm2 = nn.LayerNorm(embd_size)
+        self.relu_ffn = relu_ffn(embd_size, ffn_hidden_size, resid_p_drop)
+        self.layer_norm3 = nn.LayerNorm(embd_size)
 
-
-
-class PositionWiseFFN(nn.Module):
-    '''
-    args: ffn_num_hiddens, ffn_num_outputs
-        ffn_num_hiddens: the hidden size inside the MLP
-        ffn_num_outputs: output size of the MLP, usually the same as the input size
-    
-    inputs: X
-
-    returns: denoted as O
-    
-    explains:
-        Perform the same MLP on every position. So only one MLP is enough.
-    '''
-    def __init__(self, ffn_num_hiddens, ffn_num_outputs):
-        super().__init__()
-        self.dense1 = nn.LazyLinear(ffn_num_hiddens)
-        self.relu = nn.ReLU()
-        self.dense2 = nn.LazyLinear(ffn_num_outputs)
-    
-    def forward(self, X):
-        return self.dense2(self.relu(self.dense1(X)))
-    
-
-
-
-
-class TransformerEncoderBlock(nn.Module):
-    '''
-    components: 
-        1. multihead attention(self-att) 
-        2. addLnorm 
-        3. positionwiseFFN 
-        4. addLnorm 
-    args:
-        num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False
-    
-    inputs:
-        X: (batch_size, seq_len, num_hiddens)
-
-        valid_lens(optional): (batch_size,) since it's self-attention. 一条样本只有一个valid length, 这个 valid length 指出了
-        X 在 dim 1 的 valid 长度
-
-    returns:
-        shape: (batch_size, seq_len, num_hiddens), 和输入的 X 保持一致, 因为多个Block要堆叠起来, 所以要保持shape一致
-    
-    explains: 
-        keep batch shape at every layer's input/output through the block 
-        encode source sequence time 1 to T directly to deep sequence time 1 to T, that is: 
-            f(time 1 to T) --> node 1 to T on next layer
+    def forward(self,
+                x:torch.Tensor,
+                encoded:Tuple[torch.Tensor, torch.Tensor],
+                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None=None,
+                return_cache:bool = False,
+                attention_mask:torch.Tensor|None = None):
         
-        自注意力Encoder Block. 对输入样本data作[自注意力-前向-norm]的深度处理, 样本从时间步1到T, 输出结果也是从时间步1到T
-
-        单个样本内部, 时间步之间由于自注意力的机制, 作到了双向前后全连接表征.
-    '''
-    def __init__(self, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False):
-        super().__init__()
-        # multi-head attention
-        # input: Q(batch_size, n_query, q_size), K(batch_size, n_kv, k_size), V(batch_size, n_kv, v_size)
-        # output: (batch_size, n_query, num_hiddens)
-        self.attention = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
-        # add + layer norm
-        # input: (batch_size, n_query, num_hiddens)
-        # output: (batch_size, n_query, num_hiddens)
-        self.addlnorm1 = AddLayerNorm(num_hiddens, dropout)
-        # PosFFN
-        # input: (batch_size, n_query, num_hiddens)
-        # output: (batch_size, n_query, num_hiddens)
-        self.PosFFN = PositionWiseFFN(ffn_num_hiddens, num_hiddens) # ffn_num_hiddens在原始论文里=4*num_hiddens
-
-        self.addlnorm2 = AddLayerNorm(num_hiddens, dropout)
-    
-    def forward(self, X, valid_lens):
-        Y = self.addlnorm1(X, self.attention(X, X, X, valid_lens))
-        return self.addlnorm2(Y, self.PosFFN(Y))
-
-
-
-
+        attn_result, new_kv_cache = self.causal_attention(x, kv_cache, return_cache, attention_mask)
+        x_ = x + attn_result
+        return
 
 
 class TransformerDecoderBlock(nn.Module):
