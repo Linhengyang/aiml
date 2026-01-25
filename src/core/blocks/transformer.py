@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from typing import Tuple
-from src.core.layers.attention_pool import bidirect_mha, causal_mha
+from src.core.layers.attention_pool import BidirectMHA, CausalMHA
 from src.core.layers.feedforward import relu_ffn
 
 
@@ -13,13 +13,14 @@ class TransformerDecoderBlock(nn.Module):
                  max_context_size:int,
                  ffn_hidden_size:int,
                  attn_p_drop:float,
-                 resid_p_drop:float
+                 resid_p_drop:float,
+                 use_cached_causal_mask:bool
                  ):
         super().__init__()
-        self.causal_attention = causal_mha(embd_size, num_heads, use_bias, max_context_size,
-                                           attn_p_drop, resid_p_drop, False, False)
+        self.causal_attention = CausalMHA(embd_size, num_heads, use_bias, max_context_size,
+                                          attn_p_drop, resid_p_drop, False, use_cached_causal_mask)
         self.layer_norm1 = nn.LayerNorm(embd_size)
-        self.cross_attention = bidirect_mha(embd_size, num_heads, attn_p_drop, use_bias)
+        self.cross_attention = BidirectMHA(embd_size, num_heads, attn_p_drop, use_bias)
         self.layer_norm2 = nn.LayerNorm(embd_size)
         self.relu_ffn = relu_ffn(embd_size, ffn_hidden_size, resid_p_drop)
         self.layer_norm3 = nn.LayerNorm(embd_size)
