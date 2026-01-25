@@ -51,56 +51,6 @@ def masked_softmax(S, valid_lens, where_valid='left'):
 
 
 
-class AdditiveAttention(nn.Module):
-    '''
-    args: num_hiddens, dropout
-        num_hiddens: hidden size for Query & Key's linear-projecting aiming to add
-        dropout: dropout rate. Regularization on the attention weight matrices
-    
-    inputs: Q_batch, K_batch, V_batch, valid_lens(optional)
-        Q_batch's shape: (batch_size, n_queries, query_size)
-        K_batch's shape: (batch_size, n_kvs, key_size)
-        V_batch's shape: (batch_size, n_kvs, value_size)
-        valid_lens(optional)'s shape: (batch_size,) or (batch_size, n_queries)
-    
-    returns: denoted as O
-        O's shape: (batch_size, n_queries, value_size)
-    
-    explains:
-        returns W @ V where W = attention pool of (Q, K)
-        MLP of additive operation on queries and keys to attention pool for weight matrices W (batch_size, n_queries, n_kvs)
-        Convex combinations of Values based on weight matrices are returned
-    '''
-    def __init__(self, num_hiddens, dropout, **kwargs):
-        super().__init__(**kwargs)
-        self.W_q = nn.LazyLinear(num_hiddens, bias=False)
-        self.W_k = nn.LazyLinear(num_hiddens, bias=False)
-        self.W_v = nn.LazyLinear(1, bias=False)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
-        # Q_batch: (batch_size, n_query, q_size); K_batch: (batch_size, n_kv, k_size); V_batch: (batch_size, n_kv, v_size)
-        n_query, n_kv = Q_batch.size(1), K_batch.size(1)
-
-        # Q_batch_tilda shape(batch_size, n_query, h), K_batch_tilda shape(batch_size, n_kv, h)
-        Q_batch, K_batch = self.W_q(Q_batch), self.W_k(K_batch)
-
-        # Q_batch: (batch_size, n_query, h) --> (batch_size, n_query, 1, h) --> (batch_size, n_query, n_kv, h)
-        # K_batch: (batch_size, n_kv, h) --> (batch_size, 1, n_kv, h) --> (batch_size, n_query, n_kv, h)
-        S_batch = Q_batch.unsqueeze(2).expand(-1, -1, n_kv, -1) + K_batch.unsqueeze(1).expand(-1, n_query, -1, -1)
-        # S_batch: (batch_size, n_query, n_kv, h)
-
-        # S_batch: (batch_size, n_query, n_kv, h) --> (batch_size, n_query, n_kv, 1) --> (batch_size, n_query, n_kv)
-        Scores = self.W_v(torch.tanh(S_batch)).squeeze(-1)
-
-        # Scores: (batch_size, n_query, n_kv), valid_lens 指定了每条 query 里的 valid area:(batch_size,) or (batch_size, n_query)
-        self.attention_weights = masked_softmax(Scores, valid_lens, where_valid)
-
-        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, value_size) ->  (batch_size, n_query, value_size) 
-        return torch.bmm(self.dropout(self.attention_weights), V_batch)
-
-
-
 # implementation of F.scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal=False, scale, enable_gqa=False)
 class ScaledDotProductAttention(nn.Module):
     '''
@@ -153,33 +103,7 @@ class ScaledDotProductAttention(nn.Module):
 
 
 
-
-def transpose_qkv(x, num_heads, seq_len, dim_per_head):
-    '''
-    x shape: (batch_size, seq_len, hidden_size)
-    transpose route: --> (batch_size, hidden_size, seq_len) --> (batch_size, num_heads, dim_per_head, seq_len)
-                     --> (batch_size, num_heads, seq_len, dim_per_head)
-    '''
-    return x.permute(0,2,1).reshape(-1, num_heads, dim_per_head, seq_len).permute(0,1,3,2)
-
-
-
-
-def transpose_o(x, num_heads):
-    '''
-    X shape: (batch_size*num_heads, seq_len, dim_per_head)
-    transpose route: --> (batch_size*num_heads, dim_per_head, seq_len) --> (batch_size, num_heads*dim_per_head, seq_len)
-                     --> (batch_size, seq_len, num_heads*dim_per_head)
-    '''
-    h = num_heads
-    prod_batchsize_h, m, _ = x.shape
-    batch_size = prod_batchsize_h // h
-    return x.permute(0,2,1).reshape(batch_size, -1, m).permute(0,2,1)
-
-
-
-F.multi_head_attention_forward()
-# implementation of F.multi_head_attention_forward(q, k, v, attn_mask, dropout_p, is_causal=False, scale, enable_gqa=False)
+# implementation of nn.MultiheadAttention(embed_dim, num_heads, dropout, bias).forward(query, key, value, attn_mask, is_causal=False)
 class MultiHeadAttention(nn.Module):
     '''
     args: num_heads, num_hiddens, dropout
@@ -208,7 +132,7 @@ class MultiHeadAttention(nn.Module):
     单头注意力是指 对 QKV 作各自线性映射(至相同维度 num_hiddens/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, num_hiddens/H)
     多头注意力: H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, num_hiddens) 的结果. 再follow一个 num_hiddens -> num_hiddens 的线性映射
     '''
-    def __init__(self, num_heads, hidden_size, attn_p_drop, use_bias, **kwargs):
+    def __init__(self, hidden_size, num_heads, attn_p_drop, use_bias, **kwargs):
         assert hidden_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
         super().__init__(**kwargs)
         self.h = num_heads
@@ -217,22 +141,49 @@ class MultiHeadAttention(nn.Module):
         self.W_k = nn.LazyLinear(hidden_size, bias=use_bias)
         self.W_v = nn.LazyLinear(hidden_size, bias=use_bias)
         self.W_o = nn.LazyLinear(hidden_size, bias=use_bias)
-        self.attention = ScaledDotProductAttention(attn_p_drop, math.sqrt(1/self.d))
+        self.attention = ScaledDotProductAttention(attn_p_drop, math.sqrt(1.0/self.d))
     
-    def forward(self, q, k, v, attention_mask=None):
-        # q/k/v 都被split成多个head: (batch_size, num_heads, seq_length, dim_per_head)
-        # attention计算时, q/k shape (B, H, n_query, d)/(B, H, n_kv, d) --> attn_w (B, H, n_query, n_kv)
-        q = transpose_qkv(self.W_q(q), self.h)
-        k = transpose_qkv(self.W_k(k), self.h)
-        v = transpose_qkv(self.W_v(v), self.h)
-        O = self.attention(q, k, v, attention_mask)
-        O = transpose_o(O, self.h)
-        return self.W_o(O)
+    def transpose_qkv(self, x):
+        '''
+        x shape: (batch_size, seq_len, hidden_size)
+        transpose route:--> (batch_size, hidden_size, seq_len) --> (batch_size, num_heads, dim_per_head, seq_len)
+                        --> (batch_size, num_heads, seq_len, dim_per_head)
+        '''
+        seq_len = x.size(1)
+        return x.permute(0, 2, 1).reshape(-1, self.h, self.d, seq_len).permute(0, 1, 3, 2)
+
+    def transpose_o(self, x):
+        '''
+        X shape: (batch_size, num_heads, seq_len, dim_per_head)
+        transpose route:--> (batch_size, num_heads, dim_per_head, seq_len) --> (batch_size, num_heads*dim_per_head, seq_len)
+                        --> (batch_size, seq_len, num_heads*dim_per_head)
+        '''
+        seq_len = x.size(1)
+        return x.permute(0, 1, 3, 2).reshape(-1, self.h*self.d, seq_len).permute(0, 2, 1)
+
+    def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
+        q = self.transpose_qkv(self.W_q(query)) #(B, h, L_q, d)
+        k = self.transpose_qkv(self.W_k(key)) #(B, h, L_kv, d)
+        v = self.transpose_qkv(self.W_v(value)) #(B, h, L_kv, d)
+        o = self.attention(q, k, v, attention_mask) #(B, h, L_q, d)
+        output = self.transpose_o(o) #(B, L_q, D)
+        return self.W_o(output) #(B, L_q, D)
+
+
+
+class bidirect_mha(nn.Module):
+    def __init__(self, embd_size, num_heads, attn_p_drop, use_bias):
+        assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
+        super().__init__()
+        self.attention = nn.MultiheadAttention(embed_dim=embd_size, num_heads=num_heads, dropout=attn_p_drop, bias=use_bias)
+    
+    def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
+        return self.attention(query, key, value, attn_mask=attention_mask, is_causal=False)
 
 
 
 
-# 因果遮罩 casual mask: 当自回归式生成 N 个 token时, 意味着用 token1 生成 token2, token1<->2 生成 token3, ..., token1<->N-1 生成 tokenN
+# 因果遮罩 causal mask: 当自回归式生成 N 个 token时, 意味着用 token1 生成 token2, token1<->2 生成 token3, ..., token1<->N-1 生成 tokenN
 # 1  0  0  0  0       ---> tok_2 = f(tok_1)
 # 1  1  0  0  0       ---> tok_3 = f(tok_1, tok_2)
 # 1  1  1  0  0       ---> tok_4 = f(tok_1, tok_2, tok_3)
@@ -242,7 +193,7 @@ class MultiHeadAttention(nn.Module):
 # 上述右边的式子, 假设 f 是线性的, 那么系数矩阵可以看作左边的因果矩阵 hadmad-乘 全系数矩阵
 # 左边 因果遮罩 的构建方法:
 #     最下面一行一定是 all 1, 且 1 的个数是 num all valid tokens so-far, 记为 N
-#     往上相对距离为 i( 0 < i < N) 的行, casual 是 N-i 个 1, then i 个 0
+#     往上相对距离为 i( 0 < i < N) 的行, causal 是 N-i 个 1, then i 个 0
 
 # 考虑 总序列 12345, 用1234生成2345, 则 context_size = 4. 自回归系数矩阵会是一个下三角(包含对角线)矩阵
 # 给 1234 的位置编码, 可以从0开始, 也可以从1开始. 只要train和infer时保持一致即可
@@ -299,12 +250,12 @@ class MultiHeadAttention(nn.Module):
 # encoding 都应该主动透传跨文档信息, 以便模型理解.
 
 
-# 通过 casual_mask/attention_mask/label_mask 三道屏蔽, 以及正确的数据对齐, 无论是左PAD还是右PAD, 在训练上差别不大. 但是在推理时, 如果作凑批Batch推理, 
+# 通过 causal_mask/attention_mask/label_mask 三道屏蔽, 以及正确的数据对齐, 无论是左PAD还是右PAD, 在训练上差别不大. 但是在推理时, 如果作凑批Batch推理, 
 # 由于始终会取Batch各序列的last token作为q, 那么右PAD的batch, 会导致某些序列在推理时传入了PAD作为q.
 # 所以推理时把batch各序列作左PAD对齐 比较好. 训练数据右PAD对齐，跟推理batch左PAD对齐不矛盾.
 
 
-# F.scaled_dot_product_attention 的 api 逻辑, 实现带因果遮罩 casual_mask 的 multi-head attention layer
+# F.scaled_dot_product_attention 的 api 逻辑, 实现带因果遮罩 causal_mask 的 multi-head attention layer
 # (function) def scaled_dot_product_attention(
 #     query: Tensor,
 #     key: Tensor,
@@ -315,27 +266,27 @@ class MultiHeadAttention(nn.Module):
 #     scale: float | None = None,
 #     enable_gqa: bool = False
 # ) -> Tensor
-# casual mask提供是否缓存选择:
-#   缓存则 register_buffer 一个 max_context_size 的上三角 casual mask, 以便在 forward 中slice取出每条query相应的未来位置
-#   不缓存则 在 forward 中按需构造一个 casual mask, 来制作每条query相应的未来位置, 这样就避免了forward中存在max_context_size
+# causal mask提供是否缓存选择:
+#   缓存则 register_buffer 一个 max_context_size 的上三角 causal mask, 以便在 forward 中slice取出每条query相应的未来位置
+#   不缓存则 在 forward 中按需构造一个 causal mask, 来制作每条query相应的未来位置, 这样就避免了forward中存在max_context_size
 # attention中提供是否rope选择:
 #   yes则在计算self-attention时, apply_rope on q/k， no则在计算self-attention时，直接计算 qk
 
 from src.core.layers.position_encoding import RoPEConfig, RotaryPosEnc
 from typing import Tuple
 
-# 由此，CasualMHA 在forward过程可以不依赖 max_context_size: casual_mask可以根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
-# 实际上，CasualMHA 还实现了 input sequence 变长(前后两次forward的sequence长度可以不一样)：因为 RoPE 和 attention weights 都支持变长
+# 由此，CausalMHA 在forward过程可以不依赖 max_context_size: causal_mask可以根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
+# 实际上，CausalMHA 还实现了 input sequence 变长(前后两次forward的sequence长度可以不一样)：因为 RoPE 和 attention weights 都支持变长
 
 # 不过, 在实际Model层面, 仍然会设定max_context_size参数，并保证所有input sequence 的长度都不大于这个值。原因如下:
-#   1. 在 CasualMHA层, casual_mask 和 attention weights在训练时, 涉及 O(L_q^2) 的显存空间占用. 如果不限制 L_q
-#      那么在训练时若输入了过长的 input sequence as query, 可能会导致OOM. 这样在 CasualMHA 层避免了过大的 attention weights 矩阵。
+#   1. 在 CausalMHA层, causal_mask 和 attention weights在训练时, 涉及 O(L_q^2) 的显存空间占用. 如果不限制 L_q
+#      那么在训练时若输入了过长的 input sequence as query, 可能会导致OOM. 这样在 CausalMHA 层避免了过大的 attention weights 矩阵。
 #   2. 很多模型在制作train dataset时，会切分长文档/拼接短文档，成固定长度的chunk。这里的固定长度就约等于模型的max_context_size，因为限制了外推能力.
 #      现代很多LLM的训练策略是curriculum-style: 训练epoch早期使用短序列，后期用长序列，训练时sequence length是动态变化的。
 #   3. RoPE的无限拓展只是理论上的，实际上theta=position_index*频率信号，当position很大时会失真。现代模型多会启用RoPE scaling，而这里
 #      RoPE scaling 依赖 max_context_size. 为了保证 vanilla-RoPE 和 scaling-RoPE 之间接口的一致性, 应该始终保有 max_context_size 参数
 
-class CasualMHA(nn.Module):
+class CausalMHA(nn.Module):
     '''
     初始化参数
         embd_size: int
@@ -346,14 +297,14 @@ class CasualMHA(nn.Module):
         attn_p_drop: float
             注意力权重矩阵 attention weights 在与 v 进行计算之前使用 dropout 增强泛化
         resid_p_drop: float
-            因为 attention layer 后面紧接 add 残差连接. 所以要在 CasualMHA layer 最后 使用 dropout 增强泛化
-        use_cached_casual_mask: bool
-            True: 会根据 max_context_size 预先生成 casual mask 以供裁剪去契合 attention weights
-            False:, 根据 train/eval 状态, 以及 q/k 的 seq_len_q/seq_len_k, 动态生成相应 casual mask
+            因为 attention layer 后面紧接 add 残差连接. 所以要在 CausalMHA layer 最后 使用 dropout 增强泛化
+        use_cached_causal_mask: bool
+            True: 会根据 max_context_size 预先生成 causal mask 以供裁剪去契合 attention weights
+            False:, 根据 train/eval 状态, 以及 q/k 的 seq_len_q/seq_len_k, 动态生成相应 causal mask
         use_rope: bool
-            True: CasualMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k.
-                  本 CasualMHA 层在使用 RoPE 时, valid token 的位置编码从 0 开始. PAD(如果有)位置编码赋0. 不害怕混淆, 因为PAD不参与计算.
-            False: CasualMHA layer 不带 位置编码. 那么 CasualMHA layer 之前, 要使用 max_context_size 参数实施 绝对位置编码
+            True: CausalMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k.
+                  本 CausalMHA 层在使用 RoPE 时, valid token 的位置编码从 0 开始. PAD(如果有)位置编码赋0. 不害怕混淆, 因为PAD不参与计算.
+            False: CausalMHA layer 不带 位置编码. 那么 CausalMHA layer 之前, 要使用 max_context_size 参数实施 绝对位置编码
     '''
     def __init__(self,
                  embd_size:int,
@@ -362,7 +313,7 @@ class CasualMHA(nn.Module):
                  max_context_size:int,
                  attn_p_drop:float,
                  resid_p_drop:float,
-                 use_cached_casual_mask:bool,
+                 use_cached_causal_mask:bool,
                  use_rope:bool):
         
         super().__init__()
@@ -380,10 +331,10 @@ class CasualMHA(nn.Module):
         self.attn_drop = nn.Dropout(attn_p_drop)
         self.resid_drop = nn.Dropout(resid_p_drop)
 
-        if use_cached_casual_mask:
+        if use_cached_causal_mask:
             # [1, 1, max_context_size, max_context_size] 的 T/F tensor. 其中主对角线上方(不含对角线)为True
             self.register_buffer(
-                'casual_mask',
+                'causal_mask',
                 torch.triu(torch.ones(max_context_size, max_context_size, dtype=torch.bool), diagonal=1)[None, None, :, :],
                 persistent = False # False 指不作为 state_dict 的一部分
                 )
@@ -410,7 +361,7 @@ class CasualMHA(nn.Module):
             x [B, L_q, D], 代表分别输入 x as first 1, 2, ..., L_q
             kv_cache = None, kv 直接使用 x 自身信息, 即 k/v as all 1<->L_q
             CauslMHA 是 自注意力计算 with (q: 1<->L_q, k: 1<->L_q, v: 1<->L_q), 生成 No. 2, 3, ..., L_q+1, 得到 attn_w[..., L_q, L_q]
-            这里 attention weights[..., L_q, L_q] 还需要 经过 casual_mask / attention_mask 等, 去屏蔽 不该相关 区域.
+            这里 attention weights[..., L_q, L_q] 还需要 经过 causal_mask / attention_mask 等, 去屏蔽 不该相关 区域.
           infer.decode:
             x [B, 1, D] 代表输入 x as No. L_so_far token.
             k_cache/v_cache 形状 [B, H, L_past, d], L_so_far = L_past+1
@@ -425,7 +376,7 @@ class CasualMHA(nn.Module):
             作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法贡献. 对某 q, 涉及 PAD, 以及不与该 q same-text 的 k, 都是非法贡献, 要屏蔽.
 
         positions: Tensor|None, 默认None, 否则为 tensor [B, L_so_far]
-            只在 use_rope = True 时, positions 才会起作用. 否则应该在 casualMHA 层之前就把 绝对位置编码 加到 x 里.
+            只在 use_rope = True 时, positions 才会起作用. 否则应该在 CausalMHA 层之前就把 绝对位置编码 加到 x 里.
             positions 代表了 L_past + L_q = L_so_far 的所有位置信息. 从中取 后L_q部分, 即为 q 的 位置编码.
             当 use_rope = True 但又不输入 positions, 那么此 layer 会自动生成从 0 开始的 positions 作为 q/k 的位置编码.
 
@@ -498,26 +449,26 @@ class CasualMHA(nn.Module):
                 pass
         
         #### 等价于 y = F.scaled_dot_product_attention(q, k, v, attention_mask, attn_p_drop, True, scale=self.scale) ####
-        ######### qk 计算 attn_w --> casual_mask & attention_mask --> softmax --> dropout --> attn_w @ v ---> y #########
+        ######### qk 计算 attn_w --> causal_mask & attention_mask --> softmax --> dropout --> attn_w @ v ---> y #########
 
         attn_w = torch.matmul(q, k.transpose(2, 3)) * self.scale # [B, H, L_q, L_so_far]
 
-        # casual_mask: [B, H, L_q, L_so_far]/bool. True --> 上三角(不包含对角线, 会被-inf替代), False --> 下三角(包含对角线, 原值)
+        # causal_mask: [B, H, L_q, L_so_far]/bool. True --> 上三角(不包含对角线, 会被-inf替代), False --> 下三角(包含对角线, 原值)
         # train/infer.prefill [..., L_q=L_so_far, L_so_far], infer.decode [..., L_q=1, L_so_far]
-        if hasattr(self, 'casual_mask'):
+        if hasattr(self, 'causal_mask'):
             # 当使用缓存, 为了通用性, 采用如下写法
-            casual_mask = self.casual_mask[:, :, L_past:L_so_far, :L_so_far]
+            causal_mask = self.causal_mask[:, :, L_past:L_so_far, :L_so_far]
         else:
             # 当动态生成
-            casual_mask = torch.triu(
+            causal_mask = torch.triu(
                 torch.ones(L_q, L_so_far, dtype = torch.bool, device = attn_w.device),
                 diagonal = L_past + 1
                 )[None, None, :, :] # [L_q, L_so_far] --> [1, 1, L_q, L_so_far]
-        attn_w = attn_w.masked_fill(casual_mask, float('-inf')) # [B, H, L_q, L_so_far]
+        attn_w = attn_w.masked_fill(causal_mask, float('-inf')) # [B, H, L_q, L_so_far]
 
         if attention_mask is not None:
             # attention_mask: tensor [B, L_q, L_so_far]/bool. True --> valid_area, False --> invalid_area
-            # 这里用 -1e9 填入 而不再用 -inf, 因为 casual_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
+            # 这里用 -1e9 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
             # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃. 因为
             # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
             # 所以这里用 finite 大负数 -1e9 而不是 -inf. softmax能正确处理 大负数 和全大负数行.
@@ -541,29 +492,29 @@ class CasualMHA(nn.Module):
 
 
 
-class casual_mha(nn.Module):
+class causal_mha(nn.Module):
     def __init__(self,
                  embd_size:int,
-                 num_head:int,
+                 num_heads:int,
                  use_bias:bool,
                  max_context_size:int,
                  attn_p_drop:float,
                  resid_p_drop:float,
-                 use_cached_casual_mask:bool,
-                 use_rope:bool):
+                 use_rope:bool,
+                 use_cached_causal_mask:bool):
         super().__init__()
         self.D = embd_size
-        self.H = num_head
-        self.d = embd_size // num_head
+        self.H = num_heads
+        self.d = embd_size // num_heads
         self.scale = 1.0 / math.sqrt(self.d)
         self.W_qkv = nn.Linear(embd_size, 3 * embd_size, bias=use_bias)
         self.W_o = nn.Linear(embd_size, embd_size, bias=use_bias)
         self.attn_p_drop = attn_p_drop
         self.resid_drop = nn.Dropout(resid_p_drop)
 
-        if use_cached_casual_mask:
+        if use_cached_causal_mask:
             self.register_buffer(
-                'casual_mask',
+                'causal_mask',
                 torch.triu(torch.ones(max_context_size, max_context_size, dtype=torch.bool), diagonal=1)[None, None, :, :],
                 persistent = False
                 )

@@ -154,8 +154,8 @@ class gpt2Model(DecoderOnly):
                 config.max_context_size,
                 config.attn_p_drop,
                 config.resid_p_drop,
-                config.use_cached_casual_mask,
-                config.use_rope) for _ in range(config.num_block)])
+                config.use_rope,
+                config.use_cached_casual_mask) for _ in range(config.num_block)])
         
         self.layer_norm_final = nn.LayerNorm(config.embd_size)
 

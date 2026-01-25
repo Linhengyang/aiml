@@ -26,19 +26,18 @@ class GPT2DecoderBlock(nn.Module):
                  max_context_size:int,
                  attn_p_drop:float,
                  resid_p_drop:float,
-                 use_cached_causal_mask:bool,
-                 use_rope:bool
-                 ):
+                 use_rope:bool,
+                 use_cached_causal_mask:bool):
         super().__init__()
         self.layer_norm1 = nn.LayerNorm(embd_size)
         self.causal_attention = causal_mha(embd_size, num_heads, use_bias, max_context_size, attn_p_drop,
-                                           resid_p_drop, use_cached_causal_mask, use_rope)
+                                           resid_p_drop, use_rope, use_cached_causal_mask)
         self.layer_norm2 = nn.LayerNorm(embd_size)
         self.gelu_ffn = gelu_ffn(embd_size, use_bias, resid_p_drop)
 
     def forward(self,
                 x:torch.Tensor,
-                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None=None,
+                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None = None,
                 return_cache:bool = False,
                 attention_mask:torch.Tensor|None = None,
                 positions:torch.Tensor|None = None):
