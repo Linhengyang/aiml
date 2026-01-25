@@ -2,7 +2,7 @@ import torch
 import math
 from typing import Tuple
 from torch import nn
-from src.core.layers.attention_pool import CasualMHA, casual_mha
+from src.core.layers.attention_pool import causalMHA, causal_mha
 from src.core.layers.feedforward import gelu_ffn
 
 
@@ -12,7 +12,7 @@ class GPT2DecoderBlock(nn.Module):
     pre-layer_normalization 的 decoder block 架构图:
     
         -----------------add---------------->|       ------------add------------>|
-      x --layer_norm-->|--casual_attention-->|--> x_ --layer_norm-->--gelu_ffn-->|--> y
+      x --layer_norm-->|--causal_attention-->|--> x_ --layer_norm-->--gelu_ffn-->|--> y
     kv_cache(if any)-->|                      --> new_kv_cache(if need)
    attn_mask(if any)-->|
    positions(if any)-->|
@@ -21,18 +21,18 @@ class GPT2DecoderBlock(nn.Module):
     '''
     def __init__(self,
                  embd_size:int,
-                 num_head:int,
+                 num_heads:int,
                  use_bias:bool,
                  max_context_size:int,
                  attn_p_drop:float,
                  resid_p_drop:float,
-                 use_cached_casual_mask:bool,
+                 use_cached_causal_mask:bool,
                  use_rope:bool
                  ):
         super().__init__()
         self.layer_norm1 = nn.LayerNorm(embd_size)
-        self.casual_attention = casual_mha(embd_size, num_head, use_bias, max_context_size, attn_p_drop,
-                                           resid_p_drop, use_cached_casual_mask, use_rope)
+        self.causal_attention = causal_mha(embd_size, num_heads, use_bias, max_context_size, attn_p_drop,
+                                           resid_p_drop, use_cached_causal_mask, use_rope)
         self.layer_norm2 = nn.LayerNorm(embd_size)
         self.gelu_ffn = gelu_ffn(embd_size, use_bias, resid_p_drop)
 
@@ -43,7 +43,7 @@ class GPT2DecoderBlock(nn.Module):
                 attention_mask:torch.Tensor|None = None,
                 positions:torch.Tensor|None = None):
         
-        attn_result, new_kv_cache = self.casual_attention(self.layer_norm1(x), kv_cache, return_cache, attention_mask, positions)
+        attn_result, new_kv_cache = self.causal_attention(self.layer_norm1(x), kv_cache, return_cache, attention_mask, positions)
         x_ = x + attn_result
         y = x_ + self.gelu_ffn(self.layer_norm2(x_))
         
