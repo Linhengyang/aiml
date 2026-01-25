@@ -103,34 +103,35 @@ class ScaledDotProductAttention(nn.Module):
 
 
 
-# implementation of nn.MultiheadAttention(embed_dim, num_heads, dropout, bias).forward(query, key, value, attn_mask, is_causal=False)
+
 class MultiHeadAttention(nn.Module):
     '''
-    args: num_heads, num_hiddens, dropout
-        num_heads: number of heads (num_heads | num_hiddens), see explains
-        num_hiddens: number of hiddens (num_heads | num_hiddens), see explains
-        dropout: dropout rate. Regularization on the attention weight matrices
+    args:
+        hidden_size: number of hiddens (num_heads | hidden_size), see explains
+        num_heads: number of heads (num_heads | hidden_size), see explains
+        attn_p_drop: dropout rate. Regularization on the attention weight matrices
+        use_bias
     
-    inputs: q, k, v, attention_mask(optional)
+    inputs:
         q: (batch_size, n_queries, query_size)
         k: (batch_size, n_kvs, key_size)
         v: (batch_size, n_kvs, value_size)
-        attention_mask(optional): (batch_size,) or (batch_size, n_queries)
+        attention_mask(optional): (batch_size, n_queries, n_kvs)
     
     returns: denoted as o
-        o: (batch_size, n_queries, num_hiddens)
+        o: (batch_size, n_queries, hidden_size)
     
     explains:
         After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
         and a final linear project is followed.
         In detail:
-            1. H linear projections on Q K V whom projected to num_hiddens // H dimensions, which stands for H heads
+            1. H linear projections on Q K V whom projected to hidden_size // H dimensions, which stands for H heads
             2. For every head's result, perform scaled-dot-prod attention pool
-            3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to
-               num_hiddens linear project is followed
+            3. Assemble H attenion-poolings' output, to have a result with hidden_size dimensions. A final hidden_size to
+               hidden_size linear project is followed
     
-    单头注意力是指 对 QKV 作各自线性映射(至相同维度 num_hiddens/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, num_hiddens/H)
-    多头注意力: H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, num_hiddens) 的结果. 再follow一个 num_hiddens -> num_hiddens 的线性映射
+    单头注意力是指 对 QKV 作各自线性映射(至相同维度 hidden_size/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, hidden_size/H)
+    多头注意力: H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, hidden_size) 的结果. 再follow一个 hidden_size -> hidden_size 的线性映射
     '''
     def __init__(self, hidden_size, num_heads, attn_p_drop, use_bias, **kwargs):
         assert hidden_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
@@ -162,6 +163,7 @@ class MultiHeadAttention(nn.Module):
         return x.permute(0, 1, 3, 2).reshape(-1, self.h*self.d, seq_len).permute(0, 2, 1)
 
     def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
+        # q/k/v: (B, L_q/L_kv/L_kv, D)
         q = self.transpose_qkv(self.W_q(query)) #(B, h, L_q, d)
         k = self.transpose_qkv(self.W_k(key)) #(B, h, L_kv, d)
         v = self.transpose_qkv(self.W_v(value)) #(B, h, L_kv, d)
@@ -175,10 +177,16 @@ class bidirect_mha(nn.Module):
     def __init__(self, embd_size, num_heads, attn_p_drop, use_bias):
         assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
         super().__init__()
-        self.attention = nn.MultiheadAttention(embed_dim=embd_size, num_heads=num_heads, dropout=attn_p_drop, bias=use_bias)
+        self.h = num_heads
+        self.attention = nn.MultiheadAttention(embd_size, num_heads, dropout=attn_p_drop, bias=use_bias, batch_first=True)
     
     def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
-        return self.attention(query, key, value, attn_mask=attention_mask, is_causal=False)
+        if attention_mask is not None:
+            attn_mask = attention_mask.repeat_interleave(repeats=self.h, dim=0) # (B, n_q, n_kv) --> (B*h, n_q, n_kv)
+        else:
+            attn_mask = None
+        
+        return self.attention(query, key, value, need_weights=False, attn_mask=attn_mask, is_causal=False)[0]
 
 
 
@@ -372,7 +380,7 @@ class CausalMHA(nn.Module):
         return_cache: bool, 默认False
             当 return_cache 为 True 时, 返回计算 attention weight 时用的 kv. 这个 kv 包含 1<->L_so_far 所有.
 
-        attention_mask: Tensor|None, 默认None, 否则为 tensor [B, L_q, L_so_far]bool
+        attention_mask: Tensor|None, 默认None, 否则为 tensor [B, L_q, L_so_far]bool.  False 代表非法贡献, True 代表合理贡献
             作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法贡献. 对某 q, 涉及 PAD, 以及不与该 q same-text 的 k, 都是非法贡献, 要屏蔽.
 
         positions: Tensor|None, 默认None, 否则为 tensor [B, L_so_far]
@@ -472,7 +480,7 @@ class CausalMHA(nn.Module):
             # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃. 因为
             # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
             # 所以这里用 finite 大负数 -1e9 而不是 -inf. softmax能正确处理 大负数 和全大负数行.
-            attn_w = attn_w.masked_fill((attention_mask == False).unsqueeze(1) , -1e9)
+            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , -1e9)
 
         # softmax
         attn_w = F.softmax(attn_w, dim=-1) # [B, H, L_q, L_so_far]
