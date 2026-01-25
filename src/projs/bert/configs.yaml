@@ -41,5 +41,6 @@ bertconfig:
   num_heads: 2
   use_bias: False
   ffn_num_hiddens: 256
+  attn_p_drop: 0.1
   resid_p_drop: 0.1
   num_blks: 2

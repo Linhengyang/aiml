@@ -13,6 +13,7 @@ class bertConfig:
     num_heads:int
     use_bias:bool
     ffn_num_hiddens:bool
+    attn_p_drop:float
     resid_p_drop:float
     ## number of encoder-block
     num_blks:int

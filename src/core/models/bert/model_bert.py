@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from src.core.blocks.transformer import TransformerEncoderBlock
+from src.core.blocks.bert import BERTEncoderBlock
 from src.core.layers.position_encoding import LearnAbsPosEnc, TrigonoAbsPosEnc
 from .config_bert import bertConfig
 
@@ -29,12 +29,13 @@ class BERTEncoder(nn.Module):
         # (batch_size, seq_length, num_hiddens) 
         self.blks = nn.Sequential()
         for i in range(config.num_blks):
-            cur_blk = TransformerEncoderBlock(
-                config.num_heads,
+            cur_blk = BERTEncoderBlock(
                 config.num_hiddens,
+                config.num_heads,
+                config.use_bias,
+                config.ffn_num_hiddens,
+                config.attn_p_drop,
                 config.resid_p_drop,
-                config.ffn_num_hiddens, 
-                config.use_bias
                 )
             self.blks.add_module(f'blk{i+1}', cur_blk)
     
