@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import math
 from src.core.functional import create_mask_on_last_dim
-
+import torch.nn.functional as F
 
 
 def masked_softmax(S, valid_lens, where_valid='left'):
@@ -101,85 +101,85 @@ class AdditiveAttention(nn.Module):
 
 
 
-
-
+# implementation of F.scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal=False, scale, enable_gqa=False)
 class ScaledDotProductAttention(nn.Module):
     '''
-    args: dropout
-        dropout: dropout rate. Regularization on the attention weight matrices
+    args:
+        attn_p_drop: dropout rate. Regularization on the attention weight matrices
+        scale: scale value on the attention weight matrices
     
-    inputs: Q_batch, K_batch, V_batch, valid_lens(optional)
-        Q_batch's shape: (batch_size, n_query, qk_size)
-        K_batch's shape: (batch_size, n_kvs, qk_size)
-        V_batch's shape: (batch_size, n_kvs, v_size)
-        valid_lens(optional)'s shape: (batch_size,) or (batch_size, n_query)
+    inputs:
+        q's shape: (B, H, n_query, qk_size)
+        k's shape: (B, H, n_kvs, qk_size)
+        v's shape: (B, H, n_kvs, v_size)
+        attention_mask(optional)'s shape: (B, n_query, n_kvs)
     
-    returns: denoted as O
-        O's shape: (batch_size, n_query, v_size)
+    returns: denoted as o
+        o's shape: (B, H, n_query, v_size)
     
     explains:
-        Q(batch_size, n_query, qk_size), K(batch_size, n_kvs, qk_size) --相似度计算--> W(batch_size, n_query, n_kvs)
+        q(..., n_query, qk_size), k(..., n_kvs, qk_size) --相似度计算--> attn_w(..., n_query, n_kvs)
         
-        Scaled Dot Production on queries and keys to attention pool for weight matrices W (batch_size, n_queries, n_kvs)
+        Scaled Dot Production on queries and keys to attention pool for weight matrices attn_w (..., n_queries, n_kvs)
         Convex combinations of Values based on weight matrices are returned
     
-    query/key/value 都有各自的数量和维度. 其中 query 的数量自由决定, 但是其维度要和key相同(毕竟要计算query和key之间的相似度)
+    query/key/value 都有各自的数量和维度. 其中 query 的数量自由决定, 但是其维度要和key相同(因为要计算query和key之间的相似度)
     value的维度自由决定, 但是其数量要和key相同(key决定了其对应value在最终输出结果中的重要程度)
     
     积式注意力 ScaledDotProductAttention 简单地根据 每条 query和不同keys之间地相似度, 决定了每个key对应的value的权重, 组合出最后的结果
     最终由 n_queries 条结果
     '''
-    def __init__(self, dropout, **kwargs):
+    def __init__(self, attn_p_drop, scale, **kwargs):
         super().__init__(**kwargs)
-        self.dropout = nn.Dropout(dropout)
+        self.attn_drop = nn.Dropout(attn_p_drop)
+        self.register_buffer('scale', torch.tensor(scale)) # 乘以 scale 相似度计算中因为维数过大引起的数值不稳定
 
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
+    def forward(self,
+                q:torch.Tensor,                             # [B, n_query, qk_size]
+                k:torch.Tensor,                             # [B, n_kvs, qk_size]
+                v:torch.Tensor,                             # [B, n_kvs, v_size]
+                attention_mask:torch.Tensor|None = None     # [B, n_query, n_kvs] where False --> zero probability
+                ):
+        # q(..., n_query, qk_size) @ k(..., n_kvs, qk_size) 转置 -> attn_w(..., n_query, n_kvs)
+        attn_w = torch.bmm(q, k.permute(0, -1, -2)) * self.scale # 本质是 q 和 k 的相似度计算
 
-        assert Q_batch.size(-1) == K_batch.size(-1), \
-            f'query_size {Q_batch.size(-1)} not equal to key_size {K_batch.size(-1)}'
+        if attention_mask is not None:
+            attn_w = attn_w.masked_fill((attention_mask == False).unsqueeze(1) , -1e20)
         
-        d = Q_batch.size(-1) # scale 相似度计算中因为维数过大引起的数值不稳定
+        self.attention_weights = F.softmax(attn_w, dim=-1) # 注意力权重shape (..., n_query, n_kvs)
 
-        # Q: (batch_size, n_query, qk_size) @ K: (batch_size, n_kvs, qk_size) 转置 -> (batch_size, n_query, n_kvs)
-        S_batch = torch.bmm(Q_batch, K_batch.permute(0, 2, 1)) / math.sqrt(d) # 本质是 Q 和 K 的相似度计算
-
-        self.attention_weights = masked_softmax(S_batch, valid_lens, where_valid) # 注意力权重shape (batch_size, n_query, n_kvs)
-
-        # W: (batch_size, n_query, n_kvs) @ V:  (batch_size, n_kvs, v_size) ->  (batch_size, n_query, v_size) 
-        return torch.bmm( self.dropout(self.attention_weights), V_batch )
+        # attn_w(..., n_query, n_kvs) @ v(..., n_kvs, v_size) -> o(..., n_query, v_size) 
+        return torch.bmm(self.attn_drop(self.attention_weights), v)
 
 
 
 
-def transpose_qkv(X, num_heads):
+def transpose_qkv(x, num_heads, seq_len, dim_per_head):
     '''
-    X shape: (batch_size, seq_length, num_hiddens)
-    transpose route: --> (batch_size, num_hiddens, seq_length) --> (batch_size, num_heads, dim_per_head, seq_length)
-                     --> (batch_size, num_heads, seq_length, dim_per_head) --> (batch_size*num_heads, seq_length, dim_per_head)
+    x shape: (batch_size, seq_len, hidden_size)
+    transpose route: --> (batch_size, hidden_size, seq_len) --> (batch_size, num_heads, dim_per_head, seq_len)
+                     --> (batch_size, num_heads, seq_len, dim_per_head)
     '''
-    h = num_heads
-    batch_size, n, _ = X.shape
-    return X.permute(0,2,1).reshape(batch_size, h, -1, n).permute(0,1,3,2).reshape(batch_size*h, n, -1)
+    return x.permute(0,2,1).reshape(-1, num_heads, dim_per_head, seq_len).permute(0,1,3,2)
 
 
 
 
-def transpose_o(X, num_heads):
+def transpose_o(x, num_heads):
     '''
-    X shape: (batch_size*num_heads, seq_length, dim_per_head)
-    transpose route: --> (batch_size*num_heads, dim_per_head, seq_length) --> (batch_size, num_heads*dim_per_head, seq_length)
-                     --> (batch_size, seq_length, num_heads*dim_per_head)
+    X shape: (batch_size*num_heads, seq_len, dim_per_head)
+    transpose route: --> (batch_size*num_heads, dim_per_head, seq_len) --> (batch_size, num_heads*dim_per_head, seq_len)
+                     --> (batch_size, seq_len, num_heads*dim_per_head)
     '''
     h = num_heads
-    prod_batchsize_h, m, _ = X.shape
+    prod_batchsize_h, m, _ = x.shape
     batch_size = prod_batchsize_h // h
-    return X.permute(0,2,1).reshape(batch_size, -1, m).permute(0,2,1)
+    return x.permute(0,2,1).reshape(batch_size, -1, m).permute(0,2,1)
 
 
 
-
-
-
+F.multi_head_attention_forward()
+# implementation of F.multi_head_attention_forward(q, k, v, attn_mask, dropout_p, is_causal=False, scale, enable_gqa=False)
 class MultiHeadAttention(nn.Module):
     '''
     args: num_heads, num_hiddens, dropout
@@ -187,14 +187,14 @@ class MultiHeadAttention(nn.Module):
         num_hiddens: number of hiddens (num_heads | num_hiddens), see explains
         dropout: dropout rate. Regularization on the attention weight matrices
     
-    inputs: Q_batch, K_batch, V_batch, valid_lens(optional)
-        Q_batch's shape: (batch_size, n_queries, query_size)
-        K_batch's shape: (batch_size, n_kvs, key_size)
-        V_batch's shape: (batch_size, n_kvs, value_size)
-        valid_lens(optional)'s shape: (batch_size,) or (batch_size, n_queries)
+    inputs: q, k, v, attention_mask(optional)
+        q: (batch_size, n_queries, query_size)
+        k: (batch_size, n_kvs, key_size)
+        v: (batch_size, n_kvs, value_size)
+        attention_mask(optional): (batch_size,) or (batch_size, n_queries)
     
-    returns: denoted as O
-        O's shape: (batch_size, n_queries, num_hiddens)
+    returns: denoted as o
+        o: (batch_size, n_queries, num_hiddens)
     
     explains:
         After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
@@ -202,34 +202,30 @@ class MultiHeadAttention(nn.Module):
         In detail:
             1. H linear projections on Q K V whom projected to num_hiddens // H dimensions, which stands for H heads
             2. For every head's result, perform scaled-dot-prod attention pool
-            3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to 
+            3. Assemble H attenion-poolings' output, to have a result with num_hiddens dimensions. A final num_hiddens to
                num_hiddens linear project is followed
-
-    多头注意力:
-        单头注意力是指 对 QKV 作各自线性映射(至相同维度 num_hiddens/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, num_hiddens/H)
-    H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, num_hiddens) 的结果. 再follow一个 num_hiddens -> num_hiddens 的线性映射
+    
+    单头注意力是指 对 QKV 作各自线性映射(至相同维度 num_hiddens/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, num_hiddens/H)
+    多头注意力: H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, num_hiddens) 的结果. 再follow一个 num_hiddens -> num_hiddens 的线性映射
     '''
-    def __init__(self, num_heads, num_hiddens, dropout, use_bias=False, **kwargs):
-        assert num_hiddens % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
+    def __init__(self, num_heads, hidden_size, attn_p_drop, use_bias, **kwargs):
+        assert hidden_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
         super().__init__(**kwargs)
         self.h = num_heads
-        self.W_q = nn.LazyLinear(num_hiddens, bias=use_bias)
-        self.W_k = nn.LazyLinear(num_hiddens, bias=use_bias)
-        self.W_v = nn.LazyLinear(num_hiddens, bias=use_bias)
-        self.W_o = nn.LazyLinear(num_hiddens, bias=use_bias)
-        self.attention = ScaledDotProductAttention(dropout)
+        self.d = hidden_size // num_heads
+        self.W_q = nn.LazyLinear(hidden_size, bias=use_bias)
+        self.W_k = nn.LazyLinear(hidden_size, bias=use_bias)
+        self.W_v = nn.LazyLinear(hidden_size, bias=use_bias)
+        self.W_o = nn.LazyLinear(hidden_size, bias=use_bias)
+        self.attention = ScaledDotProductAttention(attn_p_drop, math.sqrt(1/self.d))
     
-    def forward(self, Q_batch, K_batch, V_batch, valid_lens=None, where_valid='left'):
-        # Q/K/V 都被split成多个head: (batch_size*num_heads, seq_length, dim_per_head)
-        # attention计算时, q/k shape (B, n_query, q_size)/(B, n_kv, k_size) --> attn_w (B, n_query, n_kv)
-        # 相关性计算只存在于dim 1和2, dim 0（B）之间没有相关性计算, dim 0维度之间仍然是独立的, 即 attn_w[i] = attn_func( q[i], k[i] )
-        # 由此, head维度被合并到batch_size维度后, 在attention计算时head之间是独立的.
-        Q = transpose_qkv(self.W_q(Q_batch), self.h)
-        K = transpose_qkv(self.W_k(K_batch), self.h)
-        V = transpose_qkv(self.W_v(V_batch), self.h)
-        if valid_lens is not None:
-            valid_lens = valid_lens.repeat_interleave(self.h, dim=0)
-        O = self.attention(Q, K, V, valid_lens, where_valid)
+    def forward(self, q, k, v, attention_mask=None):
+        # q/k/v 都被split成多个head: (batch_size, num_heads, seq_length, dim_per_head)
+        # attention计算时, q/k shape (B, H, n_query, d)/(B, H, n_kv, d) --> attn_w (B, H, n_query, n_kv)
+        q = transpose_qkv(self.W_q(q), self.h)
+        k = transpose_qkv(self.W_k(k), self.h)
+        v = transpose_qkv(self.W_v(v), self.h)
+        O = self.attention(q, k, v, attention_mask)
         O = transpose_o(O, self.h)
         return self.W_o(O)
 
@@ -327,7 +323,6 @@ class MultiHeadAttention(nn.Module):
 
 from src.core.layers.position_encoding import RoPEConfig, RotaryPosEnc
 from typing import Tuple
-import torch.nn.functional as F
 
 # 由此，CasualMHA 在forward过程可以不依赖 max_context_size: casual_mask可以根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
 # 实际上，CasualMHA 还实现了 input sequence 变长(前后两次forward的sequence长度可以不一样)：因为 RoPE 和 attention weights 都支持变长

@@ -11,7 +11,7 @@ class AddLayerNorm(nn.Module):
         dropout: dropout rate. Regularization on second input
     
     inputs: X, f_X
-        X: minibatch
+        X: batch data
         f_X: MLP(X) with same shape as X. Usually to achieve resildual connection
 
     returns: denoted as O
@@ -84,8 +84,6 @@ class TransformerEncoderBlock(nn.Module):
         自注意力Encoder Block. 对输入样本data作[自注意力-前向-norm]的深度处理, 样本从时间步1到T, 输出结果也是从时间步1到T
 
         单个样本内部, 时间步之间由于自注意力的机制, 作到了双向前后全连接表征.
-
-
     '''
     def __init__(self, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias=False):
         super().__init__()
