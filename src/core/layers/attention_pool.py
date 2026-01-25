@@ -104,11 +104,11 @@ class ScaledDotProductAttention(nn.Module):
 
 
 
-class MultiHeadAttention(nn.Module):
+class BidirectMHA(nn.Module):
     '''
     args:
-        hidden_size: number of hiddens (num_heads | hidden_size), see explains
-        num_heads: number of heads (num_heads | hidden_size), see explains
+        embd_size: number of hiddens (num_heads | embd_size), see explains
+        num_heads: number of heads (num_heads | embd_size), see explains
         attn_p_drop: dropout rate. Regularization on the attention weight matrices
         use_bias
     
@@ -119,29 +119,29 @@ class MultiHeadAttention(nn.Module):
         attention_mask(optional): (batch_size, n_queries, n_kvs)
     
     returns: denoted as o
-        o: (batch_size, n_queries, hidden_size)
+        o: (batch_size, n_queries, embd_size)
     
     explains:
         After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
         and a final linear project is followed.
         In detail:
-            1. H linear projections on Q K V whom projected to hidden_size // H dimensions, which stands for H heads
+            1. H linear projections on Q K V whom projected to embd_size // H dimensions, which stands for H heads
             2. For every head's result, perform scaled-dot-prod attention pool
-            3. Assemble H attenion-poolings' output, to have a result with hidden_size dimensions. A final hidden_size to
-               hidden_size linear project is followed
+            3. Assemble H attenion-poolings' output, to have a result with embd_size dimensions. A final embd_size to
+               embd_size linear project is followed
     
-    单头注意力是指 对 QKV 作各自线性映射(至相同维度 hidden_size/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, hidden_size/H)
-    多头注意力: H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, hidden_size) 的结果. 再follow一个 hidden_size -> hidden_size 的线性映射
+    单头注意力是指 对 QKV 作各自线性映射(至相同维度 embd_size/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, embd_size/H)
+    多头注意力: H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, embd_size) 的结果. 再follow一个 embd_size -> embd_size 的线性映射
     '''
-    def __init__(self, hidden_size, num_heads, attn_p_drop, use_bias, **kwargs):
-        assert hidden_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
+    def __init__(self, embd_size, num_heads, attn_p_drop, use_bias, **kwargs):
+        assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
         super().__init__(**kwargs)
         self.h = num_heads
-        self.d = hidden_size // num_heads
-        self.W_q = nn.LazyLinear(hidden_size, bias=use_bias)
-        self.W_k = nn.LazyLinear(hidden_size, bias=use_bias)
-        self.W_v = nn.LazyLinear(hidden_size, bias=use_bias)
-        self.W_o = nn.LazyLinear(hidden_size, bias=use_bias)
+        self.d = embd_size // num_heads
+        self.W_q = nn.LazyLinear(embd_size, bias=use_bias)
+        self.W_k = nn.LazyLinear(embd_size, bias=use_bias)
+        self.W_v = nn.LazyLinear(embd_size, bias=use_bias)
+        self.W_o = nn.LazyLinear(embd_size, bias=use_bias)
         self.attention = ScaledDotProductAttention(attn_p_drop, math.sqrt(1.0/self.d))
     
     def transpose_qkv(self, x):
@@ -173,20 +173,20 @@ class MultiHeadAttention(nn.Module):
 
 
 
-class bidirect_mha(nn.Module):
-    def __init__(self, embd_size, num_heads, attn_p_drop, use_bias):
-        assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
-        super().__init__()
-        self.h = num_heads
-        self.attention = nn.MultiheadAttention(embd_size, num_heads, dropout=attn_p_drop, bias=use_bias, batch_first=True)
+# class bidirect_mha(nn.Module):
+#     def __init__(self, embd_size, num_heads, attn_p_drop, use_bias):
+#         assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
+#         super().__init__()
+#         self.h = num_heads
+#         self.attention = nn.MultiheadAttention(embd_size, num_heads, dropout=attn_p_drop, bias=use_bias, batch_first=True)
     
-    def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
-        if attention_mask is not None:
-            attn_mask = attention_mask.repeat_interleave(repeats=self.h, dim=0) # (B, n_q, n_kv) --> (B*h, n_q, n_kv)
-        else:
-            attn_mask = None
+#     def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
+#         if attention_mask is not None:
+#             attn_mask = attention_mask.repeat_interleave(repeats=self.h, dim=0) # (B, n_q, n_kv) --> (B*h, n_q, n_kv)
+#         else:
+#             attn_mask = None
         
-        return self.attention(query, key, value, need_weights=False, attn_mask=attn_mask, is_causal=False)[0]
+#         return self.attention(query, key, value, need_weights=False, attn_mask=attn_mask, is_causal=False)[0]
 
 
 
@@ -263,8 +263,8 @@ class bidirect_mha(nn.Module):
 # 所以推理时把batch各序列作左PAD对齐 比较好. 训练数据右PAD对齐，跟推理batch左PAD对齐不矛盾.
 
 
-# F.scaled_dot_product_attention 的 api 逻辑, 实现带因果遮罩 causal_mask 的 multi-head attention layer
-# (function) def scaled_dot_product_attention(
+# 参考 F.scaled_dot_product_attention 的 api 逻辑, 实现同时 带因果遮罩 causal_mask & 注意力遮罩 attention_mask 的 mha layer
+# (function) def scaled_dot_product_attention( # 不支持 is_causal = True and attn_mask is not None
 #     query: Tensor,
 #     key: Tensor,
 #     value: Tensor,
@@ -298,7 +298,7 @@ class CausalMHA(nn.Module):
     '''
     初始化参数
         embd_size: int
-        num_head: int
+        num_heads: int
         use_bias: bool
         max_context_size: int
             最大上下文长度.
@@ -306,30 +306,30 @@ class CausalMHA(nn.Module):
             注意力权重矩阵 attention weights 在与 v 进行计算之前使用 dropout 增强泛化
         resid_p_drop: float
             因为 attention layer 后面紧接 add 残差连接. 所以要在 CausalMHA layer 最后 使用 dropout 增强泛化
-        use_cached_causal_mask: bool
-            True: 会根据 max_context_size 预先生成 causal mask 以供裁剪去契合 attention weights
-            False:, 根据 train/eval 状态, 以及 q/k 的 seq_len_q/seq_len_k, 动态生成相应 causal mask
         use_rope: bool
             True: CausalMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k.
                   本 CausalMHA 层在使用 RoPE 时, valid token 的位置编码从 0 开始. PAD(如果有)位置编码赋0. 不害怕混淆, 因为PAD不参与计算.
             False: CausalMHA layer 不带 位置编码. 那么 CausalMHA layer 之前, 要使用 max_context_size 参数实施 绝对位置编码
+        use_cached_causal_mask: bool
+            True: 会根据 max_context_size 预先生成 causal mask 以供裁剪去契合 attention weights
+            False:, 根据 train/eval 状态, 以及 q/k 的 seq_len_q/seq_len_k, 动态生成相应 causal mask
     '''
     def __init__(self,
                  embd_size:int,
-                 num_head:int,
+                 num_heads:int,
                  use_bias:bool,
                  max_context_size:int,
                  attn_p_drop:float,
                  resid_p_drop:float,
-                 use_cached_causal_mask:bool,
-                 use_rope:bool):
+                 use_rope:bool,
+                 use_cached_causal_mask:bool):
         
         super().__init__()
         
-        assert embd_size % num_head == 0, f'embedding size shall be divided into number_head'
+        assert embd_size % num_heads == 0, f'embedding size shall be divided into number_head'
         self.D = embd_size
-        self.H = num_head
-        self.d = embd_size // num_head
+        self.H = num_heads
+        self.d = embd_size // num_heads
         assert self.d % 2 == 0, f'dim_per_head (embedding size / number_head) must be even for RoPE'
         self.scale = 1.0 / math.sqrt(self.d)
 
@@ -476,11 +476,11 @@ class CausalMHA(nn.Module):
 
         if attention_mask is not None:
             # attention_mask: tensor [B, L_q, L_so_far]/bool. True --> valid_area, False --> invalid_area
-            # 这里用 -1e9 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
+            # 这里用 -1e20 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
             # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃. 因为
             # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
-            # 所以这里用 finite 大负数 -1e9 而不是 -inf. softmax能正确处理 大负数 和全大负数行.
-            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , -1e9)
+            # 所以这里用 finite 大负数 -1e20 而不是 -inf. softmax能正确处理 大负数 和全大负数行.
+            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , -1e20)
 
         # softmax
         attn_w = F.softmax(attn_w, dim=-1) # [B, H, L_q, L_so_far]
@@ -488,83 +488,11 @@ class CausalMHA(nn.Module):
         y = torch.matmul(attn_w, v) # [B, H, L_q, L_so_far] @ [B, H, L_so_far, d] --> [B, H, L_q, d]
 
         ############ 等价部分
+        # 实际上, F.scaled_dot_product_attention 在 is_causal=True时, 要求attn_mask is None, 不然报错
+        # 所以若既需要 causal 又需要支持 attn_mask 时, 本实现是必不可少的
 
         y = y.transpose(1, 2).reshape(-1, L_q, self.D) # --> [B, L_q, H, d] --> [B, L_q, D]
         y = self.resid_drop(self.W_o(y)) # [B, L_q, D] --> [B, L_q, D]
-
-        new_kv_cache = None
-        if return_cache:
-            new_kv_cache = (k, v)
-
-        return y, new_kv_cache
-
-
-
-class causal_mha(nn.Module):
-    def __init__(self,
-                 embd_size:int,
-                 num_heads:int,
-                 use_bias:bool,
-                 max_context_size:int,
-                 attn_p_drop:float,
-                 resid_p_drop:float,
-                 use_rope:bool,
-                 use_cached_causal_mask:bool):
-        super().__init__()
-        self.D = embd_size
-        self.H = num_heads
-        self.d = embd_size // num_heads
-        self.scale = 1.0 / math.sqrt(self.d)
-        self.W_qkv = nn.Linear(embd_size, 3 * embd_size, bias=use_bias)
-        self.W_o = nn.Linear(embd_size, embd_size, bias=use_bias)
-        self.attn_p_drop = attn_p_drop
-        self.resid_drop = nn.Dropout(resid_p_drop)
-
-        if use_cached_causal_mask:
-            self.register_buffer(
-                'causal_mask',
-                torch.triu(torch.ones(max_context_size, max_context_size, dtype=torch.bool), diagonal=1)[None, None, :, :],
-                persistent = False
-                )
-        if use_rope:
-            self.rope = RotaryPosEnc(RoPEConfig(self.d))
-
-    def forward(self,
-                x:torch.Tensor,                                         # [B, L_q, D]
-                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None = None, # [B, H, L_past, D]
-                return_cache:bool = False,
-                attention_mask:torch.Tensor|None = None,                # [B, L_q, L_so_far=L_past+L_q]
-                positions:torch.Tensor|None = None,                     # [B, L_so_far]
-                ):
-        L_q = x.size(1)
-        qkv = self.W_qkv(x)
-        q, k, v = qkv.split(self.D, dim=-1)
-        q = q.view(-1, L_q, self.H, self.d).transpose(1, 2)
-        k = k.view(-1, L_q, self.H, self.d).transpose(1, 2)
-        v = v.view(-1, L_q, self.H, self.d).transpose(1, 2)
-        if kv_cache:
-            k_past, v_past = kv_cache
-            k, v = torch.cat([k_past, k], dim=2), torch.cat([v_past, v], dim=2)
-
-        L_so_far = k.size(2)
-        L_past = L_so_far - L_q
-
-        if hasattr(self, 'rope'):
-            if positions is not None and attention_mask is not None:
-                pass
-            else:
-                positions = torch.arange(0, L_so_far, dtype=torch.long, device=k.device)
-                attention_mask = None
-
-            cos, sin = self.rope.get_sin_cos(positions, broadcast_axis=1)
-            cos_q, sin_q = cos[:, :, L_past:L_so_far, :], sin[:, :, L_past:L_so_far, :]
-            q = self.rope.apply_rope(q, cos_q, sin_q)
-            k = self.rope.apply_rope(k, cos, sin)
-        
-        y = F.scaled_dot_product_attention(q, k, v, attention_mask, self.attn_p_drop, True, self.scale)
-
-        y = y.transpose(1, 2).reshape(-1, L_q, self.D)
-        y = self.resid_drop(self.W_o(y))
 
         new_kv_cache = None
         if return_cache:
