@@ -2,29 +2,8 @@ import torch
 import math
 from typing import Tuple
 from torch import nn
-from src.core.layers.attention_pool import CasualMHA
-
-
-class GeLU(nn.Module):
-    def forward(self, x):
-        return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
-
-
-class GeLUFFN(nn.Module):
-    '''
-    GPT 经典 FeedForward 实现(with GeLU)
-
-    [..., D] --linear--> [..., 4*D] --non_linear_act(gelu/relu)--> [..., 4D] --linear--> [..., D] --dropout--> [..., D]
-    '''
-    def __init__(self, embd_size, use_bias, resid_p_drop):
-        super().__init__()
-        self.W_in = nn.Linear(embd_size, 4*embd_size, use_bias)
-        self.gelu = GeLU()
-        self.W_out = nn.Linear(4*embd_size, embd_size, use_bias)
-        self.drop = nn.Dropout(resid_p_drop)
-
-    def forward(self, x):
-        return self.drop(self.W_out(self.gelu(self.W_in(x))))
+from src.core.layers.attention_pool import CasualMHA, casual_mha
+from src.core.layers.feedforward import gelu_ffn
 
 
 
@@ -52,10 +31,10 @@ class GPT2DecoderBlock(nn.Module):
                  ):
         super().__init__()
         self.layer_norm1 = nn.LayerNorm(embd_size)
-        self.casual_attention = CasualMHA(embd_size, num_head, use_bias, max_context_size, attn_p_drop,
-                                          resid_p_drop, use_cached_casual_mask, use_rope)
+        self.casual_attention = casual_mha(embd_size, num_head, use_bias, max_context_size, attn_p_drop,
+                                           resid_p_drop, use_cached_casual_mask, use_rope)
         self.layer_norm2 = nn.LayerNorm(embd_size)
-        self.gelu_ffn = GeLUFFN(embd_size, use_bias, resid_p_drop)
+        self.gelu_ffn = gelu_ffn(embd_size, use_bias, resid_p_drop)
 
     def forward(self,
                 x:torch.Tensor,
