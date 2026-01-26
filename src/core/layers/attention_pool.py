@@ -5,51 +5,6 @@ from src.core.functional import create_mask_on_last_dim
 import torch.nn.functional as F
 
 
-def masked_softmax(S, valid_lens, where_valid='left'):
-    '''
-    inputs:
-        S: 3-Dtensor, shape: (batch_size, n_query, n_logits);
-        valid_lens: 1-D or 2—D tensor, shape: (batch_size,) or (batch_size, n_query) or None
-        where_valid: left or right.
-            left: means valid_lens is counting from index 0
-            right: means valid_lens is counting from index -1
-
-    returns: convex weight tensor with shape (batch_size, n_query, n_logits), denoted as W
-        W[sample_idx, query_idx, :] is a 1-D tensor of convex weight distribution(sum to 1 and non-negative).
-        对每个样本而言, 返回 n_query 个 凸组合权重
-    '''
-
-    if valid_lens is None: #如果不输入valid_lens，那么所有元素参与权重化
-        return nn.functional.softmax(S, dim=-1)
-    
-    elif valid_lens.dim() == 1: # valid_lens: (batch_size, ) --> (batch_size, 1) --> (batch_size, n_query)
-        valid_lens = torch.repeat_interleave(valid_lens.unsqueeze(1), repeats=S.shape[1], dim=1)
-
-    elif valid_lens.dim() == 2: # valid_lens: (batch_size, n_query)
-        assert valid_lens.shape == S.shape[:-1], f"valid_lens.shape {valid_lens.shape} not match with S shape {S.shape}"
-
-    else:
-        raise ValueError(f'wrong valid_lens')
-    
-    # 让 non-valid 部分为 True, 以此形成的 mask tensor 可以给 non-valid 部分填入 negative inf
-
-    if where_valid == 'left': # 当左边部分是valid时, 右边部分是non-valid，要在mask tensor中设为True
-        mask_flag = False
-    elif where_valid == 'right': # 当右边部分是valid时, 左边部分是non-valid，要在mask tensor中设为True
-        mask_flag = True
-    else:
-        raise ValueError(f'wrong where_valid')
-
-    mask = create_mask_on_last_dim(S.shape[-1], valid_lens, mask_flag)
-
-    # mask tensor shape: (batch_size, n_query, n_kv)
-
-    S[mask] = -1e20 # non-valid 部分填入 负无穷, 这样在 softmax 操作中被消去. index-put操作梯度可传
-
-    return nn.functional.softmax(S, dim=-1)
-
-
-
 
 # 注意这里的 attn_mask 逻辑与 F.scaled_dot_product_attention 类似: True 代表合法贡献, False 代表非法要屏蔽
 class ScaledDotProductAttention(nn.Module):
