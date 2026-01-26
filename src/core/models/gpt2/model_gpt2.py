@@ -126,7 +126,7 @@ def get_segs_pos_attnmask_decode(
         is_q_pad = input_segs != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
         attention_mask = is_q_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_so_far]]bool, qk any PAD -> false, qk no PAD -> true
     
-    #  [B, L_so_far] [B, L_so_far]   [B, L_q, L_so_far]
+    # [B,L_so_far] / [B,L_so_far] / [B,L_q,L_so_far]
     return segments, positions, attention_mask
 
 

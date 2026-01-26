@@ -10,14 +10,14 @@ class TransformerDecoderBlock(nn.Module):
                  embd_size:int,
                  num_heads:int,
                  use_bias:bool,
-                 max_context_size:int,
+                 max_decoder_ctx_size:int,
                  ffn_hidden_size:int,
                  attn_p_drop:float,
                  resid_p_drop:float,
                  use_cached_causal_mask:bool
                  ):
         super().__init__()
-        self.causal_attention = CausalSelfMHA(embd_size, num_heads, use_bias, max_context_size,
+        self.causal_attention = CausalSelfMHA(embd_size, num_heads, use_bias, max_decoder_ctx_size,
                                               attn_p_drop, resid_p_drop, False, use_cached_causal_mask)
         self.layer_norm1 = nn.LayerNorm(embd_size)
         self.cross_attention = MultiHeadAttention(embd_size, num_heads, attn_p_drop, use_bias)

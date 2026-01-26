@@ -1,114 +1,126 @@
-from src.core.architectures import Encoder, Decoder, EncoderDecoder
 from src.core.layers.position_encoding import TrigonoAbsPosEnc
-from src.core.blocks.transformer import TransformerEncoderBlock, TransformerDecoderBlock
+from src.core.blocks.bert import BERTEncoderBlock
+from src.core.blocks.transformer import TransformerDecoderBlock
+from .config_transformer import transformerConfig
 import torch.nn as nn
 import math
 import torch
+from typing import Optional, Tuple
 
 
 
-
-class TransformerEncoder(Encoder):
-    '''
-    在Encoder内部, 前后关系依赖是输入 timestep 1-seq_length, 输出 timestep 1-seq_length, 实现对 input data 的深度表征
-
-    1. Embedding层. 
-        输入(batch_size, seq_length), 每个元素是 0-vocab_size 的integer, 代表token ID。输出 (batch_size, seq_length, num_hiddens)
-        Embedding层相当于一个 onehot + linear-projection 的组合体,
-        (batch_size, seq_length) --onehot--> (batch_size, seq_length, vocab_size) --linear_proj--> (batch_size, seq_length, num_hiddens)
-
-    2. PositionEncoding层.
-        输入 (seq_length,) 的 位置信息, 对其编码. 注意 encoder 里的位置信息是 1-seq_length, timestep 0 是 BOS, 不在 src seq里
-        输出 (1, seq_length, num_hiddens)
-
-    3. 连续的 Encoder Block.
-        每个 EncoderBlock 的输入 src_embd + pos_embd (batch_size, seq_length, num_hiddens), 输出 (batch_size, seq_length, num_hiddens)
-        输入/输出 valid_lens (batch_size,) 作为在 Block间不会变的 mask 信息接力传递. valid_lens[i] 给出了样本i 的 seq_length 中, 有几个是valid.
-
-        在自注意力中, 对每个token(对应每条query)而言, 都只限制了整体valid 长度. 故 encoder 里, 每个token是跟序列里前/后所有valid token作相关性运算的
-    '''
-    def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
+class TransformerEncoder(nn.Module):
+    def __init__(self, config:transformerConfig):
         super().__init__()
-        self.num_hiddens = num_hiddens
-        self.embedding = nn.Embedding(vocab_size, num_hiddens)
-        self.dropout = nn.Dropout(dropout)
-        self.pos_encoding = TrigonoAbsPosEnc(num_hiddens)
+
+        self.D = config.hidden_size
+        self.token_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.pos_encoding = TrigonoAbsPosEnc(config.hidden_size)
+        self.embd_drop = nn.Dropout(config.embd_p_drop)
+
         self.blks = nn.Sequential()
-        for i in range(num_blk):
-            cur_blk = TransformerEncoderBlock(num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias)
-            self.blks.add_module("encblock"+str(i), cur_blk)
+        for i in range(config.num_enc_blks):
+            cur_blk = BERTEncoderBlock(
+                config.hidden_size,
+                config.num_heads,
+                config.use_bias,
+                config.ffn_hidden_size,
+                config.attn_p_drop,
+                config.resid_p_drop,
+                )
+            self.blks.add_module(f'enc_blk{i+1}', cur_blk)
+    
+    def forward(self,
+                src: torch.Tensor,
+                src_valid_lens: torch.Tensor
+                ):
+        # src shape: (batch_size, src_context_size)int64
+        # src_valid_lens: (batch_size,)int64
 
-    def forward(self, src, src_valid_lens):
-        # src shape: (batch_size, num_steps)int64, timestep: 1 -> num_steps
-        _, num_steps = src.shape
+        src_context_size = src.size(1)
+         # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
+        src_embd = self.token_embedding(src)*math.sqrt(self.D) # (batch_size, src_context_size, hidden_size)
 
-        # src_valid_lens shape: (batch_size,)int32
+        # src position embedding: 没有 bos, 从 1 开始到 src_context_size
+        position_ids = 1 + torch.arange(0, src_context_size, dtype=torch.int64, device=src_embd.device)
+        src_embd = self.embd_drop( src_embd + self.pos_encoding(position_ids) ) # (batch_size, src_context_size, hidden_size)
 
-        # source input data embedding
-        # src_embd: shape (batch_size, num_steps, num_hiddens)
-        src_embd = self.embedding(src) * math.sqrt(self.num_hiddens)
-        # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
-
-        # source position embedding: 没有 bos, 从 1 开始到 num_steps
-        # pos_embd: (num_steps,) --pos embed--> (1, num_steps, num_hiddens)
-        # 1 到 num_steps, 所有位置都需要position embed. 0 是给 <bos> 的. src里没有bos
-        position_ids = torch.arange(1, num_steps+1, dtype=torch.int64, device=src.device) # (num_steps,)
-
-        # input embeddings(batch_size, num_steps, num_hiddens) +(broadcast) position embedding(num_steps, num_hiddens)
-        src_enc = self.dropout(src_embd + self.pos_encoding(position_ids))
+        # attention mask(batch_size, src_context_size, src_context_size): True --> valid area, False --> need masked
+        # 没有因果自回归, 只有 invalid area(PAD) --> False, valid area(non-PAD) --> True
+        src_attn_mask = position_ids[None, :] < src_valid_lens[:, None] # (batch_size, src_context_size)
+        src_attn_mask = src_attn_mask.unsqueeze(-1) * src_attn_mask.unsqueeze(-2)
 
         for blk in self.blks:
-            src_enc = blk(src_enc, src_valid_lens)
+            src_embd = blk(src_embd, src_attn_mask)
+
+        return src_embd, src_attn_mask # (batch_size, src_context_size, hidden_size) & (batch_size, src_context_size, src_context_size)
+    
+
+
+
+class TransformerDecoder(nn.Module):
+    def __init__(self, config:transformerConfig):
+        super().__init__()
+
+        self.D = config.hidden_size
+        self.token_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.pos_encoding = TrigonoAbsPosEnc(config.hidden_size)
+        self.embd_drop = nn.Dropout(config.embd_p_drop)
+
+        self.blks = nn.Sequential()
+        for i in range(config.num_dec_blks):
+            cur_blk = TransformerDecoderBlock(
+                config.hidden_size,
+                config.num_heads,
+                config.use_bias,
+                config.max_decoder_ctx_size,
+                config.ffn_hidden_size,
+                config.attn_p_drop,
+                config.resid_p_drop,
+                config.use_cached_causal_mask
+                )
+            self.blks.add_module(f'dec_blk{i+1}', cur_blk)
         
-        return src_enc, src_valid_lens
+        # tied weight with embedding layer: 可以看作 隐藏状态和 token_embd 的语义相似度计算, 也可以视作 正则化手段防止过拟合
+        self.head_tok = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.head_tok.weight = self.token_embedding.weight # 这行代码本质上将两个weight指向了同一块内存区域
+
+        self.apply(self._init_weights) # _init_weights 中对 linear/embedding 的weights 作相同分布的初始化. 由于已tied, 故两层都以最后一次初始化为结果
+
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+
+    def forward(self,
+                tgt: torch.Tensor,                                                      # [B, max_decoder_ctx_size]
+                tgt_valid_lens: torch.Tensor,                                           # [B, ]
+                encoded_output:Tuple[torch.Tensor, torch.Tensor],                       # [B, src_ctx_size, hidden_size]/[B, src_ctx_size, src_ctx_size]
+                past_kv: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None,
+                if_cache_kv: bool = False
+                ):
+        
+        if self.training:
+            positions = torch.arange(0, tgt.size(1), dtype=torch.int64, device=tgt.device) # [max_decoder_ctx_size, ]
+        elif past_kv is None:
+            positions = torch.tensor([0], dtype=torch.int64, device=tgt.device)
+        else:
+            positions = torch.tensor([0], dtype=torch.int64, device=tgt.device)
+
+
+
+
+
+
+
 
 
 class TransformerDecoder(Decoder):
-    '''
-    train 模式:
-    单次forward是 seq_length 并行, 前后关系依赖是输入 timestep 0-seq_length-1, 输出 timestep 1-seq_length, 实现对 shift1 data 的 并行预测
-
-    1. Embedding层.
-        输入(batch_size, seq_length), 每个元素是 0-vocab_size 的int64, 代表token ID. 输出(batch_size, seq_length, num_hiddens)
-
-    2. pos_encoding层.
-        输入 (seq_length,) 的 位置信息, 对其编码. 注意 decoder 里的位置信息是 0-seq_length-1, timestep 0 是 BOS, 在 tgt seq里
-        输出 (1, seq_length, num_hiddens)
-
-    3. 连续的 decoder Block.
-        每个 DecoderBlock 的输入 tgt_embd + pos_embd (batch_size, seq_length, num_hiddens),
-        输入/输出 src_enc_info(src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)] 作为在Block间不会变的 src 信息接力传递.
-        输出 (batch_size, seq_length, num_hiddens)
-
-        在 Block 内部, tgt_embd 先作 自回归的自注意力 以深度表征, 再和 src_embd 作 交叉注意力 以获取信息
-
-        Block 之间没有传递 valid_lens of tgt seq 的信息. 这个 valid lens of tgt seq 用在了 求loss 的步骤里
-
-        
-    eval 模式:
-    单次forward是生产 单个token 的过程. 总共要生成 seq_length 个token, 所以总过程要执行forward seq_length次,
-    第 i 次 forward 生成 timestep 为 i 的token, i = 1,2,...,seq_length.    timestep = 0 的token是<BOS>
-
-    对于 第 i 次forward, i = 1,2,...,seq_length
-    1. Embedding层.
-        输入(1, 1), 元素是 0-vocab_size 的int64, 代表 timestep=i-1 的 token ID. 输出 (1, 1, num_hiddens)
-    
-    2. pos_encoding层.
-        对 (1,) 的 位置信息作编码. 这里这个位置信息代表 timestep i-1.
-        在forward过程中, 依靠 KV_Caches 中, dim 1 的维度长度, 得知当前 tgt_query 的位置信息
-        输出 (1, 1, num_hiddens)
-
-    3. 连续的 decoder Block
-        每个 DecoderBlock 的输入 tgt_embd + pos_embd (1, 1, num_hiddens)
-        输入/输出 src_enc_info(src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)] 作为在Block间不会变的 src 信息接力传递.
-        输入/输出 KV_Caches: 
-            输入的 KV_Caches 记录了每个 Block 各自的 输入 tgt_tensor(timestep i-1) 在 timesteps 0 - i-2 上的堆叠,
-            输出的 KV_Caches 记录了每个 Block 堆叠了 输入 tgt_tensor(timestep i-1) 更新后的结果. 一次forward过程中, 所有KV都更新一次
-    
-    4. dense层.
-        输出 (1, 1, vocab_size)tensor of logits, 即对 timestep=i 的token 的预测
-        输出 KV_Caches: 记录了每个 Block 各自的 输入 tgt_tensor 在 timesteps 0 - i-1 上的堆叠.
-    '''
     def __init__(self, vocab_size, num_blk, num_heads, num_hiddens, dropout, ffn_num_hiddens, use_bias):
         super().__init__()
         self.num_hiddens = num_hiddens
@@ -133,26 +145,7 @@ class TransformerDecoder(Decoder):
 
 
     def forward(self, tgt_dec_input, src_enc_info, KV_Caches=None):
-        # train: tgt_dec_input shape: (batch_size, num_steps)int64, timestep 从 0 到 num_steps-1
-        #        src_enc_info = (src_enc, src_valid_lens): [(batch_size, num_steps, d_dim), (batch_size,)]
-        #        KV_Caches: None
 
-        #        position_ids: 训练阶段时, position_ids 应该是 tensor([0, 1, ..., num_steps-1])
-
-        # 对于第i次infer: i = 1, 2, ..., num_steps
-        #        tgt_dec_input shape: (1, 1)int64, 其 timestep 是 i-1, 前向的output的timestep 是 i
-        #        src_enc_info = (src_enc, src_valid_lens): [(1, num_steps, d_dim), (1,)]
-        #        input KV_Caches: 
-        #           Dict with keys: block_ind,
-        #           values: 对于第 1 次infer, KV_Caches 为 空
-        #                   对于第 i > 1 次infer, KV_Caches 是 tensors shape as (1, i-1, d_dim), i-1 维包含 timestep 0 到 i-2
-
-        #        position_ids:
-        #           推理时阶段时, 对于第 1 次infer, position_ids 应该是 tensor([0]), 因为此时 tgt_dec_input 是 <bos>, KV_Caches 为 {}
-        #           对于第 i > 1 次infer, position_ids = tensor([i-1]), 因为此时 tgt_dec_input position 是 i-1, 即 KV_Cacues 的 value 的第二维度
-        
-        # target input embedding
-        # tgt_dec_input_embd shape: train (batch_size, num_steps, num_hiddens), infer (1, 1, num_hiddens)
         tgt_dec_input_embd = self.embedding(tgt_dec_input) * math.sqrt(self.num_hiddens) 
         # 使用 固定位置编码时, 避免位置编码的影响过大，所以放大input embeddings
 
@@ -185,6 +178,7 @@ class TransformerDecoder(Decoder):
         #                      keys as block_indices
         #                      values as (1, i, d_dim) tensor, i 维 包含 timestep 0-i-1, 实际上就是 input KV_Caches 添加 timestep i-1 的 tgt_query
         return self.dense(tgt_query), KV_Caches
+
 
 
 class Transformer(EncoderDecoder):
