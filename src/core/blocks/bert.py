@@ -2,7 +2,7 @@ import torch
 import math
 from typing import Tuple
 from torch import nn
-from src.core.layers.attention_pool import BidirectMHA
+from src.core.layers.attention_pool import MultiHeadAttention
 from src.core.layers.feedforward import relu_ffn
 
 
@@ -19,7 +19,7 @@ class BERTEncoderBlock(nn.Module):
     '''
     def __init__(self, embd_size:int, num_heads:int, use_bias:bool, ffn_hidden_size:int, attn_p_drop:float, resid_p_drop:float):
         super().__init__()
-        self.bidirect_attention = BidirectMHA(embd_size, num_heads, attn_p_drop, use_bias)
+        self.bidirect_attention = MultiHeadAttention(embd_size, num_heads, attn_p_drop, use_bias)
         self.resid_drop = nn.Dropout(resid_p_drop)
         self.layer_norm1 = nn.LayerNorm(embd_size)
         self.relu_ffn = relu_ffn(embd_size, ffn_hidden_size, resid_p_drop)

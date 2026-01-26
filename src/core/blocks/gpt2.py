@@ -2,7 +2,7 @@ import torch
 import math
 from typing import Tuple
 from torch import nn
-from src.core.layers.attention_pool import CausalMHA
+from src.core.layers.attention_pool import CausalSelfMHA
 from src.core.layers.feedforward import gelu_ffn
 
 
@@ -30,8 +30,8 @@ class GPT2DecoderBlock(nn.Module):
                  use_cached_causal_mask:bool):
         super().__init__()
         self.layer_norm1 = nn.LayerNorm(embd_size)
-        self.causal_attention = CausalMHA(embd_size, num_heads, use_bias, max_context_size, attn_p_drop,
-                                          resid_p_drop, use_rope, use_cached_causal_mask)
+        self.causal_attention = CausalSelfMHA(embd_size, num_heads, use_bias, max_context_size, attn_p_drop,
+                                              resid_p_drop, use_rope, use_cached_causal_mask)
         self.layer_norm2 = nn.LayerNorm(embd_size)
         self.gelu_ffn = gelu_ffn(embd_size, use_bias, resid_p_drop)
 

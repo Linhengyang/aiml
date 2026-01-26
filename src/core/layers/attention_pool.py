@@ -51,7 +51,7 @@ def masked_softmax(S, valid_lens, where_valid='left'):
 
 
 
-# implementation of F.scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal=False, scale, enable_gqa=False)
+# 注意这里的 attn_mask 逻辑与 F.scaled_dot_product_attention 类似: True 代表合法贡献, False 代表非法要屏蔽
 class ScaledDotProductAttention(nn.Module):
     '''
     args:
@@ -59,25 +59,24 @@ class ScaledDotProductAttention(nn.Module):
         scale: scale value on the attention weight matrices
     
     inputs:
-        q's shape: (B, H, n_query, qk_size)
-        k's shape: (B, H, n_kvs, qk_size)
-        v's shape: (B, H, n_kvs, v_size)
-        attention_mask(optional)'s shape: (B, n_query, n_kvs)
+        q's shape: (B, H, L_q, d)
+        k's shape: (B, H, L_kv, d)
+        v's shape: (B, H, L_kv, v_size)
+        attention_mask(optional)'s shape: (B, L_q, L_kv)
     
     returns: denoted as o
-        o's shape: (B, H, n_query, v_size)
+        o's shape: (B, H, L_q, v_size)
     
     explains:
-        q(..., n_query, qk_size), k(..., n_kvs, qk_size) --相似度计算--> attn_w(..., n_query, n_kvs)
+        q(..., L_q, d), k(..., L_kv, d) --相似度计算--> attn_w(..., L_q, L_kv)
         
-        Scaled Dot Production on queries and keys to attention pool for weight matrices attn_w (..., n_queries, n_kvs)
-        Convex combinations of Values based on weight matrices are returned
+        Scaled Dot Production on queries & keys to attention pool for weight matrices attn_w (..., L_q, L_kv)
+        Convex combinations of values based on weight matrices are returned
     
-    query/key/value 都有各自的数量和维度. 其中 query 的数量自由决定, 但是其维度要和key相同(因为要计算query和key之间的相似度)
-    value的维度自由决定, 但是其数量要和key相同(key决定了其对应value在最终输出结果中的重要程度)
+    q/k/v 都有各自的数量和维度. 其中 q 的数量自由决定, 但是其表示维度 d 要和 key 相同(因为要计算 query 和 key 之间的相似度)
+    value 的维度自由决定, 但是其数量要和 key 相同(key决定了其对应value在最终输出结果中的重要程度)
     
-    积式注意力 ScaledDotProductAttention 简单地根据 每条 query和不同keys之间地相似度, 决定了每个key对应的value的权重, 组合出最后的结果
-    最终由 n_queries 条结果
+    积式注意力 ScaledDotProductAttention 简单地根据 每条 query和不同keys之间地相似度, 决定了每个key对应的value的权重, 组合出output
     '''
     def __init__(self, attn_p_drop, scale, **kwargs):
         super().__init__(**kwargs)
@@ -85,54 +84,28 @@ class ScaledDotProductAttention(nn.Module):
         self.register_buffer('scale', torch.tensor(scale)) # 乘以 scale 相似度计算中因为维数过大引起的数值不稳定
 
     def forward(self,
-                q:torch.Tensor,                             # [B, n_query, qk_size]
-                k:torch.Tensor,                             # [B, n_kvs, qk_size]
+                q:torch.Tensor,                             # [B, H, L_q, d]
+                k:torch.Tensor,                             # [B, H, L_kv, d]
                 v:torch.Tensor,                             # [B, n_kvs, v_size]
-                attention_mask:torch.Tensor|None = None     # [B, n_query, n_kvs] where False --> zero probability
+                attention_mask:torch.Tensor|None = None     # [B, L_q, L_kv] where False --> zero attend
                 ):
-        # q(..., n_query, qk_size) @ k(..., n_kvs, qk_size) 转置 -> attn_w(..., n_query, n_kvs)
-        attn_w = torch.bmm(q, k.permute(0, -1, -2)) * self.scale # 本质是 q 和 k 的相似度计算
-
+        # q(..., L_q, d) @ k(..., L_kv, d).T -> attn_w(..., L_q, L_kv)
+        attn_w = torch.bmm(q, k.permute(0, 1, 3, 2)) * self.scale
         if attention_mask is not None:
-            attn_w = attn_w.masked_fill((attention_mask == False).unsqueeze(1) , -1e20)
+            # False 部分 not attend --> 填入-inf
+            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , float('-inf'))
         
-        self.attention_weights = F.softmax(attn_w, dim=-1) # 注意力权重shape (..., n_query, n_kvs)
-
-        # attn_w(..., n_query, n_kvs) @ v(..., n_kvs, v_size) -> o(..., n_query, v_size) 
+        self.attention_weights = F.softmax(attn_w, dim=-1)
+        # attn_w(..., L_q, L_kv) @ v(..., L_kv, v_size) -> o(..., L_q, v_size) 
         return torch.bmm(self.attn_drop(self.attention_weights), v)
 
 
 
-
-class BidirectMHA(nn.Module):
-    '''
-    args:
-        embd_size: number of hiddens (num_heads | embd_size), see explains
-        num_heads: number of heads (num_heads | embd_size), see explains
-        attn_p_drop: dropout rate. Regularization on the attention weight matrices
-        use_bias
-    
-    inputs:
-        q: (batch_size, n_queries, query_size)
-        k: (batch_size, n_kvs, key_size)
-        v: (batch_size, n_kvs, value_size)
-        attention_mask(optional): (batch_size, n_queries, n_kvs)
-    
-    returns: denoted as o
-        o: (batch_size, n_queries, embd_size)
-    
-    explains:
-        After multiple linear projections of Q K V, assemble the scaled-dot-prod attention pools of these projections,
-        and a final linear project is followed.
-        In detail:
-            1. H linear projections on Q K V whom projected to embd_size // H dimensions, which stands for H heads
-            2. For every head's result, perform scaled-dot-prod attention pool
-            3. Assemble H attenion-poolings' output, to have a result with embd_size dimensions. A final embd_size to
-               embd_size linear project is followed
-    
-    单头注意力是指 对 QKV 作各自线性映射(至相同维度 embd_size/H )后, 作 ScaledDotProductAttention 后得到 (batch_size, n_queries, embd_size/H)
-    多头注意力: H 个这样的单头注意力的结果, 拼起来是一个 (batch_size, n_queries, embd_size) 的结果. 再follow一个 embd_size -> embd_size 的线性映射
-    '''
+# impelementation of nn.MultiheadAttention(embd_size, num_heads, dropout=attn_p_drop, bias=use_bias, batch_first=True)
+# forward(query, key, value, need_weights=False, attn_mask=attn_mask, is_causal=False)
+# 注意这里 MultiHeadAttention 的 attn_mask 逻辑与 F.scaled_dot_product_attention 对齐, 即 True 代表合法贡献, False 代表非法需要屏蔽
+# 而 nn.MultiheadAttention 是相反的: 该类里 attn_mask 参数 True 代表需要被屏蔽, 而 False 代表不变化
+class MultiHeadAttention(nn.Module):
     def __init__(self, embd_size, num_heads, attn_p_drop, use_bias, **kwargs):
         assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
         super().__init__(**kwargs)
@@ -147,46 +120,30 @@ class BidirectMHA(nn.Module):
     def transpose_qkv(self, x):
         '''
         x shape: (batch_size, seq_len, hidden_size)
-        transpose route:--> (batch_size, hidden_size, seq_len) --> (batch_size, num_heads, dim_per_head, seq_len)
-                        --> (batch_size, num_heads, seq_len, dim_per_head)
+        transpose route:--> (batch_size, hidden_size, seq_len) --> (batch_size, h, d, seq_len)
+                        --> (batch_size, h, seq_len, d)
         '''
         seq_len = x.size(1)
         return x.permute(0, 2, 1).reshape(-1, self.h, self.d, seq_len).permute(0, 1, 3, 2)
 
     def transpose_o(self, x):
         '''
-        X shape: (batch_size, num_heads, seq_len, dim_per_head)
-        transpose route:--> (batch_size, num_heads, dim_per_head, seq_len) --> (batch_size, num_heads*dim_per_head, seq_len)
-                        --> (batch_size, seq_len, num_heads*dim_per_head)
+        X shape: (batch_size, h, seq_len, d)
+        transpose route:--> (batch_size, h, d, seq_len) --> (batch_size, h*d, seq_len)
+                        --> (batch_size, seq_len, hidden_size)
         '''
         seq_len = x.size(1)
         return x.permute(0, 1, 3, 2).reshape(-1, self.h*self.d, seq_len).permute(0, 2, 1)
 
-    def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
+    def forward(self, q:torch.Tensor, k:torch.Tensor, v:torch.Tensor, attention_mask:torch.Tensor|None=None):
         # q/k/v: (B, L_q/L_kv/L_kv, D)
-        q = self.transpose_qkv(self.W_q(query)) #(B, h, L_q, d)
-        k = self.transpose_qkv(self.W_k(key)) #(B, h, L_kv, d)
-        v = self.transpose_qkv(self.W_v(value)) #(B, h, L_kv, d)
-        o = self.attention(q, k, v, attention_mask) #(B, h, L_q, d)
+        q_ = self.transpose_qkv(self.W_q(q)) #(B, h, L_q, d)
+        k_ = self.transpose_qkv(self.W_k(k)) #(B, h, L_kv, d)
+        v_ = self.transpose_qkv(self.W_v(v)) #(B, h, L_kv, d)
+        o = self.attention(q_, k_, v_, attention_mask) #(B, h, L_q, d)
         output = self.transpose_o(o) #(B, L_q, D)
         return self.W_o(output) #(B, L_q, D)
 
-
-
-# class bidirect_mha(nn.Module):
-#     def __init__(self, embd_size, num_heads, attn_p_drop, use_bias):
-#         assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
-#         super().__init__()
-#         self.h = num_heads
-#         self.attention = nn.MultiheadAttention(embd_size, num_heads, dropout=attn_p_drop, bias=use_bias, batch_first=True)
-    
-#     def forward(self, query:torch.Tensor, key:torch.Tensor, value:torch.Tensor, attention_mask:torch.Tensor|None=None):
-#         if attention_mask is not None:
-#             attn_mask = attention_mask.repeat_interleave(repeats=self.h, dim=0) # (B, n_q, n_kv) --> (B*h, n_q, n_kv)
-#         else:
-#             attn_mask = None
-        
-#         return self.attention(query, key, value, need_weights=False, attn_mask=attn_mask, is_causal=False)[0]
 
 
 
@@ -283,18 +240,18 @@ class BidirectMHA(nn.Module):
 from src.core.layers.position_encoding import RoPEConfig, RotaryPosEnc
 from typing import Tuple
 
-# 由此，CausalMHA 在forward过程可以不依赖 max_context_size: causal_mask可以根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
-# 实际上，CausalMHA 还实现了 input sequence 变长(前后两次forward的sequence长度可以不一样)：因为 RoPE 和 attention weights 都支持变长
+# 由此，CausalSelfMHA 在forward过程可以不依赖 max_context_size: causal_mask可以根据query_seq_length和kv_seq_length按需构造的, RoPE也不依赖
+# 实际上，CausalSelfMHA 还实现了 input sequence 变长(前后两次forward的sequence长度可以不一样)：因为 RoPE 和 attention weights 都支持变长
 
 # 不过, 在实际Model层面, 仍然会设定max_context_size参数，并保证所有input sequence 的长度都不大于这个值。原因如下:
-#   1. 在 CausalMHA层, causal_mask 和 attention weights在训练时, 涉及 O(L_q^2) 的显存空间占用. 如果不限制 L_q
-#      那么在训练时若输入了过长的 input sequence as query, 可能会导致OOM. 这样在 CausalMHA 层避免了过大的 attention weights 矩阵。
+#   1. 在 CausalSelfMHA层, causal_mask 和 attention weights在训练时, 涉及 O(L_q^2) 的显存空间占用. 如果不限制 L_q
+#      那么在训练时若输入了过长的 input sequence as query, 可能会导致OOM. 这样在 CausalSelfMHA 层避免了过大的 attention weights 矩阵。
 #   2. 很多模型在制作train dataset时，会切分长文档/拼接短文档，成固定长度的chunk。这里的固定长度就约等于模型的max_context_size，因为限制了外推能力.
 #      现代很多LLM的训练策略是curriculum-style: 训练epoch早期使用短序列，后期用长序列，训练时sequence length是动态变化的。
 #   3. RoPE的无限拓展只是理论上的，实际上theta=position_index*频率信号，当position很大时会失真。现代模型多会启用RoPE scaling，而这里
 #      RoPE scaling 依赖 max_context_size. 为了保证 vanilla-RoPE 和 scaling-RoPE 之间接口的一致性, 应该始终保有 max_context_size 参数
 
-class CausalMHA(nn.Module):
+class CausalSelfMHA(nn.Module):
     '''
     初始化参数
         embd_size: int
@@ -305,11 +262,11 @@ class CausalMHA(nn.Module):
         attn_p_drop: float
             注意力权重矩阵 attention weights 在与 v 进行计算之前使用 dropout 增强泛化
         resid_p_drop: float
-            因为 attention layer 后面紧接 add 残差连接. 所以要在 CausalMHA layer 最后 使用 dropout 增强泛化
+            因为 attention layer 后面紧接 add 残差连接. 所以要在 CausalSelfMHA layer 最后 使用 dropout 增强泛化
         use_rope: bool
-            True: CausalMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k.
-                  本 CausalMHA 层在使用 RoPE 时, valid token 的位置编码从 0 开始. PAD(如果有)位置编码赋0. 不害怕混淆, 因为PAD不参与计算.
-            False: CausalMHA layer 不带 位置编码. 那么 CausalMHA layer 之前, 要使用 max_context_size 参数实施 绝对位置编码
+            True: CausalSelfMHA layer 自带 RoPE 位置编码, 即在 qk 计算 attention weights 之前, 实施 RoPE(neox style) on q/k.
+                  本 CausalSelfMHA 层在使用 RoPE 时, valid token 的位置编码从 0 开始. PAD(如果有)位置编码赋0. 不害怕混淆, 因为PAD不参与计算.
+            False: CausalSelfMHA layer 不带 位置编码. 那么 CausalSelfMHA layer 之前, 要使用 max_context_size 参数实施 绝对位置编码
         use_cached_causal_mask: bool
             True: 会根据 max_context_size 预先生成 causal mask 以供裁剪去契合 attention weights
             False:, 根据 train/eval 状态, 以及 q/k 的 seq_len_q/seq_len_k, 动态生成相应 causal mask
@@ -352,7 +309,7 @@ class CausalMHA(nn.Module):
 
     def forward(self,
                 x:torch.Tensor,                                         # [B, L_q, D]
-                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None = None, # [B, H, L_past, D]
+                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None = None, # [B, H, L_past, d]
                 return_cache:bool = False,
                 attention_mask:torch.Tensor|None = None,                # [B, L_q, L_so_far=L_past+L_q]
                 positions:torch.Tensor|None = None,                     # [B, L_so_far]/[1, L_so_far]
@@ -384,7 +341,7 @@ class CausalMHA(nn.Module):
             作用: 为 attention weights [B, H, L_q, L_so_far] 遮蔽 非法贡献. 对某 q, 涉及 PAD, 以及不与该 q same-text 的 k, 都是非法贡献, 要屏蔽.
 
         positions: Tensor|None, 默认None, 否则为 tensor [B, L_so_far]
-            只在 use_rope = True 时, positions 才会起作用. 否则应该在 CausalMHA 层之前就把 绝对位置编码 加到 x 里.
+            只在 use_rope = True 时, positions 才会起作用. 否则应该在 CausalSelfMHA 层之前就把 绝对位置编码 加到 x 里.
             positions 代表了 L_past + L_q = L_so_far 的所有位置信息. 从中取 后L_q部分, 即为 q 的 位置编码.
             当 use_rope = True 但又不输入 positions, 那么此 layer 会自动生成从 0 开始的 positions 作为 q/k 的位置编码.
 
