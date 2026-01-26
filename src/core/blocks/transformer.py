@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from typing import Tuple
-from src.core.layers.attention_pool import BidirectMHA, CausalMHA
+from src.core.layers.attention_pool import MultiHeadAttention, CausalSelfMHA
 from src.core.layers.feedforward import relu_ffn
 
 
@@ -17,24 +17,37 @@ class TransformerDecoderBlock(nn.Module):
                  use_cached_causal_mask:bool
                  ):
         super().__init__()
-        self.causal_attention = CausalMHA(embd_size, num_heads, use_bias, max_context_size,
-                                          attn_p_drop, resid_p_drop, False, use_cached_causal_mask)
+        self.causal_attention = CausalSelfMHA(embd_size, num_heads, use_bias, max_context_size,
+                                              attn_p_drop, resid_p_drop, False, use_cached_causal_mask)
         self.layer_norm1 = nn.LayerNorm(embd_size)
-        self.cross_attention = BidirectMHA(embd_size, num_heads, attn_p_drop, use_bias)
+        self.cross_attention = MultiHeadAttention(embd_size, num_heads, attn_p_drop, use_bias)
+        self.resid_drop = nn.Dropout(resid_p_drop)
         self.layer_norm2 = nn.LayerNorm(embd_size)
         self.relu_ffn = relu_ffn(embd_size, ffn_hidden_size, resid_p_drop)
         self.layer_norm3 = nn.LayerNorm(embd_size)
 
     def forward(self,
                 x:torch.Tensor,
-                encoded:Tuple[torch.Tensor, torch.Tensor],
+                encoded_output:Tuple[torch.Tensor, torch.Tensor],
                 kv_cache:Tuple[torch.Tensor, torch.Tensor]|None=None,
                 return_cache:bool = False,
                 attention_mask:torch.Tensor|None = None):
         
+        # src_encoded(batch_size, src_context_size, src_hidden_size), src_attn_mask(batch_size, src_context_size, src_context_size)
+        src_encoded, src_attn_mask = encoded_output
+
+        # causal self-attention
         attn_result, new_kv_cache = self.causal_attention(x, kv_cache, return_cache, attention_mask)
-        x_ = x + attn_result
-        return
+        x_ = self.layer_norm1(x + attn_result)
+
+        # cross-attention
+        xattn_result = self.cross_attention(x_, src_encoded, src_encoded, src_attn_mask)
+        y = self.layer_norm2(x_ + self.resid_drop(xattn_result))
+        y_ = self.layer_norm3(y + self.relu_ffn(y))
+
+        return y_, new_kv_cache
+
+
 
 
 class TransformerDecoderBlock(nn.Module):

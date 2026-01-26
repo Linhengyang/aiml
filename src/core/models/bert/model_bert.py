@@ -19,8 +19,8 @@ class BERTEncoder(nn.Module):
             self.pos_encoding = LearnAbsPosEnc(config.seq_len, config.hidden_size)
         # 输入序列已经被 pad/truncate 到同一长度, 并且额外 append 的 <cls> 和 <sep> token 也被计算在 seq_len 里了
         
-        # dropout layer: dropout on token_embd + pos_embd
-        self.dropout = nn.Dropout(config.embd_p_drop)
+        # embd_drop layer: dropout on token_embd + pos_embd
+        self.embd_drop = nn.Dropout(config.embd_p_drop)
 
         # segment embedding layer: (batch_size, seq_length)int64 of 0/1 --embedding--> (batch_size, seq_length, hidden_size)
         self.seg_embedding = nn.Embedding(2, config.hidden_size)
@@ -55,7 +55,7 @@ class BERTEncoder(nn.Module):
         # positions shape: [0, 1, ..., seq_len-1] 1D tensor
         position_ids = torch.arange(0, seq_len, dtype=torch.int64, device=input_embd.device)
         # input_embd(batch_size, seq_len, hidden_size) broadcast + posenc(seq_len, hidden_size)
-        input_embd = self.dropout( input_embd + self.pos_encoding(position_ids) ) #(batch_size, seq_len, hidden_size)
+        input_embd = self.embd_drop( input_embd + self.pos_encoding(position_ids) ) #(batch_size, seq_len, hidden_size)
 
         # attention mask(batch_size, seq_len, seq_len): True --> valid area, False --> need masked
         # 没有因果自回归, 只有 invalid area(PAD) --> False, valid area(non-PAD) --> True

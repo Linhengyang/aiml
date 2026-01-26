@@ -39,6 +39,10 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError
+    
+    @torch.no_grad()
+    def generate(self, *args, **kwargs):
+        raise NotImplementedError
 
 
 ########## Decoder-Only ##########
