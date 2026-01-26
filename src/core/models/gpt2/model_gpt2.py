@@ -224,6 +224,7 @@ class gpt2Model(DecoderOnly):
         new_past_kv = [] if if_cache_kv else None
         for i, block in enumerate(self.blocks):
             kv_cache = past_kv[i] if past_kv is not None else None
+            # new_kv_cache 是 kv_cache concate k & v from x
             x, new_kv_cache = block(x, kv_cache, if_cache_kv, attention_mask, positions)
             if if_cache_kv:
                 new_past_kv.append( new_kv_cache ) # new_kv_cache 是 torch.cat 得到的, 其内存使用是高效的.
