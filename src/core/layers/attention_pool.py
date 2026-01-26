@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 import math
-from src.core.functional import create_mask_on_last_dim
 import torch.nn.functional as F
 
 
