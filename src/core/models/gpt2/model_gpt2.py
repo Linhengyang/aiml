@@ -1,10 +1,9 @@
-from src.core.architectures import Decoder, DecoderOnly
+from src.core.architectures import DecoderOnly
 from src.core.layers.position_encoding import LearnAbsPosEnc
 from src.core.blocks.gpt2 import GPT2DecoderBlock
 from src.core.functional import segments_to_positions
 from .config_gpt2 import gpt2Config
 import torch.nn as nn
-import math
 import torch
 from typing import Tuple, Optional
 
