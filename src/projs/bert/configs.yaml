@@ -27,12 +27,20 @@ train_data: '../../data/WikiText2/raw/train.parquet'
 valid_data: '../../data/WikiText2/raw/validation.parquet'
 test_data: '../../data/WikiText2/raw/test.parquet'
 
-max_len: 64
-
-
 
 # resource
 resource_dir: '../../resource'
 
 
 # network-params
+bertconfig:
+  num_hiddens: 128
+  embd_p_drop: 0.1
+  use_abspos: False
+  seq_len: 64
+  num_heads: 2
+  use_bias: False
+  ffn_num_hiddens: 256
+  attn_p_drop: 0.1
+  resid_p_drop: 0.1
+  num_blks: 2

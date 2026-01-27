@@ -57,7 +57,7 @@ def segments_to_positions(segments:torch.Tensor, origin_pos:int = 0, pad_seg:int
 
     e.g,
     with other args as default: segments [0, 0, 1, 1, 1, 2, 3, 3] --> positions [0, 0, 0, 1, 2, 0, 0, 1]
-    pad_seg=None, other default: segments [0, 0, 1, 1, 1, 2, 3, 3] --> positions [0, 1, 0, 1, 2, 0, 0, 1]
+    pad_seg=None, others as default: segments [0, 0, 1, 1, 1, 2, 3, 3] --> positions [0, 1, 0, 1, 2, 0, 0, 1]
     '''
     # 步骤一: 统一编序, PAD 位置也编
     B, L = segments.shape

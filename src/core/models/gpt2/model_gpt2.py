@@ -1,34 +1,142 @@
-from src.core.architectures import Decoder, DecoderOnly
+from src.core.architectures import DecoderOnly
 from src.core.layers.position_encoding import LearnAbsPosEnc
 from src.core.blocks.gpt2 import GPT2DecoderBlock
-from .function import get_segs_pos_attnmask_train, get_segs_pos_attnmask_prefill, get_segs_pos_attnmask_decode
+from src.core.functional import segments_to_positions
+from src.core.generate import next_token_topk
+from .config_gpt2 import gpt2Config
 import torch.nn as nn
-import math
 import torch
-from dataclasses import dataclass
 from typing import Tuple, Optional
 
 
-@dataclass
-class gpt2Config:
-    ## embedding layer configs
-    embd_size:int
-    vocab_size:int
-    embd_p_drop:float
-    ## decoder-block(casual_attention layer + ffn) configs
-    # embd_size:int
-    num_head:int
-    use_bias:bool
-    max_context_size:int
-    attn_p_drop:float
-    resid_p_drop:float
-    use_cached_casual_mask:bool
-    use_rope:bool
-    ## number of decoder-block
-    num_block:int
+# train mode 下, 从 input 的 segments(可以为None) 按以下标准生成对应的 positions 和 attention mask
+# 若 input_segs = None, 默认 input 属于同一个text且没有PAD, 则 segments = None, positions = 从0开始总长度为L_q的位置编码 [1, L_q], attention_mask = None
+# 若 input_segs != None, 那么默认其中 0 代表PAD, 位置编码赋0; 从 0 开始给每个单一 seg代表的单一序列 独立 赋位置编码, tensor [B, L_q]long
+# attention_mask 是 tensor [B, L_q, L_q]long, 只有 qk 都非PAD 且 qk 的 segment 相等 才为 True, 其余都是 False
+def get_segs_pos_attnmask_train(
+        input_segs: None|torch.Tensor, L_q: int,
+        *,
+        device) -> Tuple[torch.Tensor|None, torch.Tensor, torch.Tensor|None]:
+    '''
+    实际的 input_segs 是 batch. e.g 只是取一行作例
+
+    input:
+        input_segs: None | tensor[B, L]long, where 0 --> PAD, 1/2/... --> TEXT ID
+        e.g, [0, 0, 1, 1, 1, 2, 2]
+
+    return:
+        segments: same as input_segs
+        e.g, [0, 0, 1, 1, 1, 2, 2]
+
+        positions: tensor[B, L]long
+            if input_segs is None: --> 0 to L-1 as positions
+            else: position id where PAD pos --> 0, TOKEN pos --> index(starting from 0) inside every sequence
+        e.g, [0, 0, 0, 1, 2, 0, 1]
+
+        attention_mask: None | tensor[B, L, L]bool
+            if input_segs is None: --> None
+            else: tensor[B, L, L]bool, qk any PAD or irrelevent --> False, qk no PAD and relevent --> True
+        e.g,   0  0  1  1  1  2  2 
+            0  F  F  F  F  F  F  F
+            0  F  F  F  F  F  F  F
+            1  F  F  T  T  T  F  F
+            1  F  F  T  T  T  F  F
+            1  F  F  T  T  T  F  F
+            2  F  F  F  F  F  T  T
+            2  F  F  F  F  F  T  T
+    '''
+    segments = input_segs
+
+    if segments is None:
+        positions = torch.arange(0, L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_q]
+        attention_mask = None
+    else: # segments [B, L]
+        # train mode
+        # positions: PAD pos --> 0, TOKEN pos --> index from 0 in relevent sequence
+        positions = segments_to_positions(segments) # same device with segments
+        # attention_mask: qk any PAD or irrelevent --> False, qk no PAD and relevent --> True
+        is_pad = segments != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
+        pad_mask = is_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk no PAD -> true
+        relevent_mask = segments.unsqueeze(-1) == segments.unsqueeze(-2) # [B, L_q, L_q]bool, qk irrelevent -> false, qk relevent -> true
+        attention_mask = pad_mask * relevent_mask # [B, L_q, L_q]
+    
+    #     [B, L_q]   [B, L_q]   [B, L_q, L_q]
+    return segments, positions, attention_mask
 
 
-class gpt2(DecoderOnly):
+# infer.prefill mode 下, 从 input 的 segments(可以为None) 按以下标准生成对应的 positions 和 attention mask
+# 若 input_segs = None, 默认 input 属于同一个text且没有PAD, 则 segments = None, positions = 从0开始总长度为L_q的位置编码 [1, L_q], attention_mask = None
+# 若 input_segs != None, 那么默认其中 0 代表PAD, 位置编码赋0; 从 0 开始给所有非 PAD 位置按序 赋位置编码, tensor [B, L_q]long
+# attention_mask 是 tensor [B, L_q, L_q]long, 只有 qk 都非PAD 才为 True, 其余都是 False
+def get_segs_pos_attnmask_prefill(
+        input_segs: None|torch.Tensor, L_q: int,
+        *,
+        device) -> Tuple[torch.Tensor|None, torch.Tensor, torch.Tensor|None]:
+    
+    segments = input_segs
+
+    if segments is None:
+        positions = torch.arange(0, L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_q]
+        attention_mask = None
+    else:
+        # infer.prefill mode
+        is_pad = segments != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
+        # positions: PAD pos --> 0, TOKEN pos --> index from 0 in global sequence
+        positions = segments_to_positions(is_pad.to(torch.long)) # same device with segments
+        # attention_mask: qk any PAD --> False, qk no PAD --> True
+        attention_mask = is_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_q]bool, qk any PAD -> false, qk no PAD -> true
+    
+    #     [B, L_q]   [B, L_q]   [B, L_q, L_q]
+    return segments, positions, attention_mask
+
+
+# infer.decode mode 下, 从 input 的 input_segs(可以为None) 和 kv_cache 的 past_segs(可以为None) 按以下标准生成对应的 positions 和 attention mask
+# step1: 确定 segments: 包含 past + input 的 segments
+#        若 二者都为 None, 则 segments = None; 若二者有其一不为None, 则视另外一个为全1(即非PAD单一序列); 若二者皆存在, 则OK
+
+# 若 segments = None, 则 segments = None, positions = 从0开始总长度为 L_q+L_past 的位置编码 [1, L_q+L_past], attention_mask = None
+# 若 segments != None, 那么默认其中 0 代表PAD, 位置编码赋0; 从 0 开始给所有非 PAD 位置按序 赋位置编码, tensor [B, L_q+L_past]long
+# attention_mask 是 tensor [B, L_q, L_q+L_past]long, 只有 qk 都非PAD 才为 True, 其余都是 False
+def get_segs_pos_attnmask_decode(
+        input_segs: None|torch.Tensor, L_q: int, past_segs: None|torch.Tensor, L_past: int,
+        *,
+        device) -> Tuple[torch.Tensor|None, torch.Tensor, torch.Tensor|None]:
+
+    if past_segs is None and input_segs is None:
+        pass
+    elif past_segs is not None and input_segs is None:
+        # input_segs 视作全 1. 即 nonPAD
+        input_segs =  torch.ones(past_segs.size(0), L_q, dtype=torch.long, device=device)
+    elif past_segs is None and input_segs is not None:
+        # past_segs 视作全 1. 即 nonPAD
+        past_segs = torch.ones(input_segs.size(0), L_past, dtype=torch.long, device=device)
+    else:
+        pass
+
+    segments = None if past_segs is input_segs is None  else torch.cat([past_segs, input_segs], dim=-1)
+    
+    if segments is None:
+        positions = torch.arange(0, L_past+L_q, dtype=torch.long, device=device).unsqueeze(0) # [1, L_so_far]
+        attention_mask = None
+    else:
+        # infer.decode mode
+        is_pad = segments != 0 # [B, L_so_far]bool, PAD -> false, nonPAD -> true
+        # positions: PAD pos --> 0, TOKEN pos --> index from 0 in global sequence
+        positions = segments_to_positions(is_pad.to(torch.long)) # same device with segments
+        # attention_mask: qk any PAD --> False, qk no PAD --> True
+        is_q_pad = input_segs != 0 # [B, L_q]bool, PAD -> false, nonPAD -> true
+        attention_mask = is_q_pad.unsqueeze(-1) * is_pad.unsqueeze(-2) # [B, L_q, L_so_far]]bool, qk any PAD -> false, qk no PAD -> true
+    
+    # [B,L_so_far] / [B,L_so_far] / [B,L_q,L_so_far]
+    return segments, positions, attention_mask
+
+
+
+
+
+
+
+class gpt2Model(DecoderOnly):
     def __init__(self, config:gpt2Config):
         super().__init__()
         self.config = config
@@ -46,8 +154,8 @@ class gpt2(DecoderOnly):
                 config.max_context_size,
                 config.attn_p_drop,
                 config.resid_p_drop,
-                config.use_cached_casual_mask,
-                config.use_rope) for _ in range(config.num_block)])
+                config.use_rope,
+                config.use_cached_casual_mask) for _ in range(config.num_block)])
         
         self.layer_norm_final = nn.LayerNorm(config.embd_size)
 
@@ -117,6 +225,7 @@ class gpt2(DecoderOnly):
         new_past_kv = [] if if_cache_kv else None
         for i, block in enumerate(self.blocks):
             kv_cache = past_kv[i] if past_kv is not None else None
+            # new_kv_cache 是 kv_cache concate k & v from x
             x, new_kv_cache = block(x, kv_cache, if_cache_kv, attention_mask, positions)
             if if_cache_kv:
                 new_past_kv.append( new_kv_cache ) # new_kv_cache 是 torch.cat 得到的, 其内存使用是高效的.
@@ -124,36 +233,15 @@ class gpt2(DecoderOnly):
         logits = self.head_tok(self.layer_norm_final(x)) # [B, L_q, vocab_size]
 
         return logits, tuple(new_past_kv) if if_cache_kv else None, segments
-    
-
-    @staticmethod
-    def sample_next_token(logits: torch.Tensor, temperature: float, top_k: int|None):
-        # logits: [B, vocab_size]
-        logits /= max(temperature, 1e-6)
-        if top_k is not None and top_k > 0:
-            top_k = min(top_k, logits.size(-1))
-            # values shape: [B, top_k]
-            values, _ = torch.topk(logits, top_k, dim=-1) # 在 logits[B, n_vocab] dim-1 取每行的 top_k, 从大到小 从左至右排列
-            # mask for logits to remove all elements outside tok_k
-            kth = values[..., -1, None] # [B, top_k] -> [B, 1]
-            # where outside top_k --> -inf; where inside top_k --> logits
-            logits = torch.where(logits < kth, torch.full_like(logits, float("-inf")), logits) # [B, vocab_size]
-        
-        probs = torch.nn.functional.softmax(logits, dim=-1) # [B, vocab_size]
-        # select 1 via every row distribution as next-token
-        next_token = torch.multinomial(probs, num_samples=1, replacement=False)  # [B, 1]
-
-        return next_token
-
 
     @torch.no_grad()
     def generate(self,
-                 input_ids: torch.Tensor, # prefill: [B, L_q], decode: [B, 1]
-                 input_segs: torch.Tensor|None, # [B, L_q]
-                 max_gen_size: int,        # max generating length
-                 temperature: float = 1.0, # flatten/sharpen the output distribution
-                 top_k: int|None = None,   # limit selections when sampling token via output distribution
-                 eos_id: int|None = None   # stop sign
+                 input_ids: torch.Tensor,           # prefill: [B, L_q], decode: [B, 1]
+                 input_segs: torch.Tensor|None,     # [B, L_q]
+                 max_gen_size: int,                 # max generating length
+                 temperature: float = 1.0,          # flatten/sharpen the output distribution
+                 top_k: int|None = None,            # limit selections when sampling token via output distribution
+                 eos_id: int|None = None            # stop sign
                  ):
         '''
         generate 分为两个阶段:
@@ -191,7 +279,7 @@ class gpt2(DecoderOnly):
         # past_segs: describe of past kv [B, L_past=L_q]|None
 
         max_gen_size -= 1
-        next_token = self.sample_next_token(logits[:, -1, :], temperature, top_k) # [B, 1]
+        next_token = next_token_topk(logits[:, -1, :], temperature, top_k) # [B, 1]
         output = next_token.cpu() # [B, 1]
 
         # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
@@ -210,7 +298,7 @@ class gpt2(DecoderOnly):
             # logits: [B, 1, vocab_size]
             # past_kv: tuple of kv_cache [B, H, L_past+1, d]
             # past_segs: describe of past kv [B, L_past+1] | None
-            next_token = self.sample_next_token(logits.squeeze(1), temperature, top_k) # [B, 1]
+            next_token = next_token_topk(logits.squeeze(1), temperature, top_k) # [B, 1]
             output = torch.cat([output, next_token.cpu()], dim=-1)
 
             # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
@@ -218,3 +306,7 @@ class gpt2(DecoderOnly):
                 return output
         
         return output # [B, max_gen_size]
+
+
+
+__all__ = ["gpt2Model"]

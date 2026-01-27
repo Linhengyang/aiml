@@ -14,7 +14,7 @@ class MaskedCrossEntropyLoss(nn.CrossEntropyLoss):
         '''
         input: (batch_size, num_cls, [d1...dk])float as logits
         target: (batch_size, [d1...dk])int64 as label
-        mask: (batch_size, [d1...dk])bool as mask. only loss of true-area of target will be calculated
+        mask: (batch_size, [d1...dk])bool as mask. only true-area of target attend loss
         '''
         # cross-entropy loss behavior:
         # pred(B, C, [d1...dk])float, label(B, [d1...dk])long --> unmasked_loss(B, [d1...dk])float

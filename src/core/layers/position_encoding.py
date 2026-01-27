@@ -6,13 +6,13 @@ import typing as t
 class TrigonoAbsPosEnc(nn.Module):
     '''
     args:
-        num_hiddens: the feature dimentions for Position ID to embed, simply as d
+        hidden_size: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
         position_ids: 2D tensors of [B, seq_len]int64 / 1D tensor of [seq_len,]int64
             valid positions start from index 0
     
-    returns: [B, seq_len, num_hiddens]/[seq_len, num_hiddens]
+    returns: [B, seq_len, hidden_size]/[seq_len, hidden_size]
 
     explains:
         Given input position_ids(int64), TrigonoAbsPosEnc returns embeddings of position_ids with
@@ -20,20 +20,20 @@ class TrigonoAbsPosEnc(nn.Module):
                 (k, 2j) element: sin( k/10000^(2j/d) )
                 (k, 2j+1) element is cos( k/10000^(2j/d) )
     '''
-    def __init__(self, num_hiddens, max_len=1000):
+    def __init__(self, hidden_size, max_len=1000):
         super().__init__()
 
         # PosEnc: a long enough matrix with same d(d_dim) as input, (max_len, d_dim)
-        PosEnc = torch.zeros((max_len, num_hiddens))
-        # X 2-D tensor, 行idx是0到max_len-1, 列idx是0到num_hiddens-1之内的偶数
+        PosEnc = torch.zeros((max_len, hidden_size))
+        # X 2-D tensor, 行idx是0到max_len-1, 列idx是0到 hidden_size-1之内的偶数
         X = torch.arange(max_len, dtype=torch.float32).reshape(-1, 1) / \
-            torch.pow(10000, torch.arange(0, num_hiddens, 2, dtype=torch.float32).reshape(1, -1) / num_hiddens)
+            torch.pow(10000, torch.arange(0, hidden_size, 2, dtype=torch.float32).reshape(1, -1) / hidden_size)
         
         PosEnc[:, 0::2] = torch.sin(X) # P的偶数列填入sin(X)
         try:
-            PosEnc[:, 1::2] = torch.cos(X) # P的奇数列填入cos(X). 当最后一列idx=num_hiddens-1是奇数时,正好填入
+            PosEnc[:, 1::2] = torch.cos(X) # P的奇数列填入cos(X). 当最后一列idx= hidden_size-1是奇数时,正好填入
         except:
-            PosEnc[:, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx=num_hiddens-1是偶数时,去掉X的最后一列再填入
+            PosEnc[:, 1::2] = torch.cos(X[:, :-1]) # 当最后一列idx= hidden_size-1是偶数时,去掉X的最后一列再填入
 
         self.register_buffer('weight', PosEnc, persistent=False)
 
@@ -44,7 +44,7 @@ class TrigonoAbsPosEnc(nn.Module):
         values 是 position index starting from 0. shall be inside [0, max_len-1]
         '''
 
-        return self.weight[position_ids, :] # (B, seq_len, num_hiddens)/(seq_len, num_hiddens)
+        return self.weight[position_ids, :] # (B, seq_len, hidden_size)/(seq_len, hidden_size)
 
 
 
@@ -54,32 +54,32 @@ class TrigonoAbsPosEnc(nn.Module):
 class LearnAbsPosEnc(nn.Module):
     '''
     args:
-        max_possible_posNum: how many possible absolute positions are there in total(starting from 0)
-            Given max_possible_posNum, the layer creates positions via [0, 1, ..., max_possible_posNum-1]
+        position_size: how many possible absolute positions are there in total(starting from 0)
+            Given position_size, the layer creates positions via [0, 1, ..., position_size-1]
 
-        num_hiddens: the feature dimentions for Position ID to embed, simply as d
+        hidden_size: the feature dimentions for Position ID to embed, simply as d
     
     inputs:
         position_ids: 2D tensor of [B, seq_len]int64
                       1D tensors of [seq_len,]int64
-        values shall be inside [0, max_possible_posNum-1](valid position id starts from 0)
+        values shall be inside [0, position_size-1](valid position id starts from 0)
     
-    returns: [B, seq_len, num_hiddens]/[seq_len, num_hiddens]
+    returns: [B, seq_len, hidden_size]/[seq_len, hidden_size]
         learnable position embedding of position_ids
 
     '''
-    def __init__(self, max_possible_posNum, num_hiddens):
+    def __init__(self, position_size, hidden_size):
         super().__init__()
-        self.register_parameter('weight', nn.Parameter(torch.zeros(max_possible_posNum, num_hiddens)))
+        self.register_parameter('weight', nn.Parameter(torch.zeros(position_size, hidden_size)))
 
     def forward(self, position_ids: torch.Tensor):
         '''
         position_ids: 2D tensor of int64 as of (batch_size, num_positions) / 1D tensor of int64 as (num_positions,)
         若 position_ids 是 1D tensor, 那么 input tokens-embedding + positions-embedding 的过程依赖 broadcast
-        values 是 position index starting from 0. shall be inside [0, max_possible_posNum-1]
+        values 是 position index starting from 0. shall be inside [0, position_size-1]
         '''
         
-        return self.weight[position_ids, :] # shape as (batch_size, len(position_ids), num_hiddens) / (len(position_ids), num_hiddens)
+        return self.weight[position_ids, :] # shape as (batch_size, len(position_ids), hidden_size) / (len(position_ids), hidden_size)
 
 
 

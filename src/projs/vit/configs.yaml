@@ -30,15 +30,20 @@ valid_label: '../../data/test/image/FashionMNIST/raw/t10k-labels-idx1-ubyte'
 test_data: '../../data/test/image/FashionMNIST/raw/t10k-images-idx3-ubyte'
 test_label: '../../data/test/image/FashionMNIST/raw/t10k-labels-idx1-ubyte'
 
-
 fmnist_data_dir: '../../data/test/image/FashionMNIST/download'
-
-
 
 
 # resource
 resource_dir: '../../resource'
 
 
-
 # network-params
+vitconfig:
+    patch_size: 7
+    embd_p_drop: 0.1
+    num_hiddens: 64
+    num_heads: 4
+    use_bias: False
+    mlp_num_hiddens: 128
+    resid_p_drop: 0.1
+    num_blks: 2

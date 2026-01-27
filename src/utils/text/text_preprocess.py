@@ -37,7 +37,7 @@ def add_space_around_puncs(
         separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'
         ) -> str:
     '''
-    在字符串中所有标点符号前后，如果没有空格的话，添加一个空格。连续的标点符号之间只添加一个空格
+    在字符串中所有标点符号前后, 如果没有空格的话, 添加一个空格。连续的标点符号之间只添加一个空格
 
     inputs:
         text: 输入字符串
@@ -45,7 +45,7 @@ def add_space_around_puncs(
     returns:
         处理后的字符串
     '''
-    # 正则里的高级特性：零宽断言，匹配位置 不消耗字符
+    # 正则里的高级特性：零宽断言, 匹配位置 不消耗字符
     # (?<=exp) 匹配 前面是 exp 的位置
     text = re.sub(r"(?<=\S)" + "([" + separate_puncs + "])", r" \1", text) # 匹配 前面是 \S(非空字符) 的 标点符号（位置）, 替换成 空格+该位置\1
     text = re.sub("([" + separate_puncs + "])" + r"(?=\S)", r"\1 ", text) # 匹配 后面是 \S(非空字符) 的 标点符号（位置）, 替换成 该位置\1+空格
@@ -74,8 +74,8 @@ def preprocess_space(
         preprocess spaces inside a str obeject
         参数 separate_puncs 确认了 作为独立token的标点符号. 独立token前面会加单空格
         参数 normalize_whitespace 确认了如何处理 单空格之外的空白字符.
-            当 它为 True 时，所有 空白字符和连续单空格都被处理为 单个单空格（副作用：当使用单空格来分割时，只有word和punc被视作token）
-            当 它为 False时，诸如制表符和换行符之类的空白字符，以及连续单空格都被保留（副作用：当使用单空格来分割时，非单空格的空白字符和空字符也被视作token）
+            当 它为 True 时, 所有 空白字符和连续单空格都被处理为 单个单空格（副作用：当使用单空格来分割时, 只有word和punc被视作token）
+            当 它为 False时, 诸如制表符和换行符之类的空白字符, 以及连续单空格都被保留（副作用：当使用单空格来分割时, 非单空格的空白字符和空字符也被视作token）
         text的左右空白都会被trim
     '''
     # 替换不间断特殊空格为单空格, 消除零宽度空白, 并trim首尾空格
@@ -86,11 +86,11 @@ def preprocess_space(
     
     # 在非空字符和 separate_puncs 之间插入空格
 
-    # ## 判断 当前字符是否是separate_puncs，且前一个字符不是空格
+    # ## 判断 当前字符是否是separate_puncs, 且前一个字符不是空格
 
     # def no_space(char, prev_char):
     #     return char in set(separate_puncs) and prev_char != " "
-    # ## 从第二个字符开始遍历。如果它是separate_puncs且前一个字符不是空格，则将它变成 " "+标点
+    # ## 从第二个字符开始遍历。如果它是separate_puncs且前一个字符不是空格, 则将它变成 " "+标点
     # out = [ " " + char if i > 0 and no_space(char, text[i-1]) else char for i, char in enumerate(text)]
     # out_str = "".join(out)
 
@@ -160,7 +160,7 @@ def text_atomize(text, reserved_combos:t.List[str]=[], uniq=False) -> t.List[str
     reserved_combos里可以有正则表达式.
     返回list
     '''
-    # 如果 reserved_combos 为空, 那么就是不需要保留组合，直接 用 set/list 返回原子化结果
+    # 如果 reserved_combos 为空, 那么就是不需要保留组合, 直接 用 set/list 返回原子化结果
     if not reserved_combos:
 
         if uniq: # 如果需要 unique
@@ -170,7 +170,7 @@ def text_atomize(text, reserved_combos:t.List[str]=[], uniq=False) -> t.List[str
     
     rsvd_tokn_pattern = "(" + "|".join(reserved_combos) + ")" # (<unk>|...|<eos>)
 
-    pattern = re.compile( rsvd_tokn_pattern + "|(.)" ) # (<unk>|...|</w>)|(.)  保留字符匹配group1，其他所有单个字符匹配group2
+    pattern = re.compile( rsvd_tokn_pattern + "|(.)" ) # (<unk>|...|</w>)|(.)  保留字符匹配group1, 其他所有单个字符匹配group2
     result = []
     for match in re.finditer(pattern, text):
         result.append( match.group(1) if match.group(1) else match.group(2) ) # 如果 match 匹配到的部分（group(1)或group(2)）

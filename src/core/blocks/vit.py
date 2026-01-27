@@ -1,4 +1,3 @@
-import torch
 from torch import nn
 from src.core.layers.attention_pool import MultiHeadAttention
 
@@ -20,7 +19,7 @@ class ViTEncoderBlock(nn.Module):
     def __init__(self, num_heads, num_hiddens, dropout, mlp_num_hiddens, use_bias=False):
         super().__init__()
         self.norm1 = nn.LayerNorm(num_hiddens)
-        self.attention = MultiHeadAttention(num_heads, num_hiddens, dropout, use_bias)
+        self.attention = MultiHeadAttention(num_heads, num_hiddens, use_bias, dropout, 0.0)
         self.norm2 = nn.LayerNorm(num_hiddens)
         self.mlp = ViTMLP(mlp_num_hiddens, num_hiddens, dropout)
     

@@ -102,8 +102,6 @@ class bertPreTrainer(easyTrainer):
         # mlm_Y_hat (batch_size, num_masktks, vocab_size)
         # nsp_Y_hat (batch_size, 2)
         embd_X, mlm_Y_hat, nsp_Y_hat = net(*net_inputs_batch)
-
-
         # get loss
         mlm_l, nsp_l = loss(mlm_Y_hat, mlm_label, mlm_valid_lens, nsp_Y_hat, nsp_label)
 
@@ -121,20 +119,15 @@ class bertPreTrainer(easyTrainer):
         if need_resolve:
             assert hasattr(self, 'test_iter') and self.test_iter, \
                 f'Please first set valid test_set dataset when deploying .set_data_iter'
-            
             self.net.train()
-
             # 取 inputs
             for net_inputs_batch, loss_inputs_batch in self.test_iter:
                 break
             try:
                 self.optimizer.zero_grad()
-
                 _, _, _ = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
-
                 self.net_resolved = True
                 print('Net & Loss forward succeed. Net & Loss checked. Ready to fit')
-
             except:
                 self.net_resolved = False
                 raise AssertionError(
@@ -149,10 +142,8 @@ class bertPreTrainer(easyTrainer):
 
     def init_params(self):
         '''customize the weights initialization behavior and initialize the resolved net'''
-
         assert hasattr(self, 'net_resolved') and self.net_resolved, \
             f'network unresolved. Must resolve network before applying init_params'
-
         def xavier_init_weights(m):
             if type(m) == nn.Linear:
                 nn.init.xavier_uniform_(m.weight)
@@ -163,7 +154,6 @@ class bertPreTrainer(easyTrainer):
     def set_optimizer(self, lr, optim_type='AdamW', w_decay=None):
         '''set the optimizer at attribute optimizer'''
         assert type(lr) == float, 'learning rate should be a float'
-
         if optim_type == 'AdamW' and isinstance(w_decay, float):
             self.optimizer = torch.optim.AdamW(self.net.parameters(), lr=lr, weight_decay=w_decay)
         elif optim_type == 'AdamW':
@@ -196,7 +186,8 @@ class bertPreTrainer(easyTrainer):
     def save_model(self, modelfile_path, method='default'):
         '''保存模型参数 到 modelfile_path. 默认保存方式 method = 'default' .params格式'''
         if method == 'default':
-            torch.save(self.net.state_dict(), modelfile_path)
+            # bert模型只保存 encoder. mlm 和 nsp 部分不需要保存
+            torch.save(self.net.encoder.state_dict(), modelfile_path)
         else:
             raise NotImplementedError(f'save method {method} not implemented')
         
@@ -207,33 +198,22 @@ class bertPreTrainer(easyTrainer):
         assert hasattr(self, 'optimizer'), 'optimizer missing'
         assert hasattr(self, 'train_iter'), 'data_iter missing'
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator missing'
-
         for epoch in range(self.num_epochs):
             # model set to train
             self.net.train()
-
             # evaluator determine if this epoch to reveal train situation /  evaluate current network
             self.epoch_evaluator.judge_epoch(epoch)
-
-
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
-
                 self.optimizer.zero_grad()
-
                 mlm_l, nsp_l, embd_X = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
                 l = mlm_l + nsp_l
-
                 # bp
                 l.sum().backward()
-
                 if hasattr(self, 'grad_clip_val') and self.grad_clip_val is not None:
                     nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_clip_val)
-
                 self.optimizer.step()
-
                 with torch.no_grad():
                     self.epoch_evaluator.record_batch(net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l)
-
             with torch.no_grad():
                 # 如果 valid_iter 非 None, 那么在确定要 evaluate model 的 epoch, 将遍历 整个 valid_iter 得到 validation loss
                 self.epoch_evaluator.evaluate_model(self.net, self.loss, self.valid_iter, self.FP_step)
