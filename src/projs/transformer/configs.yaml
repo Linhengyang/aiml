@@ -28,11 +28,32 @@ train_data: '../../data/WMT14/en-fr/167130.txt' # 使用 full data 来 train
 valid_data: '../../data/WMT14/en-fr/16713.txt' # 使用 10% data 来 eval
 test_data: '../../data/WMT14/en-fr/8356.txt' # 使用 5% data 来 test
 
-num_steps: 20
-
 
 # resource
 resource_dir: '../../resource'
 
 
 # network-params
+transformerConfig:
+    # embd params
+    vocab_size: -1
+    hidden_size: 256
+    num_heads: 4
+    use_bias: False
+    ffn_hidden_size: 1024
+    # dropout params
+    embd_p_drop: 0.1
+    attn_p_drop: 0.1
+    resid_p_drop: 0.1
+    # encoder params
+    num_enc_blks: 2
+    # decoder params
+    num_dec_blks: 2
+    max_decoder_ctx_size: 20
+    use_cached_causal_mask: True
+
+
+
+# generate-params
+temporature: 1.0
+topk: ''
