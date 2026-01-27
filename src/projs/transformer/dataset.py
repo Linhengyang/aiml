@@ -156,7 +156,7 @@ class seq2seqDataset(torch.utils.data.Dataset):
         bos = torch.tensor( [vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
         Y_frontshift1 = torch.cat([bos, Y[:, :-1]], dim=1)
         
-        self._net_inputs = (X, Y_frontshift1, X_valid_lens) # 输入给 transformer network
+        self._net_inputs = (X, Y_frontshift1, X_valid_lens, Y_valid_lens) # 输入给 transformer network
         self._loss_inputs = (Y, Y_valid_lens) # 输入给 loss
         self._vocab = vocab
     
