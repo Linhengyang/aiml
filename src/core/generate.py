@@ -20,3 +20,13 @@ def next_token_topk(
     next_token = torch.multinomial(probs, num_samples=1, replacement=False)  # [B, 1]
 
     return next_token
+
+
+#TODO
+def next_token_topp():
+    pass
+
+
+#TODO
+def beam_search():
+    pass
