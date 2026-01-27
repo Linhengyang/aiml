@@ -2,6 +2,7 @@ from src.core.architectures import EncoderDecoder
 from src.core.layers.position_encoding import TrigonoAbsPosEnc
 from src.core.blocks.bert import BERTEncoderBlock
 from src.core.blocks.transformer import TransformerDecoderBlock
+from src.core.generate import next_token_topk
 from .config_transformer import transformerConfig
 import torch.nn as nn
 import math
@@ -86,7 +87,10 @@ class TransformerDecoder(nn.Module):
         self.head_tok = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.head_tok.weight = self.token_embedding.weight # 这行代码本质上将两个weight指向了同一块内存区域
 
-        self.apply(self._init_weights) # _init_weights 中对 linear/embedding 的weights 作相同分布的初始化. 由于已tied, 故两层都以最后一次初始化为结果
+        # _init_weights 中对 linear/embedding 的weights 作相同分布的初始化. 由于已tied, 故两层都以最后一次初始化为结果
+        self.apply(self._init_weights)
+
+        self.decoder_context_size = config.max_decoder_ctx_size # decode 支持的最大 context size 作为重要参数透出
 
 
     def _init_weights(self, module):
@@ -136,19 +140,86 @@ class TransformerDecoder(nn.Module):
         return logits, tuple(new_past_kv) if if_cache_kv else None
 
 
+    @property
+    def decoder_context_size(self):
+        return self.decoder_context_size
 
 
-#TODO
+
 class Transformer(EncoderDecoder):
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder: TransformerEncoder, decoder: TransformerDecoder):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
 
-    def forward(self, src, tgt, src_valid_lens, tgt_valid_lens, past_kv, if_cache_kv):
+    def forward(self,
+                src: torch.Tensor,
+                tgt: torch.Tensor,
+                src_valid_lens: torch.Tensor,
+                tgt_valid_lens: torch.Tensor|None = None,
+                past_kv: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None,
+                if_cache_kv: bool = False
+                ):
         encoded_outputs = self.encoder(src, src_valid_lens)
 
         return self.decoder(encoded_outputs, tgt, tgt_valid_lens, past_kv, if_cache_kv)
+
+    @torch.no_grad()
+    def generate(self,
+                 src_ids: torch.Tensor,         # [B, L_src]
+                 src_valid_lens: torch.Tensor,  # [B,]
+                 max_gen_size: int,             # max generating length
+                 bos_id: int,                   # begin of sequence sign
+                 eos_id: int,                   # end of sequence sign
+                 temperature: float = 1.0,      # flatten/sharpen the output distribution
+                 top_k: int|None = None        # limit selections when sampling token via output distribution
+                 ):
+        assert max_gen_size > 0 and max_gen_size <= self.encoder.decoder_context_size, \
+            f'max_gen_size must be larger than 0 and no larger than decoder_context_size'
+        self.eval()
+
+        # src encode
+        encoded_outputs = self.encoder(src_ids, src_valid_lens)
+
+        # generate on <bos>: [B, 1]
+        tgt = torch.empty((src_ids.size(0), 1), device=src_ids.device, dtype=torch.int64).fill_(bos_id)
+
+        logits, past_kv = self.decoder(
+            encoded_outputs,
+            tgt,
+            past_kv = None,
+            if_cache_kv = True
+            )
+        # logits: [B, 1, vocab_size]
+        # past_kv: tuple of kv_cache [B, H, L_past=1, d]
+
+        max_gen_size -= 1
+        next_token = next_token_topk(logits[:, 0, :], temperature, top_k) # [B, 1]
+        output = next_token.cpu() # [B, 1]
+
+        # 检查输出结果是否全 EOS. 若是, 则退出 generate
+        if (next_token == eos_id).all():
+            return output
+        
+        # generate
+        for _ in range(max_gen_size):
+            logits, past_kv = self.decoder(
+                encoded_outputs,
+                tgt = next_token,                   # [B, 1]
+                past_kv = past_kv,                  # tuple of kv_cache [B, H, L_past, d]
+                if_cache_kv = True
+                )
+
+            # logits: [B, 1, vocab_size]
+            # past_kv: tuple of kv_cache [B, H, L_past+1, d]
+            next_token = next_token_topk(logits.squeeze(1), temperature, top_k) # [B, 1]
+            output = torch.cat([output, next_token.cpu()], dim=-1)
+
+            # 输出结果是否全 EOS. 若是, 则退出 generate
+            if (next_token == eos_id).all():
+                return output
+        
+        return output # [B, max_gen_size]
 
 
 

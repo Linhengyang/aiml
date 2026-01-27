@@ -2,6 +2,7 @@ from src.core.architectures import DecoderOnly
 from src.core.layers.position_encoding import LearnAbsPosEnc
 from src.core.blocks.gpt2 import GPT2DecoderBlock
 from src.core.functional import segments_to_positions
+from src.core.generate import next_token_topk
 from .config_gpt2 import gpt2Config
 import torch.nn as nn
 import torch
@@ -232,27 +233,6 @@ class gpt2Model(DecoderOnly):
         logits = self.head_tok(self.layer_norm_final(x)) # [B, L_q, vocab_size]
 
         return logits, tuple(new_past_kv) if if_cache_kv else None, segments
-    
-
-    @staticmethod
-    def sample_next_token(logits: torch.Tensor, temperature: float, top_k: int|None):
-        # logits: [B, vocab_size]
-        logits /= max(temperature, 1e-6)
-        if top_k is not None and top_k > 0:
-            top_k = min(top_k, logits.size(-1))
-            # values shape: [B, top_k]
-            values, _ = torch.topk(logits, top_k, dim=-1) # 在 logits[B, n_vocab] dim-1 取每行的 top_k, 从大到小 从左至右排列
-            # mask for logits to remove all elements outside tok_k
-            kth = values[..., -1, None] # [B, top_k] -> [B, 1]
-            # where outside top_k --> -inf; where inside top_k --> logits
-            logits = torch.where(logits < kth, torch.full_like(logits, float("-inf")), logits) # [B, vocab_size]
-        
-        probs = torch.nn.functional.softmax(logits, dim=-1) # [B, vocab_size]
-        # select 1 via every row distribution as next-token
-        next_token = torch.multinomial(probs, num_samples=1, replacement=False)  # [B, 1]
-
-        return next_token
-
 
     @torch.no_grad()
     def generate(self,
@@ -299,7 +279,7 @@ class gpt2Model(DecoderOnly):
         # past_segs: describe of past kv [B, L_past=L_q]|None
 
         max_gen_size -= 1
-        next_token = self.sample_next_token(logits[:, -1, :], temperature, top_k) # [B, 1]
+        next_token = next_token_topk(logits[:, -1, :], temperature, top_k) # [B, 1]
         output = next_token.cpu() # [B, 1]
 
         # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
@@ -318,7 +298,7 @@ class gpt2Model(DecoderOnly):
             # logits: [B, 1, vocab_size]
             # past_kv: tuple of kv_cache [B, H, L_past+1, d]
             # past_segs: describe of past kv [B, L_past+1] | None
-            next_token = self.sample_next_token(logits.squeeze(1), temperature, top_k) # [B, 1]
+            next_token = next_token_topk(logits.squeeze(1), temperature, top_k) # [B, 1]
             output = torch.cat([output, next_token.cpu()], dim=-1)
 
             # 若提供了 EOS, 则检查输出结果是否全 EOS. 若是, 则退出 generate
