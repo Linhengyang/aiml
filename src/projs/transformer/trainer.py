@@ -14,7 +14,6 @@ class transformerTrainer(easyTrainer):
         self.num_epochs = num_epochs
         self.batch_size = batch_size
 
-
     def log_topology(self, logfile_path):
         '''
         日志打印网络拓扑结构
@@ -22,7 +21,6 @@ class transformerTrainer(easyTrainer):
         '''
         with open(logfile_path, 'w') as f:
             print(self.net, file=f)
-    
     
     def set_device(self, device=None):
         '''指定trainer的设备'''
@@ -33,7 +31,6 @@ class transformerTrainer(easyTrainer):
         
         self.net.to(self.device)
         print(f'Using {device} as train device')
-        
         
     def set_data_iter(self, train_set, valid_set=None, test_set=None):
         ''' 
@@ -83,16 +80,12 @@ class transformerTrainer(easyTrainer):
     @staticmethod
     def FP_step(net:nn.Module, loss:nn.Module, net_inputs_batch, loss_inputs_batch):
         # net_inputs_batch, loss_inputs_batch 从 data_iter 中生成
-
         # Y_label: (batch_size, num_steps)
         # Y_valid_lens: (batch_size,)
         Y_label, Y_valid_lens = loss_inputs_batch
-
         Y_hat, _ = net(*net_inputs_batch) # Y_hat, tensor of logits(batch_size, num_steps, vocab_size), None
-        
         # get loss
         l = loss(Y_hat, Y_label, Y_valid_lens)
-
         return l, Y_hat
 
 
@@ -107,20 +100,15 @@ class transformerTrainer(easyTrainer):
         if need_resolve:
             assert hasattr(self, 'test_iter') and self.test_iter, \
                 f'Please first set valid test_set dataset when deploying .set_data_iter'
-            
             self.net.train()
-
             # 取 inputs
             for net_inputs_batch, loss_inputs_batch in self.test_iter:
                 break
             try:
                 self.optimizer.zero_grad()
-
                 _, _ = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
-
                 self.net_resolved = True
                 print('Net & Loss forward succeed. Net & Loss checked. Ready to fit')
-
             except:
                 self.net_resolved = False
                 raise AssertionError(
@@ -132,24 +120,18 @@ class transformerTrainer(easyTrainer):
         
         return self.net_resolved
     
-
     def init_params(self):
         '''customize the weights initialization behavior and initialize the resolved net'''
-
         assert hasattr(self, 'net_resolved') and self.net_resolved, \
             f'network unresolved. Must resolve network before applying init_params'
-
         def xavier_init_weights(m):
             if type(m) == nn.Linear:
                 nn.init.xavier_uniform_(m.weight)
-        
         self.net.apply(xavier_init_weights) # net.apply 递归式地调用 fn 到 inner object
-    
     
     def set_optimizer(self, lr, optim_type='AdamW', w_decay=None):
         '''set the optimizer at attribute optimizer'''
         assert type(lr) == float, 'learning rate should be a float'
-
         if optim_type == 'AdamW' and isinstance(w_decay, float):
             self.optimizer = torch.optim.AdamW(self.net.parameters(), lr=lr, weight_decay=w_decay)
         elif optim_type == 'AdamW':
@@ -157,7 +139,6 @@ class transformerTrainer(easyTrainer):
         else:
             raise NotImplementedError(f'optimizer {optim_type} not implemented')
     
-
     def set_grad_clipping(self, grad_clip_val:None|float = None):
         '''
         input grad_clip_val:
@@ -172,11 +153,9 @@ class transformerTrainer(easyTrainer):
         else:
             self.grad_clip_val = None
 
-
     def set_epoch_eval(self, epoch_evaluator):
         '''设置 epochEvaluator 在训练过程中 披露 train 相关信息和 validation 相关信息'''
         self.epoch_evaluator = epoch_evaluator
-
 
     def save_model(self, modelfile_path, method='default'):
         '''保存模型参数 到 modelfile_path. 默认保存方式 method = 'default' .params格式'''
@@ -185,21 +164,17 @@ class transformerTrainer(easyTrainer):
         else:
             raise NotImplementedError(f'save method {method} not implemented')
 
-
     def fit(self):
         assert hasattr(self, 'device'), 'device is not specified'
         assert hasattr(self, 'optimizer'), 'optimizer missing'
         assert hasattr(self, 'train_iter'), 'data_iter missing'
         assert hasattr(self, 'epoch_evaluator'), 'epoch_evaluator missing'
-
         for epoch in range(self.num_epochs):
             # model set to train
             self.net.train()
             # evaluator determine if this epoch to reveal train situation /  evaluate current network
             self.epoch_evaluator.judge_epoch(epoch)
-
             for net_inputs_batch, loss_inputs_batch in self.train_iter:
-
                 self.optimizer.zero_grad()
                 l, Y_hat = self.FP_step(self.net, self.loss, net_inputs_batch, loss_inputs_batch)
                 # bp

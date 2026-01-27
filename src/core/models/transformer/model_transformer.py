@@ -161,7 +161,6 @@ class Transformer(EncoderDecoder):
                 if_cache_kv: bool = False
                 ):
         encoded_outputs = self.encoder(src, src_valid_lens)
-
         return self.decoder(encoded_outputs, tgt, tgt_valid_lens, past_kv, if_cache_kv)
 
     @torch.no_grad()
@@ -225,4 +224,4 @@ class Transformer(EncoderDecoder):
 
 
 
-__all__ = ["Transformer"]
+__all__ = ["TransformerEncoder", "TransformerDecoder", "Transformer"]
