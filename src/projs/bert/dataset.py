@@ -168,7 +168,6 @@ def _build_dataset(data, max_len, pad_tokenID, cls_tokenID, mask_ratio=0.15):
         用 valid lens 记录 valid area 信息
     分别用 0 / clsTokn_ID pad to 统一 mask_position_list / mlm_label_toknIDs_list 到 max_len * 0.15
         用 mlm_valid_lens 记录 valid area 信息
-
     '''
     max_num_masks = max(1, round( max_len*mask_ratio ))
 
