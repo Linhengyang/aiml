@@ -90,7 +90,7 @@ class TransformerDecoder(nn.Module):
         # _init_weights 中对 linear/embedding 的weights 作相同分布的初始化. 由于已tied, 故两层都以最后一次初始化为结果
         self.apply(self._init_weights)
 
-        self.decoder_context_size = config.max_decoder_ctx_size # decode 支持的最大 context size 作为重要参数透出
+        self._decoder_context_size = config.max_decoder_ctx_size # decode 支持的最大 context size 作为重要参数透出
 
 
     def _init_weights(self, module):
@@ -142,7 +142,7 @@ class TransformerDecoder(nn.Module):
 
     @property
     def decoder_context_size(self):
-        return self.decoder_context_size
+        return self._decoder_context_size
 
 
 

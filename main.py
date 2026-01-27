@@ -10,7 +10,7 @@ if __name__ == "__main__":
     # generate_job()
     start = time.time()
     
-    prepare()
+    pretrain()
 
     end = time.time()
     print(f'time usage {end-start}')

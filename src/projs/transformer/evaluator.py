@@ -1,6 +1,6 @@
 from src.core.evaluation.evaluate import Timer, Accumulator, metric_summary
 from src.core.interface.infra_easy import epochEvaluator
-from src.utils.visualize import Animator
+# from src.utils.visualize import Animator
 import yaml
 import typing as t
 
@@ -41,8 +41,8 @@ class transformerEpochEvaluator(epochEvaluator):
 
         # 图像显示器
         self.visual_flag = True if visualizer else False
-        if self.visual_flag:
-            self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
+        # if self.visual_flag:
+        #     self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
 
         # 是否需要在控制台 打印训练日志
         self.verbose_flag = verbose
@@ -135,14 +135,14 @@ class transformerEpochEvaluator(epochEvaluator):
             if self.verbose_flag:
                 print(eval_log)
 
-        # 若设定了 visualizer
-        if self.visual_flag:
-            loss_avg = loss_avg if self.reveal_flag else None
-            eval_loss_avg = eval_loss_avg if self.eval_flag else None
+        # # 若设定了 visualizer
+        # if self.visual_flag:
+        #     loss_avg = loss_avg if self.reveal_flag else None
+        #     eval_loss_avg = eval_loss_avg if self.eval_flag else None
 
-            # 线条的顺序要和legends一一对应. 目前只支持最多4条线
-            # self.legends: (train_loss, valid_loss)
-            self.animator.add(self.epoch+1, (loss_avg, eval_loss_avg))
+        #     # 线条的顺序要和legends一一对应. 目前只支持最多4条线
+        #     # self.legends: (train_loss, valid_loss)
+        #     self.animator.add(self.epoch+1, (loss_avg, eval_loss_avg))
 
         # 本epoch cast 成功之后, 清空 两个accumulator
         self.reveal_accumulator.reset()
