@@ -57,12 +57,10 @@ def init_tokcombo_freqs(
     if EOW_token and bind_EOW_lastCHAR:
         # 最先匹配 (.EOW_token), 即完整的 EOW_token 和它前面一个字符
         reserved_tokens = ['.'+EOW_token, ] + reserved_tokens
-    
     # 要求 EOW_token 和它前面的字符在初始化 token combos的时候 被分割。
     elif EOW_token:
         # EOW_token 自身应该作为 独立字符, 保证不被 分割
         reserved_tokens.append( EOW_token )
-    
     # 没有输入 EOW_token, 那么 reserved_tokens 无需变动
     else:
         pass
@@ -71,12 +69,10 @@ def init_tokcombo_freqs(
         tokcombo_freqs = {}
         for raw_word, freq in raw_corpus.items():
             tokcombo_freqs[' '.join(text_atomize(raw_word, reserved_tokens))] = freq
-        
     elif type == "list":
         tokcombo_freqs = []
         for raw_word, freq in raw_corpus.items():
             tokcombo_freqs.append( (' '.join(text_atomize(raw_word, reserved_tokens)), freq) )
-
     else:
         raise NotImplementedError(f'wrong type with {type}. must be one of dict/list')
     
@@ -95,18 +91,14 @@ def merge_maxfreq_token_pair(
         maxfreq_token_pairs:
             list of tuples of most frequent adjacent token pair [(tok_L, tok_R), ...]
             if only one token pair has highest frequency, then it will be a list of length 1
-
         tokcombo_freqs:
             Dict: { token_combo_by_space: word_frequency ... } / list of tuple: [ (token_combo_by_space, word_frequency) ... ]
-
         symbols:
             list of tokens
         merge_mode:
             str, one of first/all/shortest/random
-
     output:
         updated tokcombo_freqs & symbols
-    
     explains:
         tokcombo_freqs: tokcombo中, 最频繁出现的 连续 token pair 中, 以不同方式选择一个或几个 pair 合并
             如果 merge_mode 选择了all, 那么所有 token_pair 将以 它们在 输入列表中顺序作合并
@@ -115,9 +107,7 @@ def merge_maxfreq_token_pair(
             如果 merge_mode 选择了random, 那么随机的 token_pair 将合并
         symbols: 最频繁出现的 连续 token pair 被合并后, 添加入 symbols
     '''
-    
     if merge_mode != 'all': # 当 mode 不为 all 时, 以某种方式确定 单个 token pair 以合并
-
         if merge_mode == 'first': # 合并 maxfreq 的 token pair 列表中的 第一对pair
             select = 0
         elif merge_mode == 'shortest': # 合并 maxfreq 的 token pair 列表中的 最短的 pair
@@ -128,45 +118,33 @@ def merge_maxfreq_token_pair(
             select = random.randrange(0, len(maxfreq_token_pairs))
         else:
             raise NotImplementedError(f'merge mode {merge_mode} not implemented')
-    
         maxfreq_token_pairs = maxfreq_token_pairs[select:select+1]
 
     # update vocab(symbols)
     for token_pair in maxfreq_token_pairs: # 逐一在 symbols 添加 合并后的 token pair 作为 新token
         symbols.append( ''.join(token_pair) )
-    
     # update token combo frequency corpus counter
     if isinstance(tokcombo_freqs, dict):
         new_tokcombo_freqs = {}
-
         for token_combo, freq in tokcombo_freqs.items():
             # 对于 token_combo / freq 这个 kv对, 不必检测 token combo 是否需要合并, 因为都要搬到 新 dict里
             # 如果该 token_combo 存在 maxfreq token pair, 合并 所有maxfreq_token_pair, 即去掉中间的空格; 如果不存在, 那么保持原样
             for token_pair in maxfreq_token_pairs:
                 token_combo = token_combo.replace(" ".join(token_pair), "".join(token_pair))
             new_tokcombo_freqs[token_combo] = freq
-        
         return new_tokcombo_freqs, symbols
-    
     elif isinstance(tokcombo_freqs, list):
-        
         for i, (token_combo, freq) in enumerate(tokcombo_freqs):
             # 对于 token_combo / freq 这个 kv对, 需要检测 token combo 是否需要合并。因为不需要合并的不用改
             maxfreq_toknpair_pattern = '|'.join( [re.escape(' '.join(token_pair))
                                                   for token_pair in maxfreq_token_pairs] ) # tk1 tk2|...|tk3 tk4
-            
             if re.search(maxfreq_toknpair_pattern, token_combo): # 如果匹配到 任意一个 maxfreq token pair
-                
                 for token_pair in maxfreq_token_pairs:
                     token_combo = token_combo.replace(" ".join(token_pair), "".join(token_pair))
                 tokcombo_freqs[i] = (token_combo, freq)
-        
         return tokcombo_freqs, symbols
-    
     else:
         raise TypeError(f"wrong type for param tokcombo_freqs. must be list of tuples / dict")
-
-
 
 
 
@@ -186,7 +164,6 @@ def get_maxfreq_token_pair(
         计算 adjacent token pair 的 frequency, 并返回 max freq 的 adjacent token pairs, 同时返回这个 maxfreq
     """
     token_pair_freq = collections.defaultdict(int)
-    
     if isinstance(tokcombo_freqs, dict):
         for tokcombo, freq in tokcombo_freqs.items():
             tokens = tokcombo.split()
@@ -196,23 +173,22 @@ def get_maxfreq_token_pair(
             # 故 若 num_tok = 1, 直接不跑 for chunk 是 ok 的
             for i in range(num_tok-1):
                 token_pair_freq[(tokens[i], tokens[i+1])] += freq
-    
     elif isinstance(tokcombo_freqs, list):
         for tokcombo, freq in tokcombo_freqs:
             tokens = tokcombo.split()
             num_tok = len(tokens)
             for i in range(num_tok-1):
                 token_pair_freq[(tokens[i], tokens[i+1])] += freq
-    
     # 处理 token_pair_freq 为空的极端情况: 当且仅当 tokcombo_freqs 为空, 又或者 tokcombo_freqs 中所有 tokcombo 都是单token, 即无可合并
     if not token_pair_freq:
         return (), 0
-
     # max-freq 可能有 多个 pair 达到
     maxfreq = max(token_pair_freq.values())
     token_pairs_w_maxfreq = [k for k, v in token_pair_freq.items() if v == maxfreq]
-    
     return token_pairs_w_maxfreq, maxfreq
+
+
+
 
 
 from typing import List, TypedDict
@@ -220,9 +196,6 @@ from typing import List, TypedDict
 class Glossary(TypedDict):
     tokens: List[str]
     EOW_token: str
-
-
-
 
 def get_BPE_glossary(
         corpus,
@@ -260,32 +233,23 @@ def get_BPE_glossary(
     '''
     # 输入语料中不应该存在用以分割的 EOW_token, 以及 EOW_token 不可以为 空字符. 如果存在或EOW_token为空字符, 报错;
     assert EOW_token not in corpus, f'end-of-word token {EOW_token} exists in text or is null char. change EOW_token'
-    
     # 处理空白字符. 在标点前面添加 单空格
     text_normspace = preprocess_space(corpus, need_lower, separate_puncs, normalize_whitespace)
-
     # 在每个单词/标点末尾添加 EOW_token
     text_normspace_appdEOW = attach_EOW_token(text_normspace, EOW_token)
-
     # 原始的 corpus counter
     raw_wordfreq = count_corpus(text_normspace_appdEOW.split(" "))
-
     # 初始化 tokcombo_freqs: 用单空格 分割 raw_corpus 中的key, 至不可分割粒度。参数 reserved_tokens 是不可分割token
     tokcombo_freqs = init_tokcombo_freqs(raw_wordfreq, reserved_tokens, EOW_token, bind_EOW_lastCHAR)
-    
     # 初始化 symbols as list: 包含 输入文本text的所有非空字符、单空格、输入的保留字符组合 reserved_tokens
     symbols = list( set(text_normspace) | set(reserved_tokens) )
     # 这里也可以不 union reserved_tokens.
     # 因为 reversed_tokens 在合并生成 bpe symbols 的过程中没有起作用, 而且它可以在 vocab 类中设定. 故它不是必须的
-
     # 确保 EOW_token 在 symbols 的 index 0 位置
     symbols = [EOW_token] + symbols
-
     # merge 一定次数, 或 maxfreq 的token pair 的出现频次 低于 阈值
     for _ in range(merge_times):
-
         token_pairs_w_maxfreq, maxfreq = get_maxfreq_token_pair(tokcombo_freqs) # 得到 max freq token pairs
-        
         # 当 token pair occurrence freq >= min_freq 且 maxfreq > 0 时, 才进行 merge 操作
         if maxfreq > 0 and maxfreq >= min_occur_freq_merge:
             # merge maxfreq token pair(s) : update vocab(symbols), tokcombo_freqs, 
@@ -293,18 +257,11 @@ def get_BPE_glossary(
     
     # 组装 symbols 和 EOW_token 成一个 dict: glossary
     glossary = {'tokens': symbols, 'EOW_token': EOW_token}
-
     if isinstance(save_path, str):
         with open(save_path, 'w') as f:
             json.dump(glossary, f)
     
     return glossary
-
-
-
-
-
-
 
 
 
