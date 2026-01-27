@@ -60,7 +60,7 @@ class ScaledDotProductAttention(nn.Module):
 # 注意这里 MultiHeadAttention 的 attn_mask 逻辑与 F.scaled_dot_product_attention 对齐, 即 True 代表合法贡献, False 代表非法需要屏蔽
 # 而 nn.MultiheadAttention 是相反的: 该类里 attn_mask 参数 True 代表需要被屏蔽, 而 False 代表不变化
 class MultiHeadAttention(nn.Module):
-    def __init__(self, embd_size, num_heads, attn_p_drop, use_bias, **kwargs):
+    def __init__(self, embd_size, num_heads, use_bias, attn_p_drop, resid_p_drop, **kwargs):
         assert embd_size % num_heads == 0, 'output dim of multihead att-pool is not divisible by number of heads'
         super().__init__(**kwargs)
         self.h = num_heads
@@ -70,6 +70,7 @@ class MultiHeadAttention(nn.Module):
         self.W_v = nn.LazyLinear(embd_size, bias=use_bias)
         self.W_o = nn.LazyLinear(embd_size, bias=use_bias)
         self.attention = ScaledDotProductAttention(attn_p_drop, math.sqrt(1.0/self.d))
+        self.drop = nn.Dropout(resid_p_drop)
     
     def transpose_qkv(self, x):
         '''
@@ -96,7 +97,7 @@ class MultiHeadAttention(nn.Module):
         v_ = self.transpose_qkv(self.W_v(v)) #(B, h, L_kv, d)
         o = self.attention(q_, k_, v_, attention_mask) #(B, h, L_q, d)
         output = self.transpose_o(o) #(B, L_q, D)
-        return self.W_o(output) #(B, L_q, D)
+        return self.drop(self.W_o(output)) #(B, L_q, D)
 
 
 

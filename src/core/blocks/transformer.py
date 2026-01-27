@@ -20,8 +20,7 @@ class TransformerDecoderBlock(nn.Module):
         self.causal_attention = CausalSelfMHA(embd_size, num_heads, use_bias, max_decoder_ctx_size,
                                               attn_p_drop, resid_p_drop, False, use_cached_causal_mask)
         self.layer_norm1 = nn.LayerNorm(embd_size)
-        self.cross_attention = MultiHeadAttention(embd_size, num_heads, attn_p_drop, use_bias)
-        self.resid_drop = nn.Dropout(resid_p_drop)
+        self.cross_attention = MultiHeadAttention(embd_size, num_heads, use_bias, attn_p_drop, resid_p_drop)
         self.layer_norm2 = nn.LayerNorm(embd_size)
         self.relu_ffn = relu_ffn(embd_size, ffn_hidden_size, resid_p_drop)
         self.layer_norm3 = nn.LayerNorm(embd_size)
@@ -44,7 +43,7 @@ class TransformerDecoderBlock(nn.Module):
         tgt_attn_arr = tgt_attn_mask[:, :, 0] #[B, max_decoder_ctx_size] / [B, 1]
         cross_attn_mask = tgt_attn_arr.unsqueeze(-1) * src_attn_arr.unsqueeze(-2) #[B, max_decoder_ctx_size/1, src_ctx_size]
         cross_attn_result = self.cross_attention(x_, src_encoded, src_encoded, cross_attn_mask)
-        y = self.layer_norm2(x_ + self.resid_drop(cross_attn_result))
+        y = self.layer_norm2(x_ + cross_attn_result)
         y_ = self.layer_norm3(y + self.relu_ffn(y))
 
         return y_, new_kv_cache

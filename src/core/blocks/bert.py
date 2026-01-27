@@ -19,8 +19,7 @@ class BERTEncoderBlock(nn.Module):
     '''
     def __init__(self, embd_size:int, num_heads:int, use_bias:bool, ffn_hidden_size:int, attn_p_drop:float, resid_p_drop:float):
         super().__init__()
-        self.bidirect_attention = MultiHeadAttention(embd_size, num_heads, attn_p_drop, use_bias)
-        self.resid_drop = nn.Dropout(resid_p_drop)
+        self.bidirect_attention = MultiHeadAttention(embd_size, num_heads, use_bias, attn_p_drop, resid_p_drop)
         self.layer_norm1 = nn.LayerNorm(embd_size)
         self.relu_ffn = relu_ffn(embd_size, ffn_hidden_size, resid_p_drop)
         self.layer_norm2 = nn.LayerNorm(embd_size)
@@ -30,6 +29,6 @@ class BERTEncoderBlock(nn.Module):
                 attention_mask:torch.Tensor|None = None):
         
         attn_result = self.bidirect_attention(x, x, x, attention_mask)
-        x_ = self.layer_norm1(x + self.resid_drop(attn_result))
+        x_ = self.layer_norm1(x + attn_result)
         y = self.layer_norm2(x_ + self.relu_ffn(x_))
         return y
