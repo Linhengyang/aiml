@@ -37,7 +37,7 @@ num_epochs, batch_size, lr = 5, 512, 0.00005
 
 
 # 生产 source & target corpus 的 glossary/vocab
-def prepare_job():
+def prepare():
     print('prepare job begin')
     # create all related directories if not existed
     for dir_name in [artifact_dir, model_dir, log_dir]:
@@ -67,7 +67,7 @@ def prepare_job():
     return vocab_path
 
 
-def train_job(vocab_path):
+def pretrain(vocab_path):
     print('train job begin')
     # [timetag]
     from datetime import datetime
@@ -113,7 +113,7 @@ def train_job(vocab_path):
     return saved_params_fpath
 
 
-def infer_job(saved_params_fpath, vocab_path):
+def translate(saved_params_fpath, vocab_path):
     print('infer job begin')
     # load vocab
     vocab = Vocab()

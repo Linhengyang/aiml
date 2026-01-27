@@ -1,8 +1,8 @@
 import os
 import warnings
 warnings.filterwarnings("ignore")
-# from src.projs.gpt2._jobs import env_set, pretrain_job, build_tokenizer_job, generate_job
-from src.apps.bpe_build._jobs import bpe_continue, bpe_train
+from src.projs.transformer._jobs import prepare, pretrain, translate
+# from src.apps.bpe_build._jobs import bpe_continue, bpe_train
 import time
 
 if __name__ == "__main__":
@@ -10,7 +10,7 @@ if __name__ == "__main__":
     # generate_job()
     start = time.time()
     
-    bpe_continue(None)
+    prepare()
 
     end = time.time()
     print(f'time usage {end-start}')
