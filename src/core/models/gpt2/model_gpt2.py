@@ -256,12 +256,12 @@ class gpt2Model(DecoderOnly):
 
     @torch.no_grad()
     def generate(self,
-                 input_ids: torch.Tensor, # prefill: [B, L_q], decode: [B, 1]
-                 input_segs: torch.Tensor|None, # [B, L_q]
-                 max_gen_size: int,        # max generating length
-                 temperature: float = 1.0, # flatten/sharpen the output distribution
-                 top_k: int|None = None,   # limit selections when sampling token via output distribution
-                 eos_id: int|None = None   # stop sign
+                 input_ids: torch.Tensor,           # prefill: [B, L_q], decode: [B, 1]
+                 input_segs: torch.Tensor|None,     # [B, L_q]
+                 max_gen_size: int,                 # max generating length
+                 temperature: float = 1.0,          # flatten/sharpen the output distribution
+                 top_k: int|None = None,            # limit selections when sampling token via output distribution
+                 eos_id: int|None = None            # stop sign
                  ):
         '''
         generate 分为两个阶段:
