@@ -66,8 +66,8 @@ def prepare_job():
     # 当 vocab_path 文件不存在时, 生产并保存 wiki_vocab 到 vocab_dir/wiki.json
     vocab_path = os.path.join(vocab_dir, 'wiki.json')
     if not os.path.exists(vocab_path):
-        vocab = Vocab(corpus, glossary, need_lower=True, reserved_tokens=['<pad>', '<mask>', '<cls>', '<sep>'],
-                      unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|', min_freq=5)
+        vocab = Vocab(corpus, glossary, need_lower=True, reserved_subwords=['<pad>', '<mask>', '<cls>', '<sep>'],
+                      unk='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|', min_freq=5)
         vocab.save(vocab_path)
 
     print('prepare job complete')
