@@ -21,7 +21,6 @@ class vitEpochEvaluator(epochEvaluator):
             f'num_epochs must be larger than reveal counts & eval counts'
         
         super().__init__()
-        
         self.num_epochs = num_epochs
         self.reveal_accumulator, self.eval_accumulator = Accumulator(num_dims_for_accum), Accumulator(num_dims_for_accum)
 
@@ -29,7 +28,6 @@ class vitEpochEvaluator(epochEvaluator):
         self.log_file = logfile_path
         with open(self.log_file, 'w') as f:
             print('train begin', file=f)
-
         # 记录 标签
         self.legends = []
         for name in scalar_names:
@@ -37,15 +35,12 @@ class vitEpochEvaluator(epochEvaluator):
                 self.legends.append('train_'+name)
             if self.eval_cnts != 0:
                 self.legends.append('valid_'+name)
-        
         # 图像显示器
         self.visual_flag = True if visualizer else False
         if self.visual_flag:
             self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
-
         # 是否需要在控制台 打印训练日志
         self.verbose_flag = verbose
-
 
     # 确定当前 epcoh 要不要作 reveal train situation 或 evaluate current validation situation
     def judge_epoch(self, epoch):
@@ -56,7 +51,6 @@ class vitEpochEvaluator(epochEvaluator):
         self.reveal_flag = (self.reveal_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.reveal_cnts) == 0 or epoch == 0 )
         self.eval_flag = (self.eval_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.eval_cnts) == 0 or epoch == 0 )
         self.epoch = epoch
-
         # 若当前 epoch 需要 reveal train, 开始计时, reveal累加器二位(train loss, num_tokens)
         if self.reveal_flag:
             self.timer = Timer()
@@ -71,7 +65,6 @@ class vitEpochEvaluator(epochEvaluator):
             # batch loss(sum of loss of sample), batch num correct preds, batch num_imgs(sum of y pf sample)
             self.reveal_accumulator.add(l.sum(), accuracy(Y_hat, y), y.numel())
     
-
     # @evaluation: record values for scalars
     def evaluate_model(self, net, loss, valid_iter, num_batches=None):
         if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
@@ -84,15 +77,12 @@ class vitEpochEvaluator(epochEvaluator):
                 # batch loss(sum of loss of sample), batch num correct preds, batch num_imgs(sum of y pf sample)
                 self.eval_accumulator.add(l.sum(), accuracy(Y_hat, y), y.numel())
 
-
     def cast_metric(self):
-        
         loss_avg, acc_avg, eval_loss_avg, eval_acc_avg = None, None, None, None
 
         # 若当前 epoch 需要 reveal train, 停止计时, reveal累加器二位(train loss, num_tokens)
-        if self.reveal_flag:
+        if self.reveal_flag and self.reveal_accumulator:
             # reveal_accumulator: loss, num correct preds, num_imgs
-
             time_cost = self.timer.stop()
             loss_avg = self.reveal_accumulator[0] / self.reveal_accumulator[2]
             acc_avg = self.reveal_accumulator[1] / self.reveal_accumulator[2] * 100
@@ -105,18 +95,14 @@ class vitEpochEvaluator(epochEvaluator):
                 unit_names = ["", "/img", "%", "imgs/sec", "min"],
                 round_ndigits = [None, 3, 1, 0, 0]
                 )
-            
             with open(self.log_file, 'a+') as f:
                 f.write(reveal_log+'\n')
-            
             if self.verbose_flag:
                 print(reveal_log)
         
-        
         # 若当前 epoch 需要 evaluate model, reveal累加器二位(validation loss, num_tokens)
-        if self.eval_flag:
+        if self.eval_flag and self.eval_accumulator:
             # eval_accumulator: loss, num correct preds, num_imgs
-
             eval_loss_avg = self.eval_accumulator[0] / self.eval_accumulator[2]
             eval_acc_avg = self.eval_accumulator[1] / self.eval_accumulator[2] * 100
 
@@ -126,10 +112,8 @@ class vitEpochEvaluator(epochEvaluator):
                 unit_names = ["", "/img", "%"],
                 round_ndigits = [None, 3, 1]
             )
-
             with open(self.log_file, 'a+') as f:
                 f.write(eval_log+'\n')
-
             if self.verbose_flag:
                 print(eval_log)
 

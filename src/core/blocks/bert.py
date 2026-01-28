@@ -27,7 +27,6 @@ class BERTEncoderBlock(nn.Module):
     def forward(self,
                 x:torch.Tensor,
                 attention_mask:torch.Tensor|None = None):
-        
         attn_result = self.bidirect_attention(x, x, x, attention_mask)
         x_ = self.layer_norm1(x + attn_result)
         y = self.layer_norm2(x_ + self.relu_ffn(x_))

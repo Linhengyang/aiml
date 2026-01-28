@@ -44,14 +44,14 @@ class ScaledDotProductAttention(nn.Module):
                 attention_mask:torch.Tensor|None = None     # [B, L_q, L_kv] where False --> zero attend
                 ):
         # q(..., L_q, d) @ k(..., L_kv, d).T -> attn_w(..., L_q, L_kv)
-        attn_w = torch.bmm(q, k.permute(0, 1, 3, 2)) * self.scale
+        attn_w = torch.matmul(q, k.permute(0, 1, 3, 2)) * self.scale
         if attention_mask is not None:
-            # False 部分 not attend --> 填入-inf
-            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , float('-inf'))
+            # False 部分 not attend --> 填入大负数. 不用-inf的原因是 attention_mask 很有可能有全false行(比如存在右pad的序列)
+            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , -1e20)
         
         self.attention_weights = F.softmax(attn_w, dim=-1)
         # attn_w(..., L_q, L_kv) @ v(..., L_kv, v_size) -> o(..., L_q, v_size) 
-        return torch.bmm(self.attn_drop(self.attention_weights), v)
+        return torch.matmul(self.attn_drop(self.attention_weights), v)
 
 
 
@@ -65,10 +65,10 @@ class MultiHeadAttention(nn.Module):
         super().__init__(**kwargs)
         self.h = num_heads
         self.d = embd_size // num_heads
-        self.W_q = nn.LazyLinear(embd_size, bias=use_bias)
-        self.W_k = nn.LazyLinear(embd_size, bias=use_bias)
-        self.W_v = nn.LazyLinear(embd_size, bias=use_bias)
-        self.W_o = nn.LazyLinear(embd_size, bias=use_bias)
+        self.W_q = nn.Linear(embd_size, embd_size, use_bias)
+        self.W_k = nn.Linear(embd_size, embd_size, use_bias)
+        self.W_v = nn.Linear(embd_size, embd_size, use_bias)
+        self.W_o = nn.Linear(embd_size, embd_size, use_bias)
         self.attention = ScaledDotProductAttention(attn_p_drop, math.sqrt(1.0/self.d))
         self.drop = nn.Dropout(resid_p_drop)
     
@@ -87,7 +87,7 @@ class MultiHeadAttention(nn.Module):
         transpose route:--> (batch_size, h, d, seq_len) --> (batch_size, h*d, seq_len)
                         --> (batch_size, seq_len, hidden_size)
         '''
-        seq_len = x.size(1)
+        seq_len = x.size(2)
         return x.permute(0, 1, 3, 2).reshape(-1, self.h*self.d, seq_len).permute(0, 2, 1)
 
     def forward(self, q:torch.Tensor, k:torch.Tensor, v:torch.Tensor, attention_mask:torch.Tensor|None=None):
@@ -388,7 +388,8 @@ class CausalSelfMHA(nn.Module):
 
         if attention_mask is not None:
             # attention_mask: tensor [B, L_q, L_so_far]/bool. True --> valid_area, False --> invalid_area
-            # 这里用 -1e20 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
+            # 这里用 -1e20 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行
+            # 特别是 右pad 的序列, 其attention_mask在pad位置就会出现全-inf行.
             # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃. 因为
             # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
             # 所以这里用 finite 大负数 -1e20 而不是 -inf. softmax能正确处理 大负数 和全大负数行.

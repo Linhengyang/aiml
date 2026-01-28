@@ -7,16 +7,12 @@ import typing as t
 
 
 configs = yaml.load(open('src/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
-reveal_cnt_in_train, eval_cnt_in_train = configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
-
-
 
 
 class bertEpochEvaluator(epochEvaluator):
 
-    # class 变量
-    reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集
-    eval_cnts = eval_cnt_in_train # 评价当前model, 需要validate data或infer.避免次数太多
+    reveal_cnts = configs['reveal_cnt_in_train'] # 披露train情况的次数, 从train过程中收集
+    eval_cnts = configs['eval_cnt_in_train']     # 评价当前model, 需要infer on validation data. 避免次数太多
 
     def __init__(self, num_epochs, logfile_path, scalar_names=['mlm_loss', 'nsp_loss', ], num_dims_for_accum=4,
                  visualizer=None, verbose=False):
@@ -52,7 +48,6 @@ class bertEpochEvaluator(epochEvaluator):
         # 是否需要在控制台 打印训练日志
         self.verbose_flag = verbose
 
-
     # 确定当前 epcoh 要不要作 reveal train situation 或 evaluate current validation situation
     def judge_epoch(self, epoch):
         '''
@@ -62,11 +57,9 @@ class bertEpochEvaluator(epochEvaluator):
         self.reveal_flag = (self.reveal_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.reveal_cnts) == 0 or epoch == 0 )
         self.eval_flag = (self.eval_cnts != 0) and ( (epoch+1) % (self.num_epochs // self.eval_cnts) == 0 or epoch == 0 )
         self.epoch = epoch
-
         # 若当前 epoch 需要 reveal train, 开始计时, reveal累加器二位(train loss, num_tokens)
         if self.reveal_flag:
             self.timer = Timer()
-
 
     # @train: record values for scalars
     def record_batch(self, net_inputs_batch, loss_inputs_batch, mlm_l, nsp_l):
@@ -85,7 +78,6 @@ class bertEpochEvaluator(epochEvaluator):
             self.reveal_accumulator.add(mlm_l.sum(), nsp_l.sum(),
                                         loss_inputs_batch[0].sum(), loss_inputs_batch[2].dim())
     
-
     # @evaluation: record values for scalars
     def evaluate_model(self, net, loss, valid_iter, FP_step:t.Callable, num_batches=None):
         if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
@@ -93,7 +85,6 @@ class bertEpochEvaluator(epochEvaluator):
             for i, (net_inputs_batch, loss_inputs_batch) in enumerate(valid_iter):
                 if num_batches and i >= num_batches:
                     break
-
                 # net_inputs_batch
                 # tokens: (batch_size, seq_len)int64 ot token ID. 已包含<cls>和<sep>
                 # valid_lens: (batch_size,)
@@ -104,19 +95,14 @@ class bertEpochEvaluator(epochEvaluator):
                 # mlm_valid_lens (batch_size,)
                 # mlm_label (batch_size, num_masktks)
                 # nsp_label (batch_size,)
-                
                 mlm_l, nsp_l, _ = FP_step(net, loss, net_inputs_batch, loss_inputs_batch)
-
                 # 记录 batch mlm loss, batch nsp loss, batch valid masked tokens 总数量, batch size
                 self.eval_accumulator.add(mlm_l.sum(), nsp_l.sum(),
                                           loss_inputs_batch[0].sum(), loss_inputs_batch[2].dim())
     
-
-
     def cast_metric(self):
-
         # 若当前 epoch 需要 reveal train, 停止计时, reveal累加器4位( mlm loss, nsp loss, valid masked tokens 总数量, size)
-        if self.reveal_flag:
+        if self.reveal_flag and self.reveal_accumulator:
             time_cost = self.timer.stop()
             mlm_loss_train = self.reveal_accumulator[0] / self.reveal_accumulator[3]
             nsp_loss_train = self.reveal_accumulator[1] / self.reveal_accumulator[3]
@@ -131,16 +117,13 @@ class bertEpochEvaluator(epochEvaluator):
                 unit_names = ["", "/token", "/sample", "/sample", "tokens/sec", "min"],
                 round_ndigits = [None, 3, 3, 3, 0, 1]
                 )
-            
             with open(self.log_file, 'a+') as f:
                 f.write(reveal_log+'\n')
-            
             if self.verbose_flag:
                 print(reveal_log)
         
-        
         # 若当前 epoch 需要 evaluate model, eval累加器4位( mlm loss, nsp loss, valid masked tokens 总数量, size)
-        if self.eval_flag:
+        if self.eval_flag and self.eval_accumulator:
             mlm_loss_eval = self.eval_accumulator[0] / self.eval_accumulator[3]
             nsp_loss_eval = self.eval_accumulator[1] / self.eval_accumulator[3]
             loss_eval = mlm_loss_eval + nsp_loss_eval
@@ -151,10 +134,8 @@ class bertEpochEvaluator(epochEvaluator):
                 unit_names = ["", "/token", "/sample", "/sample",],
                 round_ndigits = [None, 3, 3, 3]
             )
-
             with open(self.log_file, 'a+') as f:
                 f.write(eval_log+'\n')
-
             if self.verbose_flag:
                 print(eval_log)
 
@@ -162,10 +143,8 @@ class bertEpochEvaluator(epochEvaluator):
         if self.visual_flag:
             mlm_loss_train = mlm_loss_train if self.reveal_flag else None
             mlm_loss_eval = mlm_loss_eval if self.eval_flag else None
-
             nsp_loss_train = nsp_loss_train if self.reveal_flag else None
             nsp_loss_eval = nsp_loss_eval if self.eval_flag else None
-
             # 线条的顺序要和legends一一对应. 目前只支持最多4条线
             # self.legends: (train_mlm_loss, valid_mlm_loss, train_nsp_loss, valid_nsp_loss)
             self.animator.add(self.epoch+1, (mlm_loss_train, mlm_loss_eval, nsp_loss_train, nsp_loss_eval))

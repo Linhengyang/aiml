@@ -51,7 +51,6 @@ class TransformerEncoder(nn.Module):
         # 没有因果自回归, 只有 位置id大于 valid_lens 部分为 invalid area(PAD) --> False, 位置id小于等于 valid_lens 部分为 valid area(non-PAD) --> True
         src_attn_arr = position_ids[None, :] <= src_valid_lens[:, None] # (batch_size, src_context_size)
         src_attn_mask = src_attn_arr.unsqueeze(-1) * src_attn_arr.unsqueeze(-2)
-
         for blk in self.blks:
             src_embd = blk(src_embd, src_attn_mask)
 
@@ -87,19 +86,7 @@ class TransformerDecoder(nn.Module):
         self.head_tok = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.head_tok.weight = self.token_embedding.weight # 这行代码本质上将两个weight指向了同一块内存区域
 
-        # _init_weights 中对 linear/embedding 的weights 作相同分布的初始化. 由于已tied, 故两层都以最后一次初始化为结果
-        self.apply(self._init_weights)
-
-        self.decoder_context_size = config.max_decoder_ctx_size # decode 支持的最大 context size 作为重要参数透出
-
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        self._decoder_context_size = config.max_decoder_ctx_size # decode 支持的最大 context size 作为重要参数透出
 
 
     def forward(self,
@@ -113,7 +100,7 @@ class TransformerDecoder(nn.Module):
         if self.training:
             # train: tgt 是 [B, max_decoder_ctx_size], tgt_valid_lens 是 [B, ]
             positions = torch.arange(0, tgt.size(1), dtype=torch.int64, device=tgt.device) # [max_decoder_ctx_size, ]
-            tgt_attn_arr = positions[None, :] < tgt_valid_lens[:, None]
+            tgt_attn_arr = positions[None, :] < tgt_valid_lens[:, None] # [B, max_decoder_ctx_size]
             tgt_attn_mask = tgt_attn_arr.unsqueeze(-1) * tgt_attn_arr.unsqueeze(-2) #[B, max_decoder_ctx_size, max_decoder_ctx_size]
         elif past_kv is None:
             # infer on <bos>: tgt 是[B, 1]的<bos>tensor, tgt_valid_lens 不需要输入
@@ -123,7 +110,7 @@ class TransformerDecoder(nn.Module):
             L_past = past_kv[0][0].size(2)
             # infer on last predicted token: tgt 是[B, 1], tgt_valid_lens 不需要输入
             positions = torch.tensor([L_past], dtype=torch.int64, device=tgt.device)
-            tgt_attn_mask = torch.ones((tgt.size(0), 1, L_past), dtype=torch.bool, device=tgt.device) #[B, 1, L_past+1]
+            tgt_attn_mask = torch.ones((tgt.size(0), 1, L_past+1), dtype=torch.bool, device=tgt.device) #[B, 1, L_past+1]
         
         x = self.token_embedding(tgt)*math.sqrt(self.D) # (batch_size, max_decoder_ctx_size/1, hidden_size)
         x = self.embd_drop( x + self.pos_encoding(positions) ) # (batch_size, max_decoder_ctx_size/1, hidden_size)
@@ -142,7 +129,7 @@ class TransformerDecoder(nn.Module):
 
     @property
     def decoder_context_size(self):
-        return self.decoder_context_size
+        return self._decoder_context_size
 
 
 
@@ -173,7 +160,7 @@ class Transformer(EncoderDecoder):
                  temperature: float = 1.0,      # flatten/sharpen the output distribution
                  top_k: int|None = None        # limit selections when sampling token via output distribution
                  ):
-        assert max_gen_size > 0 and max_gen_size <= self.encoder.decoder_context_size, \
+        assert max_gen_size > 0 and max_gen_size <= self.decoder.decoder_context_size, \
             f'max_gen_size must be larger than 0 and no larger than decoder_context_size'
         self.eval()
 
@@ -218,7 +205,7 @@ class Transformer(EncoderDecoder):
             if (next_token == eos_id).all():
                 return output
         
-        return output # [B, max_gen_size]
+        return output # [B, max_gen_size] on cpu
 
 
 

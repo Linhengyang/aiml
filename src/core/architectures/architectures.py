@@ -34,8 +34,8 @@ class Decoder(nn.Module):
 ########## Encoder-Decoder ##########
 class EncoderDecoder(nn.Module):
     """The basic class for encoder-decoder architecture"""
-    def __init__(self, encoder:Encoder, decoder:Decoder):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError

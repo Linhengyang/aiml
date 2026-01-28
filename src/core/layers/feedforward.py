@@ -9,7 +9,7 @@ class relu_ffn(nn.Module):
     '''
     def __init__(self, output_size, ffn_hidden_size, resid_p_drop):
         super().__init__()
-        self.W_in = nn.LazyLinear(ffn_hidden_size)
+        self.W_in = nn.Linear(output_size, ffn_hidden_size)
         self.relu = nn.ReLU()
         self.W_out = nn.Linear(ffn_hidden_size, output_size)
         self.drop = nn.Dropout(resid_p_drop)

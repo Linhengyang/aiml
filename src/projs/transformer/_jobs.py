@@ -28,16 +28,16 @@ model_dir = os.path.join( configs['model_dir'], configs['proj_name'] )
 log_dir = os.path.join( configs['log_dir'], configs['proj_name'] )
 
 ################## data-params ##################
-context_size = configs['transformerConfig'].max_decoder_ctx_size
+context_size = configs['transformerConfig']['max_decoder_ctx_size']
 
 ################## train-params ##################
-num_epochs, batch_size, lr = 5, 512, 0.00005
+num_epochs, batch_size, lr = 10, 512, 0.00005
 
 
 
 
 # 生产 source & target corpus 的 glossary/vocab
-def prepare_job():
+def prepare():
     print('prepare job begin')
     # create all related directories if not existed
     for dir_name in [artifact_dir, model_dir, log_dir]:
@@ -55,23 +55,27 @@ def prepare_job():
     glossary_path = os.path.join(artifact_dir, 'glossary.json')
     if not os.path.exists(glossary_path):
         glossary = get_BPE_glossary(corpus, EOW_token = "</w>", merge_times = 50000, save_path = glossary_path)
-    
+    else:
+        import json
+        with open(glossary_path, 'r', encoding='utf-8') as f:
+            glossary = json.load(f)
     # vocab
     vocab_path = os.path.join(artifact_dir, 'vocab.json')
     if not os.path.exists(vocab_path):
-        vocab = Vocab(corpus, glossary=glossary, need_lower=True, reserved_tokens=['<pad>', '<bos>', '<eos>'],
-                      unk_token='<unk>', separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
+        vocab = Vocab(corpus, glossary, True, ['<pad>', '<bos>', '<eos>'], '<unk>', '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|')
         vocab.save(vocab_path)
 
     print('prepare job complete')
     return vocab_path
 
 
-def train_job(vocab_path):
+def pretrain():
     print('train job begin')
     # [timetag]
     from datetime import datetime
     now_minute = datetime.now().strftime("%Y-%m-%d_%H:%M")
+    # vocab
+    vocab_path = os.path.join(artifact_dir, 'vocab.json')
 
     # /workspace/logs/[proj_name]/train_log_[timetag].txt, defined_net_[timetag].txt
     train_logs_fpath = os.path.join( log_dir, f'train_log_{now_minute}.txt' )
@@ -80,12 +84,12 @@ def train_job(vocab_path):
     # /workspace/model/[proj_name]/saved_params[timetag].params
     saved_params_fpath = os.path.join( model_dir, f'saved_params_{now_minute}.pth' )
 
-    trainset = seq2seqDataset(configs['train_data'], context_size, vocab_path)
-    validset = seq2seqDataset(configs['valid_data'], context_size, vocab_path)
+    # trainset = seq2seqDataset(configs['train_data'], context_size, vocab_path)
+    # validset = seq2seqDataset(configs['valid_data'], context_size, vocab_path)
     testset = seq2seqDataset(configs['test_data'], context_size, vocab_path)
 
     net_config = transformerConfig(**configs['transformerConfig'])
-    net_config.vocab_size = len(trainset.vocab)
+    net_config.vocab_size = len(testset.vocab)
     transenc = TransformerEncoder(net_config)
     transdec = TransformerDecoder(net_config)
     net = Transformer(transenc, transdec)
@@ -94,26 +98,26 @@ def train_job(vocab_path):
     
     # init trainer
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
-    trainer.set_device(torch.device('cuda')) # set the device
-    trainer.set_data_iter(trainset, validset, testset) # set the data iters
-    trainer.set_optimizer(lr) # set the optimizer
-    trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
-    trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True)) # set the epoch evaluator
+    trainer.set_device(torch.device('cuda'))
+    trainer.set_data_iter(testset, None, testset)
+    trainer.set_optimizer(lr)
+    trainer.set_grad_clipping(grad_clip_val=1.0)
+    trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True))
     # set trainer
-    check_flag = trainer.resolve_net(need_resolve=True)## check the net & loss
+    check_flag = trainer.resolve_net(need_resolve=True, bos_id=testset.vocab['<bos>']) # check the net & loss
     if check_flag:
-        trainer.log_topology(defined_net_fpath)## print the defined topology
-        trainer.init_params()## init params
+        trainer.log_topology(defined_net_fpath)
+        trainer.init_params()
     
     # fit model
-    trainer.fit()
+    trainer.fit(bos_id=testset.vocab['<bos>'])
     # save
     trainer.save_model(saved_params_fpath)
     print('train job complete')
     return saved_params_fpath
 
 
-def infer_job(saved_params_fpath, vocab_path):
+def translate(saved_params_fpath, vocab_path):
     print('infer job begin')
     # load vocab
     vocab = Vocab()
@@ -133,11 +137,10 @@ def infer_job(saved_params_fpath, vocab_path):
     translator = sentenceTranslator(net, vocab, context_size, configs['temporature'], configs['topk'], device=device)
     
     # predict
-    # src_sentence = 'i\'m home .'
-    src_sentence = 'Who forced you to do that?'
-    print(translator.predict(src_sentence))
+    src_sentences = ['Who forced you to do that?', 'i\'m home .']
+    print(translator.predict(src_sentences))
 
     # evaluate output
-    # print('bleu score: ', translator.evaluate('je suis chez moi .'))
-    print('bleu score: ', translator.evaluate('Qui vous a forcée à faire cela ?'))
+    tgt_sentences = ['Qui vous a forcée à faire cela ?', 'je suis chez moi .']
+    print('bleu score: ', translator.evaluate(tgt_sentences))
     return
