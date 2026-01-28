@@ -39,15 +39,21 @@ class Accumulator:  #@save
     """在n个变量上累加"""
     def __init__(self, n):
         self.data = [0.0] * n
+        self.__activated = False
 
     def add(self, *args):
         self.data = [a + float(b) for a, b in zip(self.data, args)]
+        self.__activated = True
 
     def reset(self):
         self.data = [0.0] * len(self.data)
+        self.__activated = False
 
     def __getitem__(self, idx):
         return self.data[idx]
+    
+    def __bool__(self):
+        return self.__activated
 
 
 def metric_summary(
