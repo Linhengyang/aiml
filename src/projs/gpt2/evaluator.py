@@ -37,7 +37,7 @@ class gpt2EpochEvaluator(epochEvaluator):
 
     def cast_metric(self):
         # 若当前 epoch 需要 reveal train, 停止计时, reveal 累加器二位(train loss, num_tokens)
-        if self.reveal_flag:
+        if self.reveal_flag and self.reveal_accumulator:
             time_cost = self.timer.stop()
             loss_avg = self.reveal_accumulator[0] / self.reveal_accumulator[1]
             speed = self.reveal_accumulator[1] / time_cost

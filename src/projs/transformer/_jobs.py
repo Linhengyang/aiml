@@ -98,19 +98,19 @@ def pretrain():
     
     # init trainer
     trainer = transformerTrainer(net, loss, num_epochs, batch_size)
-    trainer.set_device(torch.device('cuda')) # set the device
-    trainer.set_data_iter(testset, None, None) # set the data iters
-    trainer.set_optimizer(lr) # set the optimizer
-    trainer.set_grad_clipping(grad_clip_val=1.0) # set the grad clipper
-    trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True)) # set the epoch evaluator
+    trainer.set_device(torch.device('cuda'))
+    trainer.set_data_iter(testset, None, testset)
+    trainer.set_optimizer(lr)
+    trainer.set_grad_clipping(grad_clip_val=1.0)
+    trainer.set_epoch_eval(transformerEpochEvaluator(num_epochs, train_logs_fpath, verbose=True))
     # set trainer
-    check_flag = trainer.resolve_net(need_resolve=False)## check the net & loss
+    check_flag = trainer.resolve_net(need_resolve=True, bos_id=testset.vocab['<bos>']) # check the net & loss
     if check_flag:
-        trainer.log_topology(defined_net_fpath)## print the defined topology
-        trainer.init_params()## init params
+        trainer.log_topology(defined_net_fpath)
+        trainer.init_params()
     
     # fit model
-    trainer.fit()
+    trainer.fit(bos_id=testset.vocab['<bos>'])
     # save
     trainer.save_model(saved_params_fpath)
     print('train job complete')
