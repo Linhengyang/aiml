@@ -33,7 +33,7 @@ def segment_seq2seqText(
     returns: denoted as source, target
         source: 2D list, each element is a datapoint, which is a list of source token sequence
         target: 2D list, each element is a datapoint, which is a list of target token sequence correspondingly
-    
+        sample_size: int
     explains:
         fisrt pre-process translation seq2seq text data, then split it into source token 2-D list and target token 2-D list
         首先预处理翻译数据集, 然后将它分拆成 source 词元序列们 和 对应的target词元序列们
@@ -53,6 +53,7 @@ def segment_seq2seqText(
     source, target = [], []
     for i, line in enumerate(text.split(sample_sep)): # 大文本按行分隔
         if (num_examples and i >= num_examples) or (line == ''): # 当有最大样本数限制, 且循环已经收集足够样本时, 抑或是读到空行时, 跳出循环
+            i -= 1 # 为了统计样本总量, 循环结束后要用到i. 如果循环在这里退出, i是多加了一个1(相比正常结束)
             break
         try:
             src_sentence, tgt_sentence = line.split(seq_sep) # 每一行分成两部分, 前半是 source sentence，后半是 target sentence
@@ -63,7 +64,7 @@ def segment_seq2seqText(
         except ValueError:
             raise ValueError(f"line {i+1} of text unpack wrong. line text as {line[:100]}")
 
-    return source, target
+    return source, target, i+1
 
 
 def tensorize_tokens(subwords, vocab, context_size):
@@ -87,50 +88,6 @@ def tensorize_tokens(subwords, vocab, context_size):
     return array, valid_lens
 
 
-def build_seq2seqDataset(raw_text:str,
-                         context_size:int,
-                         vocab:Vocab,
-                         sample_separator:str,
-                         srctgt_separator:str,
-                         need_lower:bool=True,
-                         separate_puncs:str='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
-                         num_examples:int|None=None,
-                         ):
-    """
-    inputs:
-        raw_text: seq2seq text file
-        context_size: hyperparams to identify the length of sequences by truncate/pad
-        vocab: mapping tool
-        sample_separator: separator for datapoints
-        srctgt_separator: separator for source & target sequences
-        need_lower: if lower the raw text
-        separate_puncs: punctuations that shall be seen as independent tokens
-        num_examples: total sample size if given. None to read all
-    returns: denoted as tuple of tensors(tensor dataset), tuple of vocabs
-        tensor dataset:
-            1. src, (num_examples, context_size)
-            2. src_valid_lens, (num_examples, )
-            3. tgt, (num_examples, context_size)
-            4. tgt_valid_lens, (num_examples, )
-    """
-    unk_token = vocab.to_subwords(vocab.unk)
-
-    # source 和 target 是 2D list of subwords
-    source, target = segment_seq2seqText(
-        raw_text,
-        sample_separator,
-        srctgt_separator,
-        vocab.to_glossary(),
-        unk_token,
-        need_lower,
-        separate_puncs,
-        num_examples)
-    src_array, src_valid_lens = tensorize_tokens(source, vocab, context_size)# (num_examples, num_stpes), (num_examples,)
-    tgt_array, tgt_valid_lens = tensorize_tokens(target, vocab, context_size)# (num_examples, num_stpes), (num_examples,)
-
-    return (src_array, src_valid_lens, tgt_array, tgt_valid_lens)
-
-
 class seq2seqDataset(torch.utils.data.Dataset):
     def __init__(self,
                  text_path,
@@ -142,30 +99,30 @@ class seq2seqDataset(torch.utils.data.Dataset):
                  separate_puncs='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~',
                  num_examples:int|None=None):
         super().__init__()
-        vocab = Vocab()
-        vocab.load(vocab_path)
         with open(text_path, 'r', encoding='utf-8') as f:
             raw_text = f.read()
-        
-        X, X_valid_lens, Y, Y_valid_lens = build_seq2seqDataset(
-            raw_text, context_size, vocab, sample_separator, srctgt_separator, need_lower, separate_puncs, num_examples)
-        
-        # X 是 source data 的 (batch_size, num_steps), Y 是 target data 的 (batch_size, num_steps)
-        # X_valid_lens 是 source 的 (batch_size,), Y_valid_lens 是 target 的 (batch_size,)
 
-        bos = torch.tensor( [vocab['<bos>']] * Y.shape[0], device=Y.device).reshape(-1, 1)
-        Y_frontshift1 = torch.cat([bos, Y[:, :-1]], dim=1)
-        
-        self._net_inputs = (X, Y_frontshift1, X_valid_lens, Y_valid_lens) # 输入给 transformer network
-        self._loss_inputs = (Y, Y_valid_lens) # 输入给 loss
-        self._vocab = vocab
-    
+        self._vocab = Vocab()
+        self._vocab.load(vocab_path)
+
+        # source 和 target 是 2D list of subwords
+        source, target, self.sample_size = segment_seq2seqText(
+            raw_text,
+            sample_separator,
+            srctgt_separator,
+            self._vocab.to_glossary(),
+            self._vocab.to_subwords(self._vocab.unk),
+            need_lower,
+            separate_puncs,
+            num_examples)
+        self.src, self.src_valid_lens = tensorize_tokens(source, self._vocab, context_size)# (sample_size, context_size), (sample_size,)
+        self.tgt, self.tgt_valid_lens = tensorize_tokens(target, self._vocab, context_size)# (sample_size, context_size), (sample_size,)
+
     def __getitem__(self, index):
-        return (tuple(tensor[index] for tensor in self._net_inputs),
-                tuple(tensor[index] for tensor in self._loss_inputs))
+        return self.src[index], self.src_valid_lens[index], self.tgt[index], self.tgt_valid_lens[index]
     
     def __len__(self):
-        return len(self._net_inputs[0])
+        return self.sample_size
 
     @property
     def vocab(self):

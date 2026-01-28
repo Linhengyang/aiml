@@ -46,8 +46,8 @@ class ScaledDotProductAttention(nn.Module):
         # q(..., L_q, d) @ k(..., L_kv, d).T -> attn_w(..., L_q, L_kv)
         attn_w = torch.matmul(q, k.permute(0, 1, 3, 2)) * self.scale
         if attention_mask is not None:
-            # False 部分 not attend --> 填入-inf
-            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , float('-inf'))
+            # False 部分 not attend --> 填入大负数. 不用-inf的原因是 attention_mask 很有可能有全false行(比如存在右pad的序列)
+            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , -1e20)
         
         self.attention_weights = F.softmax(attn_w, dim=-1)
         # attn_w(..., L_q, L_kv) @ v(..., L_kv, v_size) -> o(..., L_q, v_size) 
@@ -388,7 +388,8 @@ class CausalSelfMHA(nn.Module):
 
         if attention_mask is not None:
             # attention_mask: tensor [B, L_q, L_so_far]/bool. True --> valid_area, False --> invalid_area
-            # 这里用 -1e20 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行.
+            # 这里用 -1e20 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行
+            # 特别是 右pad 的序列, 其attention_mask在pad位置就会出现全-inf行.
             # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃. 因为
             # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
             # 所以这里用 finite 大负数 -1e20 而不是 -inf. softmax能正确处理 大负数 和全大负数行.

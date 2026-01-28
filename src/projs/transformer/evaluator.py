@@ -3,17 +3,17 @@ from src.core.interface.infra_easy import epochEvaluator
 # from src.utils.visualize import Animator
 import yaml
 import typing as t
+import torch
 
 
 configs = yaml.load(open('src/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
-reveal_cnt_in_train, eval_cnt_in_train = configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
+reveal_times, eval_times = configs['reveal_cnt_in_train'], configs['eval_cnt_in_train']
 
 
 class transformerEpochEvaluator(epochEvaluator):
 
-    # class 变量
-    reveal_cnts = reveal_cnt_in_train # 披露train情况次数, 从train过程中收集
-    eval_cnts = eval_cnt_in_train # 评价当前model, 需要validate data或infer.避免次数太多
+    reveal_cnts = reveal_times # 披露train情况次数, 从train过程中收集
+    eval_cnts = eval_times # 评价当前model, 需要validate data或infer.避免次数太多
 
     def __init__(self, num_epochs, logfile_path, scalar_names=['loss', ], num_dims_for_accum=2,
                  visualizer=None, verbose=False):
@@ -62,41 +62,32 @@ class transformerEpochEvaluator(epochEvaluator):
             self.timer = Timer()
     
     # @train: record values for scalars
-    def record_batch(self, net_inputs_batch, loss_inputs_batch, Y_hat, l):
-        # net_inputs_batch = (X, Y_frontshift1, X_valid_lens)
-        # shapes: (batch_size, num_steps), (batch_size, num_steps), (batch_size,)
-        # loss_inputs_batch = (Y, Y_valid_lens)
-        # shapes: (batch_size, num_steps), (batch_size,)
+    def record_batch(self, tgt_valid_lens, l):
         if self.reveal_flag:
             # 记录 batch loss, 和 target batch valid token 数量
-            self.reveal_accumulator.add(l.sum(), loss_inputs_batch[1].sum())
+            self.reveal_accumulator.add(l.sum(), tgt_valid_lens.sum())
     
     # @evaluation: record values for scalars
-    def evaluate_model(self, net, loss, valid_iter, FP_step:t.Callable, num_batches=None):
+    def evaluate_model(self, net, loss, valid_iter, bos_id:int, num_batches=None):
         if self.eval_flag and valid_iter: # 如果此次 epoch 确定要 evaluate network, 且输入了 valid_iter
-            # 始终保持 net 在 train mode. 因为 net 在 eval mode 会触发自回归调用 KV_Cache
-            for i, (net_inputs_batch, loss_inputs_batch) in enumerate(valid_iter):
-                # net_inputs_batch = (X, Y_frontshift1, X_valid_lens)
-                # shapes: (batch_size, num_steps), (batch_size, num_steps), (batch_size,)
-                # loss_inputs_batch = (Y, Y_valid_lens)
-                # shapes: (batch_size, num_steps), (batch_size,)
-
-                if num_batches and i >= num_batches: # 如果 设定了 evaluate 的 batch 数量，那么在达到时，退出 eval_metric 的累积
+            # 始终保持 net 在 train mode
+            for i, (src, src_valid_lens, tgt, tgt_valid_lens) in enumerate(valid_iter):
+                # 如果 设定了 evaluate 的 batch 数量，那么在达到时，退出 eval_metric 的累积
+                if num_batches and i >= num_batches:
                     break
-                
-                l, Y_hat = FP_step(net, loss, net_inputs_batch, loss_inputs_batch)
-
+                batch_size = src.size(0)
+                bos = torch.empty((batch_size, 1), dtype=torch.int64, device=self.device).fill_(bos_id)
+                tgt_hat, _ = net(src, torch.cat([bos, tgt[:, :-1]], dim=1), src_valid_lens, tgt_valid_lens)
+                l = loss(tgt_hat, tgt, tgt_valid_lens)
                 # 记录 batch loss, 和 target batch valid token 数量
-                self.eval_accumulator.add(l.sum(), loss_inputs_batch[1].sum())
+                self.eval_accumulator.add(l.sum(), tgt_valid_lens.sum())
 
     def cast_metric(self):
-
         loss_avg, eval_loss_avg = None, None
 
         # 若当前 epoch 需要 reveal train, 停止计时, reveal 累加器二位(train loss, num_tokens)
         if self.reveal_flag:
             # reveal_accumulator: loss, num_valid_tokens
-
             time_cost = self.timer.stop()
             loss_avg = self.reveal_accumulator[0] / self.reveal_accumulator[1]
             speed = self.reveal_accumulator[1] / time_cost
@@ -108,10 +99,8 @@ class transformerEpochEvaluator(epochEvaluator):
                 unit_names = ["", "/token", "tokens/sec", "min"],
                 round_ndigits = [None, 3, 0, 0]
                 )
-            
             with open(self.log_file, 'a+') as f:
                 f.write(reveal_log+'\n')
-            
             if self.verbose_flag:
                 print(reveal_log)
         
@@ -119,19 +108,15 @@ class transformerEpochEvaluator(epochEvaluator):
         # 若当前 epoch 需要 evaluate model, eval 累加器二位(validation loss, num_tokens)
         if self.eval_flag:
             # eval_accumulator: loss, num_valid_tokens
-
             eval_loss_avg = self.eval_accumulator[0] / self.eval_accumulator[1]
-
             eval_log = metric_summary(
                 values = [self.epoch+1, eval_loss_avg],
                 metric_names = ["epoch", "eval_loss"],
                 unit_names = ["", "/token"],
                 round_ndigits = [None, 3]
             )
-
             with open(self.log_file, 'a+') as f:
                 f.write(eval_log+'\n')
-
             if self.verbose_flag:
                 print(eval_log)
 
