@@ -1,6 +1,5 @@
 from src.core.evaluation.evaluate import Timer, Accumulator, metric_summary
 from src.core.interface.infra_easy import epochEvaluator
-from src.utils.visualize import Animator
 import yaml
 import typing as t
 
@@ -16,12 +15,10 @@ class bertEpochEvaluator(epochEvaluator):
 
     def __init__(self, num_epochs, logfile_path, scalar_names=['mlm_loss', 'nsp_loss', ], num_dims_for_accum=4,
                  visualizer=None, verbose=False):
-
         assert num_epochs >= max(self.reveal_cnts, self.eval_cnts), \
             f'num_epochs must be larger than reveal counts & eval counts'
         
         super().__init__()
-
         self.num_epochs = num_epochs
         self.reveal_accumulator, self.eval_accumulator = Accumulator(num_dims_for_accum), Accumulator(num_dims_for_accum)
 
@@ -43,6 +40,7 @@ class bertEpochEvaluator(epochEvaluator):
         # 图像显示器
         self.visual_flag = True if visualizer else False
         if self.visual_flag:
+            from src.utils.visualize import Animator
             self.animator = Animator(xlabel='epoch', xlim=[1, num_epochs], legend=self.legends)
 
         # 是否需要在控制台 打印训练日志
@@ -107,7 +105,6 @@ class bertEpochEvaluator(epochEvaluator):
             mlm_loss_train = self.reveal_accumulator[0] / self.reveal_accumulator[3]
             nsp_loss_train = self.reveal_accumulator[1] / self.reveal_accumulator[3]
             loss_train = mlm_loss_train + nsp_loss_train
-            
             speed = self.reveal_accumulator[2] / time_cost
             est_remain_time = time_cost*(self.num_epochs-self.epoch-1)/60
 
@@ -141,10 +138,10 @@ class bertEpochEvaluator(epochEvaluator):
 
         # 若设定了 visualizer
         if self.visual_flag:
-            mlm_loss_train = mlm_loss_train if self.reveal_flag else None
-            mlm_loss_eval = mlm_loss_eval if self.eval_flag else None
-            nsp_loss_train = nsp_loss_train if self.reveal_flag else None
-            nsp_loss_eval = nsp_loss_eval if self.eval_flag else None
+            mlm_loss_train = mlm_loss_train if self.reveal_flag and self.reveal_accumulator else None
+            mlm_loss_eval = mlm_loss_eval if self.eval_flag and self.eval_accumulator else None
+            nsp_loss_train = nsp_loss_train if self.reveal_flag and self.reveal_accumulator else None
+            nsp_loss_eval = nsp_loss_eval if self.eval_flag and self.eval_accumulator else None
             # 线条的顺序要和legends一一对应. 目前只支持最多4条线
             # self.legends: (train_mlm_loss, valid_mlm_loss, train_nsp_loss, valid_nsp_loss)
             self.animator.add(self.epoch+1, (mlm_loss_train, mlm_loss_eval, nsp_loss_train, nsp_loss_eval))
