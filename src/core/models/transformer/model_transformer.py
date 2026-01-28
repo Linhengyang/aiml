@@ -110,7 +110,7 @@ class TransformerDecoder(nn.Module):
             L_past = past_kv[0][0].size(2)
             # infer on last predicted token: tgt 是[B, 1], tgt_valid_lens 不需要输入
             positions = torch.tensor([L_past], dtype=torch.int64, device=tgt.device)
-            tgt_attn_mask = torch.ones((tgt.size(0), 1, L_past), dtype=torch.bool, device=tgt.device) #[B, 1, L_past+1]
+            tgt_attn_mask = torch.ones((tgt.size(0), 1, L_past+1), dtype=torch.bool, device=tgt.device) #[B, 1, L_past+1]
         
         x = self.token_embedding(tgt)*math.sqrt(self.D) # (batch_size, max_decoder_ctx_size/1, hidden_size)
         x = self.embd_drop( x + self.pos_encoding(positions) ) # (batch_size, max_decoder_ctx_size/1, hidden_size)
@@ -160,7 +160,7 @@ class Transformer(EncoderDecoder):
                  temperature: float = 1.0,      # flatten/sharpen the output distribution
                  top_k: int|None = None        # limit selections when sampling token via output distribution
                  ):
-        assert max_gen_size > 0 and max_gen_size <= self.encoder.decoder_context_size, \
+        assert max_gen_size > 0 and max_gen_size <= self.decoder.decoder_context_size, \
             f'max_gen_size must be larger than 0 and no larger than decoder_context_size'
         self.eval()
 
@@ -205,7 +205,7 @@ class Transformer(EncoderDecoder):
             if (next_token == eos_id).all():
                 return output
         
-        return output # [B, max_gen_size]
+        return output # [B, max_gen_size] on cpu
 
 
 

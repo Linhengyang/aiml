@@ -137,11 +137,10 @@ def translate(saved_params_fpath, vocab_path):
     translator = sentenceTranslator(net, vocab, context_size, configs['temporature'], configs['topk'], device=device)
     
     # predict
-    # src_sentence = 'i\'m home .'
-    src_sentence = 'Who forced you to do that?'
-    print(translator.predict(src_sentence))
+    src_sentences = ['Who forced you to do that?', 'i\'m home .']
+    print(translator.predict(src_sentences))
 
     # evaluate output
-    # print('bleu score: ', translator.evaluate('je suis chez moi .'))
-    print('bleu score: ', translator.evaluate('Qui vous a forcée à faire cela ?'))
+    tgt_sentences = ['Qui vous a forcée à faire cela ?', 'je suis chez moi .']
+    print('bleu score: ', translator.evaluate(tgt_sentences))
     return
