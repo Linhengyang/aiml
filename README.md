@@ -7,7 +7,7 @@
 * invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
 
 ## src:
-* core:  &nbsp;&nbsp;&nbsp;&nbsp;torch code including:  
+* core(torch code):
     * layers:&nbsp;&nbsp;basic layers   
     * blocks:&nbsp;&nbsp;network blocks   
     * models:&nbsp;&nbsp;complete network   
@@ -15,18 +15,27 @@
     * optim:&nbsp;&nbsp;customized optimizers 
     * data:&nbsp;&nbsp;data process  
     * evaluation:&nbsp;&nbsp;evaluation tools  
+    * ...
 * kits:  
     * huggingface:  &nbsp;&nbsp;utilities for adapting huggingface-style to self-developed
+    * ...
 * lib:  
     * share: &nbsp;&nbsp;shared cpp headers & files  
     * tokenizer:  &nbsp;&nbsp;cpp & cython files to boost tokenizer bpe train  
-* utils:  &nbsp;&nbsp;&nbsp;&nbsp;tools including  
+* utils:
     * text:&nbsp;&nbsp;tokenzier, preprocess, etc   
     * image:&nbsp;&nbsp;image related   
     * parquet:&nbsp;&nbsp;parquet format related   
-* projs:  &nbsp;&nbsp;&nbsp;&nbsp;code & config for specific projects  
-* apps:  &nbsp;&nbsp;&nbsp;&nbsp;code & config for specific application  
-
+    * ...
+* projs:
+    * gpt2:   
+    * bert:   
+    * transformer:   
+    * ...
+* apps:
+    * rag:   
+    * bpe_build:
+    * ...
 
 ## Work Note:
 
