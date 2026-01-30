@@ -1,0 +1,15 @@
+RoBERTa 就是 encoder 版本的 GPT2: 二者都只有生成任务, 只是GPT2的生成任务是因果生成next token; RoBERTa的生成任务是双向生成masked token.
+1: RoBERTa 去掉 NSP 任务, 只有 MLM 任务, 但是每批次的MASK任务是动态随机生成的，并非固定在train data里
+2: train data 结果不再是 sentence pair, 而是简单的类似GPT2的 sequence with fixed context_size.
+不过有一点和GPT2不同的是, GPT2的 train data里是存在eos, 但那是ENDOFTEXT, 是文档的自然结尾。经过chunk成为batch data之后, 单个input sequence末尾并不一定是EOS.
+同时eos作为数据token的一份子，正常进入模型，目的是让模型正常学会产出eos. 也就是说, 在GPT2的train data里，我们视ENDOFTEXT是一个正常存在的token, 整个模型除了正常存在的token之外，没有人为添加、封装input sequence.
+而RoBERTa的 train data, 是截取长为 context_size - 2 的 token sequence 之后， 再在头尾硬性添加 <cls> 和 <sep>. 其中<cls>是为了表示"聚合全sentence信息", 保持下游任务的兼容性; <sep> 是物理上指示sequence末尾.
+<cls>和<sep>都要position encoding之后参与 MLM 任务, 总体来讲还是为了兼容BERT, 毕竟RoBERTa是为了成为一个更好的BERT
+
+EOS在train data中出现频率    稀疏for gpt2（仅在文档自然结束处, 作为一个正常token出现在该 input sequence, 并非每条 input sequence都有）   密集for RoBERTa（每个input 序列必须用<cls>和<sep>封装头尾
+处理逻辑                    滑动窗口for gpt2（原文+ENDOFTEXT 切到哪里算哪里）                                                         封装盒子（切完必须封口）
+序列末尾                    可能是任意词                                                                                            永远是<sep>
+目的                        保持生成的连贯性（对GPT2来说，它就像在读一本无限流token，只不过它的记忆窗口只有context_size）                定义encoding的边界（RoBERTa只用<sep>之前的token来预测MLM token）
+
+
+3: RoBERTa使用了更大的数据集.
