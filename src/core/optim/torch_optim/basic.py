@@ -4,10 +4,10 @@
 # __init__规范:
 # 1. 必须调用父类的 __init__:  super().__init__(params, defaults)
 # 这里 params 必须是:
-#   1. 一个 param tensor 的可迭代对象, 比如 model.parameters()
+#   1. 一个 nn.Parameter类 的可迭代对象, 比如 model.parameters()
 #   2. 一个字典列表, 每个字典包含 'params' key 和其他超参数 key, 比如
 #      [{'params': model.base.parameters(), 'lr': 1e-4}, {'params': model.fc.parameters(), 'lr': 1e-3}]
-#   总结: params 必须是参数tensor的可迭代对象, 或者 参数tensor nested with other hyper-params 的可迭代对象
+#   总结: params 必须是 nn.Parameter类 的可迭代对象, 或者 nn.Parameter类 nested with other hyper-params 的可迭代对象
 # 这里 defaults 必须是 字典, 包含该优化器的默认超参数, 比如 lr / weight_decay / betas 等
 
 # 2. 必须对所有超参数作 合法性检查, 抛出 value error 而不是 assert
@@ -65,15 +65,16 @@ class SGD(Optimizer):
                 if p.grad is not None:
                     grad = p.grad
                     if group['weight_decay'] != 0: # 如果有 weight_decay, SGD 的做法是加到 梯度上
-                        # 不希望污染 梯度自身, 因为可能其他地方还要用梯度, 所以用 .add 方法   .add 会分配新内存返回新的对象, 不改变 grad 和 p
+                        # 不希望污染 梯度自身, 因为可能其他地方还要用梯度, 所以用 .add 方法   .add 会分配新内存返回新的对象, 不改变 p.grad 和 p
                         grad = grad.add(p, alpha=group['weight_decay']) # grad_ = grad + wd * weight
                     
                     state = self.state[p] # 拿出 p 对应的状态
                     if 'momentum_buffer' not in state: # 延迟初始化: 当要用时检查发现尚未初始化, 那么初始化
-                        state['momentum_buffer'] = torch.zeros_like(p) # 延迟初始化为 zero
+                        state['momentum_buffer'] = torch.zeros_like(p) # 延迟初始化为 zero, 这里 in-place 修改 self.state[p]
                     velocity = state['momentum_buffer']
-                    velocity.mul_(group['momentum']).add_(grad) # 状态 是要保存的, 所以用 in-place 操作避免新内存分配, 节省内存
-                    p.add_(velocity, alpha=-group['lr']) # 修改 p 的值是优化器的职责, 所以用 in-place 操作
+                    velocity.mul_(group['momentum']).add_(grad) # 状态 是要保存的, 所以用 in-place 操作避免新内存分配, 节省内存. state['momentum_buffer']被更新
+                    p.add_(velocity, alpha=-group['lr']) # 修改 p 的值是优化器的职责, 所以用 in-place 操作.
+                    # 注意, 直接p修改只能是在torch.no_grad修饰下, 不然应该是 p.data.add_()
         
         return loss
     
