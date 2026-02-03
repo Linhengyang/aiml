@@ -1,2 +1,3 @@
+# 编译并用 nvprof 命令作profiling
 nvcc test_transfer.cu -o profile_test
 nvprof ./profile_test
