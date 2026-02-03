@@ -1,0 +1,2 @@
+nvcc test_transfer.cu -o profile_test
+nvprof ./profile_test
