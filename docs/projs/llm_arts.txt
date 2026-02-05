@@ -1,0 +1,3 @@
+首先, post-norm 难见, pre-norm 已经基本统一: pre-norm 给 input x 留出了"resnet通路".
+在预训练中, pre-norm 的 loss/bleu 等都显著优于 post-norm, 梯度衰减更弱, 梯度global norm spikes整体更少
+pre-norm 最开始是为了去掉warmup, 但现在更重要的作用是使得训练更稳定、能使用更大的学习率在大网络上.
