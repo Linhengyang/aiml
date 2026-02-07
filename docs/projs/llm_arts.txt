@@ -1,3 +1,16 @@
-首先, post-norm 难见, pre-norm 已经基本统一: pre-norm 给 input x 留出了"resnet通路".
-在预训练中, pre-norm 的 loss/bleu 等都显著优于 post-norm, 梯度衰减更弱, 梯度global norm spikes整体更少
+首先, post-norm 已经基本不再使用, pre-norm 已经基本是标准做法: pre-norm 给 input x 留出了"resnet通路".
+在预训练中, pre-norm 的 loss/bleu 等都显著优于 post-norm, 梯度衰减更弱, 梯度传播更稳, 梯度的 global norm spikes 整体更少
 pre-norm 最开始是为了去掉warmup, 但现在更重要的作用是使得训练更稳定、能使用更大的学习率在大网络上.
+(warmup: 以前用post-norm时, 由于原始数据+随机初始化的权重, norm又放在最后, 导致中间激活值可能忽大忽小, 数值波动非常激烈, 导致梯度值极大. 若配合大学习率, 提高了NaN出现的概率.
+所以warmup过程就是在训练的早期阶段(batch或epoch)用“逐步增大至目标值的小学习率”来训, 避免过程训崩。pre-norm可以很好地规整数据)
+
+其次, RMSNorm 在崛起: LayerNorm对特征维度内的分量, 作mean-std标准化后, 作参数scale+bias; 而RMSNorm的计算要简单很多, 它对特征维度内的分量, 作原点标准化后, 仅作参数scale
+RMSNorm相对LayerNorm, 其计算量更少(没有求均值), 参数量也更少(没有bias), 效果却不差.
+问题: normalization操作在整体 FLOPs&Memory 统计中，占比极小, 矩阵运算才是大头, RMSNorm相对LayerNorm这点节省有意义吗？
+答案: 有意义, 因为FLOPs不是runtime, 具体看整体 runtime 统计, normalization操作的占比是相当可观的，所以 RMSNorm 在 runtime 上的节省是显著的. 而且RMSNorm效果不差(经过严格验证).
+
+第三, FFN 中的 bias 参数普遍被舍弃. 原因也是出于 memory 和 优化时的稳定性.
+
+
+
+激活函数的 Gated化: 
