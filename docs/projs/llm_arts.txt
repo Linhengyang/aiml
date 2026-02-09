@@ -14,4 +14,7 @@ RMSNorm相对LayerNorm, 其计算量更少(没有求均值), 参数量也更少(
 
 
 激活函数的 Gated化:
-激活函数(Linear Unit)比如 ReLU、GeLu 等是给线性变换 x@W+b 加上 element-wise 的非线性函数. 那么 Gated Linear Unit 就是在 非线性之后, 再加上 element-wise 的
+激活函数(Linear Unit)比如 ReLU、GeLu 等是给线性变换 x@W+b 加上 element-wise 的非线性函数. 那么 Gated Linear Unit 就是在 非线性之后,
+再哈德玛德乘积 一个x的线性变换 x@V+a, 然后再将结果送入下一层. 即:
+原有 GeLU of FF(x) := gelu(x @ W_1 + b_1) @ W_2 + b_2
+gated化后 GeGLU of FF(x) := ( gelu(x @ W_1 + b_1) hadmad (x @ V + a) ) @ W_2 + b_2
