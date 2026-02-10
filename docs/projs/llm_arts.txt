@@ -14,7 +14,14 @@ RMSNorm相对LayerNorm, 其计算量更少(没有求均值), 参数量也更少(
 
 
 激活函数的 Gated化:
-激活函数(Linear Unit)比如 ReLU、GeLu 等是给线性变换 x@W+b 加上 element-wise 的非线性函数. 那么 Gated Linear Unit 就是在 非线性之后,
+激活函数(Linear Unit)比如 ReLU、GeLu 等，都是指给线性变换 x@W+b 加上 element-wise 的非线性函数. 那么 Gated Linear Unit 就是在 非线性之后,
 再哈德玛德乘积 一个x的线性变换 x@V+a, 然后再将结果送入下一层. 即:
 原有 GeLU of FF(x) := gelu(x @ W_1 + b_1) @ W_2 + b_2
 gated化后 GeGLU of FF(x) := ( gelu(x @ W_1 + b_1) hadmad (x @ V + a) ) @ W_2 + b_2
+
+总结:
+普通FFN: x(d_mod 维度) --线性映射--> d_ff 维度(通常是4*d_mod) --非线性化-->--线性映射--> d_mod 维度
+门控FFN: x(d_mod 维度) --线性映射--> 2*d_ff 维度(通常是8*d_mod) --双路交积(一半d_ff经非线性化后哈德玛德乘另一半d_ff)-->--线性映射--> d_mod 维度
+这里典型的非线性化有 GeLU/ReLU/Swish等. Swish(x) = x * sigmoid(x)
+
+引入门控在训练上是有效果的, 尽管它不是必需品.
