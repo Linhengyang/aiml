@@ -25,3 +25,31 @@ gated化后 GeGLU of FF(x) := ( gelu(x @ W_1 + b_1) hadmad (x @ V + a) ) @ W_2 +
 这里典型的非线性化有 GeLU/ReLU/Swish等. Swish(x) = x * sigmoid(x)
 
 引入门控在训练上是有效果的, 尽管它不是必需品.
+如果模型不在隐藏维度作 scale down, 那么对比 vanilla 和 GLU variants 的 FLOPs(以per-row计)
+vanilla: 2*d_model*d_ff
+GLU variant: 2*d_model*d_ff + d_model*d_ff = 3*d_model*d_ff
+若GLU variant保持 FLOPs 不变, 那么其 d_ff 应该是 vanilla版本 的 2/3 scale down
+如果取经典的 d_ff = 4*d_model, 那么 GLU variant 的 d_ff 应该等于 8/3*d_model = 2.67*d_model
+
+
+
+
+MLP 和 attention 的并行化:
+当前 transformer block 是序列执行的, 先 LayerNorm+Attention, addLayerNorm之后再MLP: y = x + MLP( LayerNorm(x + Attention(LayerNorm(x))) )
+有些模型并行化 MLP 和 attention: y = x + MLP(LayerNorm(x)) + Attention(LayerNorm(x))
+并行MLP+attention的计算速度更高. 消融实验展示效果有一定折扣
+
+
+
+位置编码: absolute-position-encoding --> rotary-position-encoding
+RoPE 是 apply 在 query 和 key 上的: 对奇/偶维度作两两二维旋转 --> new query 和 key
+
+
+
+超参数 hyperparameters
+1. FFN 里的 增维维度 应该是 模型维度 的多少? 答: 几乎所有模型都把 FFN 里的 d_ff 设为 4倍 d_model. 此系数几成共识, 除非
+    GLU门控: 上面论述过, 为了保持 FLOPs, GLU variant 应该作 2/3 scale down. 如此 d_ff 约为 2.67倍 d_model. 实际上流行模型的系数在 2.5 - 4 之间
+    T5(原始版本): T5的 d_ff = 65536 而 d_model = 1024, 比例达到64 --> T5 的FFN是一个超宽的神经网络 <--- scale up d_ff 的原因是谷歌的TPU非常适应超大稠密矩阵乘法
+   从经验上看, d_ff / d_model 在 1至10 这个区间内, 训练效果比较好. 原始T5的 64 过大了, T5 v1.1 马上使用了一个正常地多的值 2.5
+   ---> 总结：default choice d_ff / d_model = 4 for 普通模型, d_ff / d_model = 2.67 for GLU variant
+2. 
