@@ -22,7 +22,7 @@ gated化后 GeGLU of FF(x) := ( gelu(x @ W_1 + b_1) hadmad (x @ V + a) ) @ W_2 +
 总结:
 普通FFN: x(d_mod 维度) --线性映射--> d_ff 维度(通常是4*d_mod) --非线性化-->--线性映射--> d_mod 维度
 门控FFN: x(d_mod 维度) --线性映射--> 2*d_ff 维度(通常是8*d_mod) --双路交积(一半d_ff经非线性化后哈德玛德乘另一半d_ff)-->--线性映射--> d_mod 维度
-这里典型的非线性化有 GeLU/ReLU/Swish等. Swish(x) = x * sigmoid(x)
+这里典型的非线性化有 GeLU/ReLU/Swish等. Swish(x) = x * sigmoid(x): 可以看出门控就是“带参数的非线性激活”
 
 引入门控在训练上是有效果的, 尽管它不是必需品.
 如果模型不在隐藏维度作 scale down, 那么对比 vanilla 和 GLU variants 的 FLOPs(以per-row计)
@@ -50,14 +50,14 @@ RoPE 是 apply 在 query 和 key 上的: 对奇/偶维度作两两二维旋转 -
 1. FFN 里 d_ff / d_model 比例系数? 答: 几乎所有模型都把 FFN 里的 d_ff 设为 4倍 d_model. 此系数几成共识, 除非
     GLU门控: 上面论述过, 为了保持 FLOPs, GLU variant 应该作 2/3 scale down. 如此 d_ff 约为 2.67倍 d_model. 实际上流行模型的系数在 2.5 - 4 之间
     T5(原始版本): T5的 d_ff = 65536 而 d_model = 1024, 比例达到64 --> T5 的FFN是一个超宽的神经网络 <--- scale up d_ff 的原因是谷歌的TPU非常适应超大稠密矩阵乘法
-   从经验上看, d_ff / d_model 在 1至10 这个区间内, 训练效果比较好. 原始T5的 64 过大了, T5 v1.1 马上使用了一个正常地多的值 2.5
+   从经验上看, d_ff / d_model 在 1至10 这个区间内, 训练效果比较好. 原始T5的 64 过大了, T5 v1.1 版本马上使用了一个正常得多的值 2.5
    ---> 总结：default choice d_ff / d_model = 4 for 普通模型, d_ff / d_model = 2.67 for GLU variant, 最好控制在 1-10 之间.
 2. Attention 里, num_heads * head_dim / d_model 比例系数? 答: 几乎所有模型都让 num_heads 整除 d_model, 即 num_heads * head_dim / d_model = 1, 除非
     在 Attention 的 投影层(x --线性映射--> qkv)处作调整, 先把 x(d_model维度)映射到 num_heads*head_dim 维度的 q/k/v, 再把q/k/v拆成多头即 [B, H, L_q, d]
     比如 T5(原始版)里, num_heads*head_dim / model_dim = 16, 是一个比较极端的设定, 但是在 T5(v1.1)版本, 马上回归主流系数 1
    ---> 总结: default choice num_heads 整除 d_model, 不引入额外增维
 3. 整体架构里, aspect ratio 即模型的长宽比例 d_model / n_layers 比例系数? 答: 主流模型又一次具备一致选择, 即 100至200 左右, 比如 gpt3/qwen --> 128, llama --> 102
-    实际上, 过深(n_layers很大)的模型, 增大并行化的难度, 以及有更高的 latency: wide model 可以分布到不同device上, 而 deep model没办法作并行化, 只能等待上一层的输出
+    实际上, 过深(n_layers很大)的模型, 增大并行化的难度, 以及有更高的 latency: wide model 可以分布到不同device上, 而 deep model没办法作并行化, 只能等待上一层的输出作输入
     实证研究证实, 在参数量不变的前提下, aspect ratio(d_model/n_layers) 存在一个甜点区间, 大约在 100 左右. 即模型的宽度和层数存在一个最优固定比例系数
    ---> 总结: 模型增大(参数量增加时), 要同步提升 d_model 和 n_layers, 使得 d_model / n_layers 保持在 100至200 左右的甜点区
 4. vocab_size 即字典大小, 有无一个最优值? 答：GPT2/3 50257, Llama 32000, original transformer 37000, GPT4 100276, DeepSeek 100000, Qwen 152064
@@ -67,4 +67,32 @@ RoPE 是 apply 在 query 和 key 上的: 对奇/偶维度作两两二维旋转 -
    ---> 总结: 大模型预训练single epoch数据量充足, 过拟合风险极低, 所以一般不需要dropout正则化. weight decay 被保留是为了保证收敛稳定性. 上述是针对主流开源模型而言.
 
 
-    
+
+训练稳定性: stable training 的关注度很高，loss曲线不能有太多尖刺spike, 更不能出现loss NaN 
+softmax数值稳定: 很多 NaN 数值的出现是因为softmax步骤的不稳定性, 因为该步骤涉及了大量指数/累加和除法运算.
+1. softmax 在 attention 内: attention(Q, K, V) = softmax(Q @ K' / scale) @ v, 这里 softmax 计算在前向里容易导致overflow, 在反向里巨大的指数值使得梯度计算极不稳定
+稳定处理方法:
+   QK 计算相似性时, 1/sqrt(d_k) 缩放scale, 来"摊平" logits 之间的差距以防止分布退化成 one-hot;           ---> 防止梯度消失/分布退化, 保障梯度有效
+   softmax计算时, 采用stable实现(torch函数基本都实现), 即 row-wise log-sum-exp(即max substraction);     ---> 防止-inf, 保障数值安全
+上述两个处理的次序在数学上是等价的, 不过工程上只能先 scale 再 stable-softmax
+
+对于超深模型, 有一种架构处理叫 QK Norm, 即在 QK 计算相似性前, 首先对 Q / K 作 layernorm 以控制模长、杜绝点积过大. 即 ln(Q) @ ln(K).T / sqrt_d, 然后再softmax
+
+
+2. softmax 在 模型输出 时: softmax(logits) --> probs_hat --label--> cross-entropy Loss --> gradient
+其中 ce-loss 直接用 logits+label 就可以计算, 梯度 gradient 需要计算 probs_hat. 
+稳定处理方法:
+   ce-loss/gradient 仍然使用 max substraction/log-sum-exp: celoss = -(xY-M) + log{sum_e_(X-M)}, gradient = e_(X-M) / sum_e_(X-M) - labels
+   z-loss 是指在ce-loss之外, 再额外惩罚 logits 值的正向/负向漂移程度, 迫使 logits 值稳定. 原文PaLM里是加一个惩罚项 zloss = log(sum_e_X) ^ 2
+处理方法一仍然是 log-sum-exp 在 softmax 计算中的数值稳定作用. 但它只能保证 softmax 的数值稳定, 若 logits 自身blow up/overflow, 则无法避免. 所以要尽全力避免 logits 过大.
+处理方法二 z-loss 正是避免 logits 出现正向漂移(漂向+inf) / 全面负向漂移(漂向-inf), 迫使 logits 合理分布.
+
+除此之外, 还可以给logits使用 高精度FP32 / 监控logits幅值 / soft-capping 等方法. 其中 soft-capping on logits 指作如下变换: logits <- soft_cap * tanh(logits/soft_cap)
+系数 soft_cap 在不同的 softmax 层不同: 在 attention 内取 50, 在 输出层 取 30. 此变换把 logits 限制在 [-soft_cap, soft_cap] 区间内.
+
+
+
+
+
+
+拓展注意力计算
