@@ -68,26 +68,44 @@ RoPE 是 apply 在 query 和 key 上的: 对奇/偶维度作两两二维旋转 -
 
 
 
-训练稳定性: stable training 的关注度很高，loss曲线不能有太多尖刺spike, 更不能出现loss NaN 
-softmax数值稳定: 很多 NaN 数值的出现是因为softmax步骤的不稳定性, 因为该步骤涉及了大量指数/累加和除法运算.
-1. softmax 在 attention 内: attention(Q, K, V) = softmax(Q @ K' / scale) @ v, 这里 softmax 计算在前向里容易导致overflow, 在反向里巨大的指数值使得梯度计算极不稳定
+训练稳定性: stable training 的关注度很高，loss曲线不能有太多尖刺spike, 更不能出现loss NaN. 尤其关注 softmax 操作在稳定性上的作用:
+softmax数值稳定:
+   很多 NaN 数值的出现是因为softmax步骤的不稳定性, 因为该步骤涉及了大量指数/累加和除法运算. 指数运算尤其容易出现overflow(if 低精度FP16/BP16)
+   另外很多 NaN 数值的出现是因为 logits 过大/分布退化(锐化), 所以即使 softmax 步骤稳定, logits 也值得一些做一些处理, 使得 logits 值分布更合理
+
+1. softmax 在 attention 内: attention(Q, K, V) = softmax(Q @ K' / scale) @ v, 这里前向时点积容易overflow, 在反向里巨大的指数值使得梯度计算极不稳定
 稳定处理方法:
    QK 计算相似性时, 1/sqrt(d_k) 缩放scale, 来"摊平" logits 之间的差距以防止分布退化成 one-hot;           ---> 防止梯度消失/分布退化, 保障梯度有效
-   softmax计算时, 采用stable实现(torch函数基本都实现), 即 row-wise log-sum-exp(即max substraction);     ---> 防止-inf, 保障数值安全
-上述两个处理的次序在数学上是等价的, 不过工程上只能先 scale 再 stable-softmax
+   softmax计算时, 采用stable实现(torch函数基本都实现), 即 row-wise log-sum-exp(即max substraction);     ---> 防止出现 inf, 保障数值安全
+上述两个处理的次序在数学上是等价的, 不过工程上只能先 scale 再 stable-softmax. 当然了 flash-attn 这样的融合算子, 在内部实现了相关计算优化.
 
-对于超深模型, 有一种架构处理叫 QK Norm, 即在 QK 计算相似性前, 首先对 Q / K 作 layernorm 以控制模长、杜绝点积过大. 即 ln(Q) @ ln(K).T / sqrt_d, 然后再softmax
+对于超深模型, 即使用了上述两个处理方法, Attention仍然可能不稳定(因为方差累积过多), 那么就需要引入一些架构上的处理, 比如:
+有一种架构处理叫 QK Norm, 即在 QK 计算相似性前, 首先对 Q / K 作 layernorm 以控制模长、杜绝点积过大. 即 ln(Q) @ ln(K).T / sqrt_d, 然后再softmax
 
 
 2. softmax 在 模型输出 时: softmax(logits) --> probs_hat --label--> cross-entropy Loss --> gradient
-其中 ce-loss 直接用 logits+label 就可以计算, 梯度 gradient 需要计算 probs_hat. 
+其中 celoss 直接用 logits+label 就可以计算, 梯度 gradient 需要计算 probs_hat: celoss = -xY + log{sum_e_X}, gradient = e_X / sum_e_X - labels
 稳定处理方法:
-   ce-loss/gradient 仍然使用 max substraction/log-sum-exp: celoss = -(xY-M) + log{sum_e_(X-M)}, gradient = e_(X-M) / sum_e_(X-M) - labels
-   z-loss 是指在ce-loss之外, 再额外惩罚 logits 值的正向/负向漂移程度, 迫使 logits 值稳定. 原文PaLM里是加一个惩罚项 zloss = log(sum_e_X) ^ 2
-处理方法一仍然是 log-sum-exp 在 softmax 计算中的数值稳定作用. 但它只能保证 softmax 的数值稳定, 若 logits 自身blow up/overflow, 则无法避免. 所以要尽全力避免 logits 过大.
+   celoss/gradient 仍然使用 max substraction/log-sum-exp: celoss = -(xY-M) + log{sum_e_(X-M)}, gradient = e_(X-M) / sum_e_(X-M) - labels
+   zloss 是指在celoss之外, 再额外惩罚 logits 值的正向/负向漂移程度, 迫使 logits 值稳定. 原文PaLM里是加一个惩罚项 zloss = log(sum_e_X) ^ 2
+处理方法一仍然是 log-sum-exp 在 softmax 计算中的数值稳定作用. 但它只能保护 softmax 步骤: 若 logits 就出现blow up/overflow, 则无法避免数值崩溃. 所以要尽全力避免 logits 过大.
 处理方法二 z-loss 正是避免 logits 出现正向漂移(漂向+inf) / 全面负向漂移(漂向-inf), 迫使 logits 合理分布.
 
-除此之外, 还可以给logits使用 高精度FP32 / 监控logits幅值 / soft-capping 等方法. 其中 soft-capping on logits 指作如下变换: logits <- soft_cap * tanh(logits/soft_cap)
+详解zloss: 对于 logits X, zloss Z = log(sum_exp_X) ^ 2, 即 log-sum-exp of X 的 square
+首先, 它和 celoss 中的 lse 项 log{sum_e_(X-M)} 存在一个偏移关系: log(sum_exp_X) = M + log{sum_e_(X-M)}, 所以在一些融合算子实现的zloss内部, 会复用这个 lse 项.
+在非融合实现的zloss, 使用 torch.logsumexp(logits) 来计算 zloss(这个lse计算内部还是使用 max平移 来保证计算稳定性, 所以不用担心它的稳定性).
+其次, zloss 作为惩罚项, 是为了弥补 celoss 的一个弱点: celoss 只关注 logits 的相对分布, 但忽视了 logits 值的绝对值漂移倾向对训练的破坏作用:
+如果没有 zloss 只有 celoss, 那么 logits 的绝对值可能会发生漂移, 比如所有值都很大. 这种漂移可能对loss有正向作用, celoss也依旧能算, 但极大的logits值会压缩精度
+简而言之: celoss负责优化相对概率, 利用max-substraction忽略绝对大小, 保证优化方向正确; zloss负责约束绝对大小, 利用包含max的logsumexp Z, 防止logits漂移到数值不安全的区域
+最后, zloss 的优化动力学: 逼迫 log(sum_exp_X) ^ 2  --> 0, 即逼迫 sum_exp_X --> 1. 那么分析其优化过程:
+1. 逼迫每一项 exp_x_i <= 1 即 logits X 的每一项 x_i <= 0   ---> 直接杜绝了 logits 向正无穷漂移的可能性, 解决了正向漂移爆炸的问题
+2. 抑制全面负向漂移 即 logits X 的每一项 x_i 不能全都是 -100 这样的极端负数.
+总而言之, zloss 促使 logits 的值分布在浮点硬件比较舒适的区域(最大值在 0 附近, 大概率小于0, 值不极端) ---> zloss 通过约束 sum_exp(logits) = 1, 使得logits在0附近
+同时 zloss 对 logits 的相对分布没有影响: 相对分布依然是 celoss 发挥主要作用
+
+
+除此之外, 还可以给logits使用 高精度FP32 / 监控logits幅值 / soft-capping 等方法.
+其中 soft-capping on logits 指的是如下变换: logits <- soft_cap * tanh(logits/soft_cap)
 系数 soft_cap 在不同的 softmax 层不同: 在 attention 内取 50, 在 输出层 取 30. 此变换把 logits 限制在 [-soft_cap, soft_cap] 区间内.
 
 
