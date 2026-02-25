@@ -99,9 +99,9 @@ softmax数值稳定:
 简而言之: celoss负责优化相对概率, 利用max-substraction忽略绝对大小, 保证优化方向正确; zloss负责约束绝对大小, 利用包含max的logsumexp Z, 防止logits漂移到数值不安全的区域
 最后, zloss 的优化动力学: 逼迫 log(sum_exp_X) ^ 2  --> 0, 即逼迫 sum_exp_X --> 1. 那么分析其优化过程:
 1. 逼迫每一项 exp_x_i <= 1 即 logits X 的每一项 x_i <= 0   ---> 直接杜绝了 logits 向正无穷漂移的可能性, 解决了正向漂移爆炸的问题
-2. 抑制全面负向漂移 即 logits X 的每一项 x_i 不能全都是 -100 这样的极端负数. 但是 logits 的相对分布不受影响: 依然可以表达接近one-hot的分布信息
+2. 抑制全面负向漂移 即 logits X 的每一项 x_i 不能全都是 -100 这样的极端负数. 但是 logits 的相对分布不受影响: 依然可以表达近似one-hot的分布信息
 3. zloss对 logits 的抑制是平滑的: zloss 对 logits 求偏导, 得到偏导=2*log(sum_exp_X)*Prob(x_i), 所以 zloss 对高概率 logit 值的抑制作用要更大, 促使 高logit值以更大的动力被抑制.
-总而言之, zloss 促使 logits 的值分布在浮点硬件比较舒适的区域(最大值在 0 附近, 大概率小于0, 值不极端) ---> zloss 通过约束 sum_exp(logits) = 1, 使得logits在0附近
+总而言之, zloss 促使 logits 的值分布在浮点硬件比较舒适的区域(最大值在 0 附近, 大概率小于0, 值不极端) ---> zloss 通过约束 sum_exp(logits) = 1, 抑制logits的漂移
 同时 zloss 对 logits 的相对分布没有影响: 相对分布依然是 celoss 发挥主要作用
 
 
