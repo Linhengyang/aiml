@@ -412,3 +412,156 @@ class CausalSelfMHA(nn.Module):
             new_kv_cache = (k, v)
 
         return y, new_kv_cache
+    
+
+
+
+
+
+class CausalSelfGQA(nn.Module):
+    '''
+    初始化参数:
+        num_groups: int. 当 num_groups = 1 时, 即为 MQA
+        其余同 CasualSelfMHA
+    '''
+    def __init__(self,
+                 embd_size:int,
+                 num_heads:int,
+                 num_groups:int,
+                 use_bias:bool,
+                 max_context_size:int,
+                 attn_p_drop:float,
+                 resid_p_drop:float,
+                 use_rope:bool,
+                 use_cached_causal_mask:bool):
+        
+        super().__init__()
+        
+        assert embd_size % num_heads == 0, f'embedding size shall be divided into num_heads'
+        assert num_heads % num_groups == 0, f'num_heads shall be divided into num_groups'
+        self.G = num_groups
+        self.D = embd_size
+        self.H = num_heads
+        self.d = embd_size // num_heads
+        assert self.d % 2 == 0, f'dim_per_head (embedding size / num_heads) must be even for RoPE'
+        self.scale = 1.0 / math.sqrt(self.d)
+
+        # 线性映射
+        self.W_q = nn.Linear(embd_size, embd_size, bias=use_bias) # x[B, seq_len, D] ---> q[B, seq_len, H*d]
+        self.W_kv = nn.Linear(embd_size, 2*self.G*self.d, bias=use_bias) # x[B, seq_len, D] ---> k/v[B, seq_len, G*d]
+        self.W_o = nn.Linear(embd_size, embd_size, bias=use_bias) # y[B, seq_len, D] ---> y[B, seq_len, D]
+        self.attn_drop = nn.Dropout(attn_p_drop)
+        self.resid_drop = nn.Dropout(resid_p_drop)
+
+        if use_cached_causal_mask:
+            # [1, 1, max_context_size, max_context_size] 的 T/F tensor. 其中主对角线上方(不含对角线)为True
+            self.register_buffer(
+                'causal_mask',
+                torch.triu(torch.ones(max_context_size, max_context_size, dtype=torch.bool), diagonal=1)[None, None, :, :],
+                persistent = False # False 指不作为 state_dict 的一部分
+                )
+        
+        if use_rope:
+            self.rope = RotaryPosEnc(RoPEConfig(self.d))
+
+    def forward(self,
+                x:torch.Tensor,                                         # [B, L_q, D]
+                kv_cache:Tuple[torch.Tensor, torch.Tensor]|None = None, # [B, H, L_past, d]
+                return_cache:bool = False,
+                attention_mask:torch.Tensor|None = None,                # [B, L_q, L_so_far=L_past+L_q]
+                positions:torch.Tensor|None = None,                     # [B, L_so_far]/[1, L_so_far]
+                ):
+        B = x.size(0)
+        L_q = x.size(1)
+
+        # 制作 qkv: x[B, L_q, D] --> q[B, L_q, D], k/v[B, L_q, G*d] --reshape--> q[B, H, L_q, d], k/v[B, G, L_q, d]
+        q = self.W_q(x)
+        kv = self.W_kv(x)
+        k, v = kv.split(self.G*self.d, dim=-1) # k/v[B, L_q, G*d]
+        # q/k/v 都是 H head, 此为 MHA算法. 算法 GQA/MQA 中, q和kv 有不同的 head 数量: k/v 的head数量为 num_groups
+        q = q.view(-1, L_q, self.H, self.d).transpose(1, 2) # [B, H, L_q, d]
+        k = k.view(-1, L_q, self.G, self.d).transpose(1, 2) # [B, G, L_q, d]
+        v = v.view(-1, L_q, self.G, self.d).transpose(1, 2) # [B, G, L_q, d]
+
+        # only for infer.decode 阶段. 此时 L_q = 1
+        if kv_cache:
+            k_past, v_past = kv_cache # k_past/v_past[B, H, L_past, d]
+            try:
+                k, v = torch.cat([k_past, k], dim=2), torch.cat([v_past, v], dim=-2) # k/v[B, G, L_so_far=L_past+L_q, d]
+            except RuntimeError as err:
+                raise RuntimeError(f'wrong shape for k/v cache concatenation as {err}')
+        
+        L_so_far = k.size(2) # train/infer.prefill, L_q = L_so_far
+        L_past = L_so_far - L_q # train/infer.prefill, L_past = 0
+
+        if hasattr(self, 'rope'):
+            if positions is not None and attention_mask is not None:
+                pass # positions: [B, L_so_far], attention_mask: [B, L_q, L_so_far]
+            # elif positions is not None and attention_mask is None:
+            #     attention_mask = get_attention_mask_from_position_ids(positions) # [B, H, L_q, L_so_far]
+            # elif positions is None and attention_mask is not None:
+            #     positions = get_position_ids_from_attention_mask(attention_mask)
+            else:
+                positions = torch.arange(0, L_so_far, dtype=torch.long, device=k.device)
+                attention_mask = None # equivalent to all True
+
+            cos, sin = self.rope.get_sin_cos(positions, broadcast_axis=1) # cos/sin: [B/1, 1, L_so_far, d]
+            cos_q, sin_q = cos[:, :, L_past:L_so_far, :], sin[:, :, L_past:L_so_far, :] # cos/sin: [B/1, 1, L_q, d]
+            q = self.rope.apply_rope(q, cos_q, sin_q)
+            k = self.rope.apply_rope(k, cos, sin)
+        else: # positions 无用, 不关心
+            if attention_mask is not None:
+                pass
+            # elif positions is not None:
+            #     attention_mask = get_attention_mask_from_position_ids(positions)
+            else:
+                pass
+        
+        ## 等价于 y = F.scaled_dot_product_attention(q, k, v, attention_mask, attn_p_drop, True, scale=self.scale, enable_gqa=True) ##
+        ######### qk 计算 attn_w --> causal_mask & attention_mask --> softmax --> dropout --> attn_w @ v ---> y #########
+
+        # q[B, H, L_q, d] --> q[B, G, group_size, L_q, d], k[B, G, L_so_far, d] --> k[B, G, 1, L_so_far, d]
+        # q @ k' --broadcast--> [B, G, group_size, L_q, L_so_far] --> [B, H, L_q, L_so_far]
+        attn_w = torch.matmul(q.view(B, self.G, -1, L_q, self.d), k.unsqueeze(-3).transpose(-2, -1)).reshape(B, self.H, L_q, L_so_far) * self.scale
+
+        # causal_mask: [B, H, L_q, L_so_far]/bool. True --> 上三角(不包含对角线, 会被-inf替代), False --> 下三角(包含对角线, 原值)
+        # train/infer.prefill [..., L_q=L_so_far, L_so_far], infer.decode [..., L_q=1, L_so_far]
+        if hasattr(self, 'causal_mask'):
+            # 当使用缓存, 为了通用性, 采用如下写法
+            causal_mask = self.causal_mask[:, :, L_past:L_so_far, :L_so_far]
+        else:
+            # 当动态生成
+            causal_mask = torch.triu(
+                torch.ones(L_q, L_so_far, dtype = torch.bool, device = attn_w.device),
+                diagonal = L_past + 1
+                )[None, None, :, :] # [L_q, L_so_far] --> [1, 1, L_q, L_so_far]
+        attn_w = attn_w.masked_fill(causal_mask, float('-inf')) # [B, H, L_q, L_so_far]
+
+        if attention_mask is not None:
+            # attention_mask: tensor [B, L_q, L_so_far]/bool. True --> valid_area, False --> invalid_area
+            # 这里用 -1e20 填入 而不再用 -inf, 因为 causal_mask 后不会有全-inf行, 可是再叠加 attention_mask 后可能会出现全 -inf 行
+            # 特别是 右pad 的序列, 其attention_mask在pad位置就会出现全-inf行.
+            # 全 -inf 行在 softmax 后, 全 -inf 行会变成全 nan 行, 导致计算崩溃. 因为
+            # softmax计算中会用 x - x.max, 全 -inf 行的max等于 -inf, -inf-(-inx) 会出现 nan
+            # 所以这里用 finite 大负数 -1e20 而不是 -inf. softmax能正确处理 大负数 和全大负数行.
+            attn_w = attn_w.masked_fill((attention_mask.logical_not()).unsqueeze(1) , -1e20)
+
+        # softmax
+        attn_w = F.softmax(attn_w, dim=-1) # [B, H, L_q, L_so_far]
+        attn_w = self.attn_drop(attn_w)
+        # attn_w[B, H, L_q, L_so_far] --> [B, G, group_size, L_q, L_so_far], v[B, G, L_so_far, d] --> [B, G, 1, L_so_far, d]
+        # attn_w @ v --broadcast--> [B, G, group_size, L_q, d] --> [B, H, L_q, d]
+        y = torch.matmul(attn_w.view(B, self.G, -1, L_q, L_so_far), v.unsqueeze(-3)).reshape(B, self.H, L_q, self.d)
+
+        ############ 等价部分
+        # 实际上, F.scaled_dot_product_attention 在 is_causal=True时, 要求attn_mask is None, 不然报错
+        # 所以若既需要 causal 又需要支持 attn_mask 时, 本实现是必不可少的
+
+        y = y.transpose(1, 2).reshape(-1, L_q, self.D) # --> [B, L_q, H, d] --> [B, L_q, D]
+        y = self.resid_drop(self.W_o(y)) # [B, L_q, D] --> [B, L_q, D]
+
+        new_kv_cache = None
+        if return_cache:
+            new_kv_cache = (k, v)
+
+        return y, new_kv_cache
