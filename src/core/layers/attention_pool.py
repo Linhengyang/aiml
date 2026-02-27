@@ -423,6 +423,8 @@ class CausalSelfGQA(nn.Module):
     初始化参数:
         num_kv_heads: int. 当 num_kv_heads = 1 时, 即为 MQA
         其余同 CasualSelfMHA
+    GQA 主要的目的是降低 kv_cache 的 size, 以降低显存IO带宽压力, 另外也可以降低显存占用.
+    所以有些地方用 repeat_interleave 而不是 广播 来实现 GQA, 因为认为在训练时这点显存占用不重要. 但是infer的时候肯定要用 广播机制以降低显存占用.
     '''
     def __init__(self,
                  embd_size:int,
