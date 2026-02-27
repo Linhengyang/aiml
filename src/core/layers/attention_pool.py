@@ -421,13 +421,13 @@ class CausalSelfMHA(nn.Module):
 class CausalSelfGQA(nn.Module):
     '''
     初始化参数:
-        num_groups: int. 当 num_groups = 1 时, 即为 MQA
+        num_kv_heads: int. 当 num_kv_heads = 1 时, 即为 MQA
         其余同 CasualSelfMHA
     '''
     def __init__(self,
                  embd_size:int,
                  num_heads:int,
-                 num_groups:int,
+                 num_kv_heads:int,
                  use_bias:bool,
                  max_context_size:int,
                  attn_p_drop:float,
@@ -438,8 +438,8 @@ class CausalSelfGQA(nn.Module):
         super().__init__()
         
         assert embd_size % num_heads == 0, f'embedding size shall be divided into num_heads'
-        assert num_heads % num_groups == 0, f'num_heads shall be divided into num_groups'
-        self.G = num_groups
+        assert num_heads % num_kv_heads == 0, f'num_heads shall be divided into num_kv_heads'
+        self.G = num_kv_heads
         self.D = embd_size
         self.H = num_heads
         self.d = embd_size // num_heads
