@@ -59,3 +59,6 @@ if __name__ == '__main__':
     
     # fp16 和 bf16 精度下, sdpa 完胜 q-grouping 方案
     # fp32 精度下, q-grouping 方案小胜 sdpa
+    # sdpa 无法加入自定义的 attn_mask. 所以归纳如下:
+    # q-grouping: fp32精度, 又或者需要自定义 attn_mask
+    # sdpa: fp16/bf16精度, 且不需要自定义 attn_mask
