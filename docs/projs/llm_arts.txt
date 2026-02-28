@@ -114,15 +114,42 @@ softmax数值稳定:
 
 
 
-拓展注意力计算:
 回顾 多头自注意力 MHA:
+训练/推理.prefill阶段(1次前向):
 X --W_q--> Q[B, L, H*d], X --W_k[B, L, H*d]--> K, X --W_v--> V[B, L, H*d], Q/K/V --reshape--> Q/K/V[B, H, L, d]
 Q @ K' --> logits[B, H, L, L] --softmax--> probs[B, H, L, L], probs @ V --reshape--> output[B, L, H*d] -->W_o--> output[B, L, H*d]
 计算量: 三个线性映射 3*B*2*L*D^2 = 6BLD^2, logits计算 2*B*H*L*d*L = 2BDL^2, softmax计算忽略, @V计算 2*B*H*L*L*d = 2BDL^2, 输出投影 2*B*L*D^2 = 2BLD^2
-总计: 8BLD^2 + 4BDL^2  --> 序列长度远大于模型宽度时, BDL^2 占主导; 模型宽度远大于序列长度时, BLD^2 占主导 --> 用 BLD^2 计算 
+总计: 8BLD^2 + 4BDL^2  --> 序列长度远大于模型宽度时, BDL^2 占主导; 模型宽度远大于序列长度时, BLD^2 占主导 --> L和D量级接近, 所以直接用 BLD^2 计算 
 存储量: 激活值 Q/K/V 分别占用 BLD, 激活值 logits/softmax 占用 BHL^2, 权重 W_qkvo 分别占用 D^2
-算术密度 = 计算量/存储量 = 
+算术密度(忽略系数, 且L&D接近) = 计算量/存储量 = BLD^2 / (BLD + BHL^2 + D^2) = 1/( 1/D + HL/D^2 + 1/BL ) = 1/(1/Hd + 1/d + 1/BL) = 1/(1/k + 1/BL)
+即算术密度 = 1/(1/k + 1/BL)，这里 k 是一个正比于d的常数, B和L分别是指 batch_size 和 seq_len ---> 当 BL 更大时, 算术密度 也更大, 且往 k 逼近 ---> 能保证GPU一直跑
+
+
+推理.decode阶段(1次前向):
+X --W_q--> Q[B, 1, H*d], K_cache/V_cache[B, H, L, d]是直接读取的, Q --reshape--> Q [B, H, 1, d]
+Q @ K' --> logits[B, H, 1, L] --softmax--> probs[B, H, 1, L], probs @ V --reshape--> output[B, 1, H*d] -->W_o--> output[B, 1, H*d]
+计算量: 一个线性映射 B*2*1*D^2 = 4BD^2, logits计算 2*B*H*1*d*L = 2BDL, softmax计算忽略, @V计算 2*B*H*1*L*d = 2BDL, 输出投影 2*B*L*D^2 = 2BD^2
+总计: 6BD^2 + 4BDL --> L和D量级接近, 直接用 BD^2 计算
+存储量: 激活值 Q or KV 分别占用 BD or BLD, 激活值 logits/softmax 占用 BHL, 权重 W_qkvo 分别占用 D^2
+算术密度(忽略系数, 忽略logits) = BD^2 / (BLD + D^2) = 1 / (L/D + 1/B) ---> 当 B 更大时, 算术密度确实更大, 但是往 D/L 项逼近 ---> L越长, 计算密度越低
+
+---> 序列长度/上下文长度 限制了 decode 阶段的计算密度, 导致 GPU 经常跑不满(计算等待存储读取)
+
+
+拓展注意力计算 之 MQA: multi-query attention
+K 和 V 坍缩成 single head, 被所有 Q head 共享.  以此计算 推理.decode阶段的算术密度:
+计算量: BD^2 不变
+存储量: 激活值 Q / KV 分别占用 BD / BLd, 激活值 logits/softmax 占用 BHL, 权重 W_qkvo 分别占用 D^2 / d^2(qo前者, kv后者) --> 用 BD + BLd + D^2 计算
+算术密度(忽略系数, 忽略logits) = BD^2 / (BD + BLd + D^2) = 1 / (1/D + Ld/D^2 + 1/B) = 1 / (1/D + L/DH + 1/B) --> 往 DH/(L+H) 项逼近 --> 计算密度接近H倍提升
+
+拓展注意力计算 之 GQA: grouped-query attention
+K 和 V 坍缩成 num_kv_heads 个 head, 分别被 n_rep 个 Q head 共享( num_kv_heads*n_rep = H), 平衡推理阶段的算术密度和模型的表达能力
 
 
 
 稀疏注意力/滑动注意力:
+全context注意力计算 entire context: Q @ K' --> logits, which is [B, H, L, d] @ [B, H, L, d]' --> [B, H, L, L] casual 后就是下三角
+即 Q 作为 [L, d] 的矩阵, 与 K [L, d] 的矩阵 算出一个 [L, L] 的 logits 矩阵, 取因果下三角之后, 再softmax --> 最多有 L^2 次 QK 相关性计算
+---> 涉及的计算复杂度 O(L^2), 存储复杂度 O(L^2)
+
+稀疏注意力 --> 是一种逻辑上的"稀疏", 即降低 Q/K 之间相关性计算的个数, 而不是 tensor 中0值较多的那种"稀疏"
