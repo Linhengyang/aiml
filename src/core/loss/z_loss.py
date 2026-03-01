@@ -1,7 +1,7 @@
 # z-loss from PaLM
 # 当 logits[batch_size, num_cls, [d1...dk]] 与 labels[batch_size, [d1...dk]] 贡献 cross-entropy Loss 时,
-# 为了抑制 logits 的正向漂移, 促使 logits 分布在 0 以下附近的 float-comfortable 区域, 额外计算一个 z-loss = 
-# square of log-sum-exp of logits 
+# 为了抑制 logits 的正向漂移, 促使 logits 分布在 0 以下附近的 float-comfortable 区域, 额外计算一个
+# z-loss = square of log-sum-exp of logits 
 
 from torch.nn.modules.loss import _Loss
 from torch import Tensor
