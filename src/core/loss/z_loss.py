@@ -20,7 +20,7 @@ class ZLoss(_Loss):
         logits: (batch_size, num_cls, [d1...dk])float
         mask: None or (batch_size, [d1...dk])bool as mask. only true-area of target attend loss
         """
-        zloss = torch.logsumexp(logits, dim=1, keepdim=False) # [batch_size, [d1...dk]]
+        zloss = torch.logsumexp(logits, dim=1, keepdim=False).square() # [batch_size, [d1...dk]]
         if mask is None:
             if self.reduction == 'sum':
                 return self.alpha * torch.sum(zloss)
