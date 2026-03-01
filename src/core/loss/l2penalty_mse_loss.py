@@ -17,8 +17,8 @@ class L2PenaltyMSELoss(nn.MSELoss):
     output:
         a scalar, sum of mse loss(reduction='sum') and l2 penalty
     '''
-    def __init__(self, lambd):
-        super().__init__()
+    def __init__(self, lambd, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.lambd = lambd
 
     def forward(self, pred_tensor, truth_tensor, *weight_tensors):
@@ -28,4 +28,5 @@ class L2PenaltyMSELoss(nn.MSELoss):
         for weight_tensor in weight_tensors:
             l2_penalty += torch.sum(weight_tensor.pow(2)) / 2
         l2_penalty = self.lambd * l2_penalty
+        
         return mse_loss + l2_penalty
