@@ -149,7 +149,7 @@ K 和 V 坍缩成 num_kv_heads 个 head, 分别被 n_rep 个 Q head 共享( num_
 
 稀疏注意力/滑动注意力:
 全context注意力计算 entire context: Q @ K' --> logits, which is [B, H, L, d] @ [B, H, L, d]' --> [B, H, L, L] casual 后就是下三角
-即 Q 作为 [L, d] 的矩阵, 与 K [L, d] 的矩阵 算出一个 [L, L] 的 logits 矩阵, 取因果下三角之后, 再softmax --> 最多有 L^2 次 QK 相关性计算
+即 Q 作为 [L, d] 的矩阵, 与 K [L, d] 的矩阵 算出一个 [L, L] 的 logits 矩阵, 取因果下三角之后, 再softmax --> 最多有 L^2 次 QK 相关性计算, 需要存储 L^2 个结果值
 ---> 涉及的计算复杂度 O(L^2), 存储复杂度 O(L^2)
 
-稀疏注意力 --> 是一种逻辑上的"稀疏", 即降低 Q/K 之间相关性计算的个数, 而不是 tensor 中0值较多的那种"稀疏"
+稀疏注意力 --> 是一种逻辑上的"稀疏", 即降低 Q/K 之间相关性计算的个数, 而不是 "tensor 中0值较多" 的那种稀疏
