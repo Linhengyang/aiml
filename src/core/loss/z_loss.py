@@ -23,17 +23,17 @@ class ZLoss(_Loss):
         zloss = torch.logsumexp(logits, dim=1, keepdim=False) # [batch_size, [d1...dk]]
         if mask is None:
             if self.reduction == 'sum':
-                return torch.sum(zloss)
+                return self.alpha * torch.sum(zloss)
             elif self.reduction == 'mean':
-                return torch.mean(zloss)
+                return self.alpha * torch.mean(zloss)
             else:
-                return zloss
+                return self.alpha * zloss
         else:
             # mask is not None. False area not attend to loss 
             zloss[~mask] = 0
             if self.reduction == 'sum':
-                return torch.sum(zloss)
+                return self.alpha * torch.sum(zloss)
             elif self.reduction == 'mean':
-                return torch.sum(zloss) / torch.sum(mask)
+                return self.alpha * torch.sum(zloss) / torch.sum(mask)
             else:
-                return zloss
+                return self.alpha * zloss
