@@ -152,4 +152,36 @@ K 和 V 坍缩成 num_kv_heads 个 head, 分别被 n_rep 个 Q head 共享( num_
 即 Q 作为 [L, d] 的矩阵, 与 K [L, d] 的矩阵 算出一个 [L, L] 的 logits 矩阵, 取因果下三角之后, 再softmax --> 最多有 L^2 次 QK 相关性计算, 需要存储 L^2 个结果值
 ---> 涉及的计算复杂度 O(L^2), 存储复杂度 O(L^2)
 
-稀疏注意力 --> 是一种逻辑上的"稀疏", 即降低 Q/K 之间相关性计算的个数, 而不是 "tensor 中0值较多" 的那种稀疏
+稀疏注意力 --> 是一种“算法逻辑”上的稀疏, 即结构化降低 Q/K 之间相关性计算次数, 而不是 "tensor 中0值较多" 的那种稀疏
+古早的结构化稀疏注意力:
+一: strided-sparse attention
+步长 k, 即意味着位置 i 的 token 由位置 i-k, i-2k, ... 生成
+例如for k = 2:
+  0  1  2  3  4  5  6
+0 a                  
+1 x  a               
+2 a  x  a            
+3 x  a  x  a         
+4 a  x  a  x  a      
+5 x  a  x  a  x  a   
+6 a  x  a  x  a  x  a
+
+
+二: block-sparse attention
+
+
+
+
+
+
+三: sliding-window attention
+窗口大小 w, 即意味着位置 i 的 token 由位置 i-(w-1), ..., i 生成
+例如for w = 3:
+  0  1  2  3  4  5  6
+0 a                  
+1 a  a               
+2 a  a  a            
+3 x  a  a  a         
+4 x  x  a  a  a      
+5 x  x  x  a  a  a   
+6 x  x  x  x  a  a  a
