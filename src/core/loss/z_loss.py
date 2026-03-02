@@ -34,6 +34,6 @@ class ZLoss(_Loss):
             if self.reduction == 'sum':
                 return self.alpha * torch.sum(zloss)
             elif self.reduction == 'mean':
-                return self.alpha * torch.sum(zloss) / torch.sum(mask)
+                return torch.sum(zloss) / torch.sum(mask) * self.alpha
             else:
                 return self.alpha * zloss
