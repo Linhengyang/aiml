@@ -240,7 +240,7 @@ if col_id > row_id(causal之外) or row_id - col_id > M(window之外), then set 
 1. tiling: 将 QKV 切分成固定大小的 block
 2. scheduling: 对于每个 Q-block, 根据 window_size 计算需要遍历的 K-block 范围(保证完整覆盖)
 3. SRAM loading: 将这些 K-blocks 连续地从 HBM 拷贝到 SRAM(整块拷贝)
-4. masked matmul: 在SRAM中执行矩阵乘法, 在累加器中就应用 token-level 的 causal / window 掩码. --> 那些多算的logits在累加之前就是-inf, 并在softmax的max/sum运算中被忽略
+4. masked matmul: 在SRAM中执行矩阵乘法, 在累加器中应用 token-level 的 causal/window 掩码 --> 那些"多算位置"的logits在累加之前就是-inf, 或者是在softmax的max/sum运算中被忽略
 ---> 用少量冗余的 FLOPs 运算换取巨大的内存带宽节省和计算并行度提升
 
 

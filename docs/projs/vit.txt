@@ -7,6 +7,8 @@ ViT在工程上没什么好说的, 将图片patch化之后, 将每个patch摊平
 
 随后添加头部cls_token, 作为整个序列的embedding, 用作分类输出. 在self-att和mlp前向过程中, cls_token会逐渐集成整个序列的综合embedding tensor.
  (position embedding)
+    ---> cls token 的 params 是以 expand 的方式添加到 data 最左边, 而不是 repeat. 这意味着在模型训练中, 整个batch data的信息会综合到cls token params
+这是因为 cls token 应该视作 参数 而不是 数据 来看待. 它应该是 sequence data的一个具备共性的特征提取器，在与data的交互计算中, 提取出了整个sequence的信息.
 
 
 patch_embedding有一种更方便的实现方法, 即使用nn.Conv2D算子直接实现. 对比两种方法:
