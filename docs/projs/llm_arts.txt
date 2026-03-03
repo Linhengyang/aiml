@@ -148,7 +148,7 @@ K 和 V 坍缩成 num_kv_heads 个 head, 分别被 n_rep 个 Q head 共享( num_
 
 
 稀疏注意力/滑动注意力:
-全context注意力计算 entire context: Q @ K' --> logits, which is [B, H, L, d] @ [B, H, L, d]' --> [B, H, L, L] casual 后就是下三角
+全context注意力计算 entire context: Q @ K' --> logits, which is [B, H, L, d] @ [B, H, L, d]' --> [B, H, L, L] causal 后就是下三角
 即 Q 作为 [L, d] 的矩阵, 与 K [L, d] 的矩阵 算出一个 [L, L] 的 logits 矩阵, 取因果下三角之后, 再softmax --> 最多有 L^2 次 QK 相关性计算, 需要存储 L^2 个结果值
 ---> 涉及的计算复杂度 O(L^2), 存储复杂度 O(L^2)
 
@@ -165,16 +165,62 @@ K 和 V 坍缩成 num_kv_heads 个 head, 分别被 n_rep 个 Q head 共享( num_
 4 a  x  a  x  a      
 5 x  a  x  a  x  a   
 6 a  x  a  x  a  x  a
+通常来说会采用混合模式: sliding-window + strided, 即: 对于位置 i 的 token, 首先考虑相邻窗口 w 内: i-(w-1), ..., i. 然后考虑 strided: i-w, i-2w, ... 等
 
 
 二: block-sparse attention
+一般以 block_size = b, non-overlapping 地划分 序列长度 L 至 L/b = B 块. 用[B,B]形状的邻接矩阵, 而不是[L,L]形状的系数矩阵 来考虑 qk 之间的相互关系
+例如 B = 5:
+    B1  B2  B3  B4  B5
+B1  0/1 0/1 0/1 0/1 0/1      
+B2  0/1 0/1 0/1 0/1 0/1   
+B3  0/1 0/1 0/1 0/1 0/1   
+B4  0/1 0/1 0/1 0/1 0/1   
+B5  0/1 0/1 0/1 0/1 0/1   
+形成的[5,5]邻接矩阵是一个 0/1 矩阵, 其中 1 代表该行/列块相关, 而 0 代表该行/列块不相关. 比如 行B2 下的 列B4,B5 为 1, B1/2/3 都是 0, 那么代表
+q中的 B2 tokens 与 k 中的 B4/B5 tokens 执行相关性计算, 得到 logits, 而 B2 tokens 与 k 中其他 tokens 的 logits 直接就是 -inf
+---> 原本巨大的 [L, L]logits 矩阵计算, 变成了由 邻接矩阵指定的 多个 [b,b] logits 矩阵计算
+---> 每个 [b,b] logits 计算还要经过 causal 处理, 因为邻接矩阵不负责传递 causal, 同时也无法传递 block 内部的 causal
+---> 整体矩阵是稀疏的, 但是局部计算是稠密的: 多个 [b,b] 矩阵以连续存储的方式一次性加载到高速缓存并在tensor core执行. 效率极高
+
+显然 block-sparse attention 一需要编写特定的算子kernel而不是使用 matmul/sdpa, 二需要设计有效的邻接矩阵, 以兼顾模型能力和计算效率
+邻接矩阵设计模式:
+1. block-wise sliding-window / local band 模式: 对角线附近的带状区域, 目的是捕捉每一个token的局部上下文. 一般作为混合设计模式的基础存在
+    B1  B2  B3  B4  B5
+B1   1   1   0   0   0
+B2   1   1   1   0   0
+B3   0   1   1   1   0
+B4   0   0   1   1   1
+B5   0   0   0   1   1
+sliding-window 的工程实现极其高效: 直接通过 token position ID 就可以知道所属的 block, 以及作为语境需要的 blocks --> 确定性极高, 访问连续性极高
+
+2. global block / 全局块模式: 指定少数几个block, 让它们和所有block作相关性计算, 目的是充当信息枢纽, 让信息在整个序列中快速传递
+举例, 比如这里 块1 是 cls块, 那么让 q 里的 B1 和所有块作相关性计算, 同时让 q 所有的块与 k 里的 B1 作相关性计算
+    B1  B2  B3  B4  B5
+B1   1   1   1   1   1
+B2   1   1   1   0   0
+B3   1   1   1   1   0
+B4   1   0   1   1   1
+B5   1   0   0   1   1
+
+3. random / 随机块模式: q 里的每个块随机选择 r 个其他块进行连接, 目的是增加图的连通性 让信息能以更短的路径传播
+
+一般是混合模式: 以block-wise sliding window为基础, 让大部分计算集中在滑动窗口以保证局部语义, 少量全局block/token 负责长距离聚合, 少量随机连接保证鲁棒性
+注意在局部计算之后, 还要因果 causal 掩码, 即 if row_id > col_id then set to -inf 
+   --> 邻接矩阵是粗筛, 把规则外的块直接扔掉以省计算量, 块级优化. 实际上 flash-attn 在kernel内部会动态计算 window_end, 即即时判断下一个block是否需要读取
+       因果掩码是细筛, 保证token的因果逻辑, 块内细化
+
+
+
+block-sparse attention的优点:
+1.内存连续，GPU可以一次性加载block到SRAM / 2.tensor core举证乘法优化, 尽管整体稀疏, 但局部计算稠密 / 3.控制开销低因为控制逻辑是在block粒度执行
+实现效果 --> 线性计算复杂度/线性存储需求/通过全局块随机块实现长距离依赖/硬件高效, 但是 软件实现复杂/邻接矩阵需要人工设计/邻接矩阵的设计是固定的，没有动态性
 
 
 
 
 
-
-三: sliding-window attention
+三: token-wise sliding-window attention
 窗口大小 w, 即意味着位置 i 的 token 由位置 i-(w-1), ..., i 生成
 例如for w = 3:
   0  1  2  3  4  5  6
@@ -185,3 +231,18 @@ K 和 V 坍缩成 num_kv_heads 个 head, 分别被 n_rep 个 Q head 共享( num_
 4 x  x  a  a  a      
 5 x  x  x  a  a  a   
 6 x  x  x  x  a  a  a
+token-wise sliding window 的设计思想非常直接, 但是它的工程实现实际是 block-wise sliding window高效近似 + token-level mask精细对齐
+因为对于单个 token i 取 w 个near-tokens 这种非规整的锯齿状读取 / 非连续内存读取gather & scatter, 是非常低效的. 因为此时 GPU核心在等待数据, 分支预测容易失败
+实际上具体实现是, 取 block_size <= window_size, 根据 window_size 确定每block至少该读取 若干个block 以完整覆盖 window, 然后在局部计算内部执行 token-level mask:
+if col_id > row_id(causal之外) or row_id - col_id > M(window之外), then set logits to -inf
+
+现代 flash-attn 框架:
+1. tiling: 将 QKV 切分成固定大小的 block
+2. scheduling: 对于每个 Q-block, 根据 window_size 计算需要遍历的 K-block 范围(保证完整覆盖)
+3. SRAM loading: 将这些 K-blocks 连续地从 HBM 拷贝到 SRAM(整块拷贝)
+4. masked matmul: 在SRAM中执行矩阵乘法, 在累加器中就应用 token-level 的 causal / window 掩码. --> 那些多算的logits在累加之前就是-inf, 并在softmax的max/sum运算中被忽略
+---> 用少量冗余的 FLOPs 运算换取巨大的内存带宽节省和计算并行度提升
+
+
+
+模型的深度会给 sliding-window attention 自动带来感受野的扩大.
