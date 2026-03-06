@@ -1,4 +1,11 @@
 // mempooled_concurrent_hashtable.h
+// 内存池上的哈希表由两部分组成: nodes 和 buckets(链表头node指针数组). 其中 nodes 在insert时逐一分配在内存池上
+// 而 buckets 由创建方式分配内存, 即:
+// 方法1: HashTable* map = new HashTable(capacity, &mempool); 此时 buckets 分配在 堆内存 上, 由new/delete手动管理哈希表的生命周期
+// 方法2: HashTable map(capacity, &mempool); 此时 buckets 分配在 栈内存 上, 由函数调用自动管理哈希表的生命周期
+// 这样的好处是 rehash 后原buckets相关空间可以即时被系统回收.
+
+// 推荐方法1, 且将哈希表指针存储在 静态区. 这样可以全程手动控制哈希表的生命周期, 且资源做到最大程度的可复用和即时回收.
 
 #ifndef MEMPOOLED_CONCURRENT_HASHTABLE_H
 #define MEMPOOLED_CONCURRENT_HASHTABLE_H
