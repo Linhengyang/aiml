@@ -84,7 +84,9 @@ private:
     * 扩容 rehash
     * @param new_capacity
     * 
-    * 行为:对每一个node重新计算bucket, 然后将其重新挂载到新的bucket链表的头部
+    * 行为:对每一个node重新计算bucket, 然后将其重新挂载到新的bucket链表的头部. rehash并没有改变 HashTable node 的存储位置, 仍然在 mempool 上
+    * 只是 node 的指针指向改变, 以及存储 链表头node 指针的 指针数组改变
+    * 链表头node指针数组就是哈希表本身, 它不是在 mempool 上分配, 而是由机器 std::calloc 从系统堆内存分配, 由 new/delete 语句管理生命周期.
     */
     void rehash(size_t new_capacity) {
         // 初始化一个新的 table
