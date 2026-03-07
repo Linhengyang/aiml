@@ -1,4 +1,11 @@
 // mempooled_hashtable.h
+// 内存池上的哈希表由两部分组成: nodes 和 buckets(链表头node指针数组). 其中 nodes 在insert时逐一分配在内存池上
+// 而 buckets 由创建方式分配内存, 即:
+// 方法1: HashTable* map = new HashTable(capacity, &mempool); 此时 buckets 分配在 堆内存 上, 由new/delete手动管理哈希表的生命周期
+// 方法2: HashTable map(capacity, &mempool); 此时 buckets 分配在 栈内存 上, 由函数调用自动管理哈希表的生命周期
+// 这样的好处是 rehash 后原buckets相关空间可以即时被系统回收.
+
+// 推荐方法1, 且将哈希表指针存储在 静态区. 这样可以全程手动控制哈希表的生命周期, 且资源做到最大程度的可复用和即时回收.
 
 #ifndef MEMPOOLED_HASHTABLE_H
 #define MEMPOOLED_HASHTABLE_H
@@ -51,7 +58,8 @@ private:
             _table = nullptr;
             return;
         }
-        // calloc: 分配空间为 n 个 节点指针 的空间, 并零初始化, 避免 .resize 的逐元素置空
+        // calloc: 从堆内存 分配 n 个 节点指针 的空间, 并零初始化, 避免 .resize 的逐元素置空
+        // 本质是 node节点指针数组
         _table = static_cast<HashTableNode**>(std::calloc(n, sizeof(HashTableNode*)));
         if (!_table) throw std::bad_alloc();
     }
@@ -84,7 +92,9 @@ private:
     * 扩容 rehash
     * @param new_capacity
     * 
-    * 行为:对每一个node重新计算bucket, 然后将其重新挂载到新的bucket链表的头部
+    * 行为:对每一个node重新计算bucket, 然后将其重新挂载到新的bucket链表的头部. rehash并没有改变 HashTable node 的存储位置, 仍然在 mempool 上
+    * 只是 node 的指针指向改变, 以及存储 链表头node 指针的 指针数组改变
+    * 链表头node指针数组就是哈希表本身, 它不是在 mempool 上分配, 而是由机器 std::calloc 从系统堆内存分配, 由 new/delete 语句管理生命周期.
     */
     void rehash(size_t new_capacity) {
         // 初始化一个新的 table
@@ -276,10 +286,11 @@ public:
     }
 
 
-    // 哈希表是构建在传入的 内存池 上的数据结构, 它不应该负责 内存池 的 复位or销毁
+    // 哈希表自身作为 链表头node指针数组 构建在 堆内存, node全部构建在内存池 
+    // 哈希表不应该负责 内存池 的 复位or销毁
     // 内存池本身是只可以 整体复用/整体销毁，不可精确销毁单次allocate的内存
-    // 哈希表的"清空"：原数据全部析构, 不再可访问, 但其分配的内存不会在这里被 复位or销毁. 保持 bucket 结构
-    // 由于保持了 bucket 结构 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
+    // 哈希表的"清空"：内存池上的node全部析构, 不再可访问, 但其分配的内存不会在这里被 复位or销毁. 链表头node指针数组全部置空
+    // 由于保持了 bucket结构(堆内存上的链表头node指针数组, 全部是nullptr) 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
     void clear() {
         if (_capacity == 0 || !_table) {
             _size = 0;

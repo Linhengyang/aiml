@@ -158,7 +158,7 @@ class Transformer(EncoderDecoder):
                  bos_id: int,                   # begin of sequence sign
                  eos_id: int,                   # end of sequence sign
                  temperature: float = 1.0,      # flatten/sharpen the output distribution
-                 top_k: int|None = None        # limit selections when sampling token via output distribution
+                 top_k: int|None = None         # limit selections when sampling token via output distribution
                  ):
         assert max_gen_size > 0 and max_gen_size <= self.decoder.decoder_context_size, \
             f'max_gen_size must be larger than 0 and no larger than decoder_context_size'

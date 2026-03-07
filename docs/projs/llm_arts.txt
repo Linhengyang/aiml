@@ -1,0 +1,248 @@
+首先, post-norm 已经基本不再使用, pre-norm 已经基本是标准做法: pre-norm 给 input x 留出了"resnet通路".
+在预训练中, pre-norm 的 loss/bleu 等都显著优于 post-norm, 梯度衰减更弱, 梯度传播更稳, 梯度的 global norm spikes 整体更少
+pre-norm 最开始是为了去掉warmup, 但现在更重要的作用是使得训练更稳定、能使用更大的学习率在大网络上.
+(warmup: 以前用post-norm时, 由于原始数据+随机初始化的权重, norm又放在最后, 导致中间激活值可能忽大忽小, 数值波动非常激烈, 导致梯度值极大. 若配合大学习率, 提高了NaN出现的概率.
+所以warmup过程就是在训练的早期阶段(batch或epoch)用“逐步增大至目标值的小学习率”来训, 避免过程训崩。pre-norm可以很好地规整数据)
+
+其次, RMSNorm 在崛起: LayerNorm对特征维度内的分量, 作mean-std标准化后, 作参数scale+bias; 而RMSNorm的计算要简单很多, 它对特征维度内的分量, 作原点标准化后, 仅作参数scale
+RMSNorm相对LayerNorm, 其计算量更少(没有求均值), 参数量也更少(没有bias), 效果却不差.
+问题: normalization操作在整体 FLOPs&Memory 统计中，占比极小, 矩阵运算才是大头, RMSNorm相对LayerNorm这点节省有意义吗？
+答案: 有意义, 因为FLOPs不是runtime, 具体看整体 runtime 统计, normalization操作的占比是相当可观的，所以 RMSNorm 在 runtime 上的节省是显著的. 而且RMSNorm效果不差(经过严格验证).
+
+第三, FFN 中的 bias 参数普遍被舍弃. 原因也是出于 memory 和 优化时的稳定性.
+
+
+
+激活函数的 Gated化:
+激活函数(Linear Unit)比如 ReLU、GeLu 等，都是指给线性变换 x@W+b 加上 element-wise 的非线性函数. 那么 Gated Linear Unit 就是在 非线性之后,
+再哈德玛德乘积 一个x的线性变换 x@V+a, 然后再将结果送入下一层. 即:
+原有 GeLU of FF(x) := gelu(x @ W_1 + b_1) @ W_2 + b_2
+gated化后 GeGLU of FF(x) := ( gelu(x @ W_1 + b_1) hadmad (x @ V + a) ) @ W_2 + b_2
+
+总结:
+普通FFN: x(d_mod 维度) --线性映射--> d_ff 维度(通常是4*d_mod) --非线性化-->--线性映射--> d_mod 维度
+门控FFN: x(d_mod 维度) --线性映射--> 2*d_ff 维度(通常是8*d_mod) --双路交积(一半d_ff经非线性化后哈德玛德乘另一半d_ff)-->--线性映射--> d_mod 维度
+这里典型的非线性化有 GeLU/ReLU/Swish等. Swish(x) = x * sigmoid(x): 可以看出门控就是“带参数的非线性激活”
+
+引入门控在训练上是有效果的, 尽管它不是必需品.
+如果模型不在隐藏维度作 scale down, 那么对比 vanilla 和 GLU variants 的 FLOPs(以per-row计)
+vanilla: 2*d_model*d_ff
+GLU variant: 2*d_model*d_ff + d_model*d_ff = 3*d_model*d_ff
+若GLU variant保持 FLOPs 不变, 那么其 d_ff 应该是 vanilla版本 的 2/3 scale down
+如果取经典的 d_ff = 4*d_model, 那么 GLU variant 的 d_ff 应该等于 8/3*d_model = 2.67*d_model
+
+
+
+
+MLP 和 attention 的并行化:
+当前 transformer block 是序列执行的, 先 LayerNorm+Attention, addLayerNorm之后再MLP: y = x + MLP( LayerNorm(x + Attention(LayerNorm(x))) )
+有些模型并行化 MLP 和 attention: y = x + MLP(LayerNorm(x)) + Attention(LayerNorm(x))
+并行MLP+attention的计算速度更高. 消融实验展示效果有一定折扣
+
+
+
+位置编码: absolute-position-encoding --> rotary-position-encoding
+RoPE 是 apply 在 query 和 key 上的: 对奇/偶维度作两两二维旋转 --> new query 和 key
+
+
+
+超参数 hyperparameters
+1. FFN 里 d_ff / d_model 比例系数? 答: 几乎所有模型都把 FFN 里的 d_ff 设为 4倍 d_model. 此系数几成共识, 除非
+    GLU门控: 上面论述过, 为了保持 FLOPs, GLU variant 应该作 2/3 scale down. 如此 d_ff 约为 2.67倍 d_model. 实际上流行模型的系数在 2.5 - 4 之间
+    T5(原始版本): T5的 d_ff = 65536 而 d_model = 1024, 比例达到64 --> T5 的FFN是一个超宽的神经网络 <--- scale up d_ff 的原因是谷歌的TPU非常适应超大稠密矩阵乘法
+   从经验上看, d_ff / d_model 在 1至10 这个区间内, 训练效果比较好. 原始T5的 64 过大了, T5 v1.1 版本马上使用了一个正常得多的值 2.5
+   ---> 总结：default choice d_ff / d_model = 4 for 普通模型, d_ff / d_model = 2.67 for GLU variant, 最好控制在 1-10 之间.
+2. Attention 里, num_heads * head_dim / d_model 比例系数? 答: 几乎所有模型都让 num_heads 整除 d_model, 即 num_heads * head_dim / d_model = 1, 除非
+    在 Attention 的 投影层(x --线性映射--> qkv)处作调整, 先把 x(d_model维度)映射到 num_heads*head_dim 维度的 q/k/v, 再把q/k/v拆成多头即 [B, H, L_q, d]
+    比如 T5(原始版)里, num_heads*head_dim / model_dim = 16, 是一个比较极端的设定, 但是在 T5(v1.1)版本, 马上回归主流系数 1
+   ---> 总结: default choice num_heads 整除 d_model, 不引入额外增维
+3. 整体架构里, aspect ratio 即模型的长宽比例 d_model / n_layers 比例系数? 答: 主流模型又一次具备一致选择, 即 100至200 左右, 比如 gpt3/qwen --> 128, llama --> 102
+    实际上, 过深(n_layers很大)的模型, 增大并行化的难度, 以及有更高的 latency: wide model 可以分布到不同device上, 而 deep model没办法作并行化, 只能等待上一层的输出作输入
+    实证研究证实, 在参数量不变的前提下, aspect ratio(d_model/n_layers) 存在一个甜点区间, 大约在 100 左右. 即模型的宽度和层数存在一个最优固定比例系数
+   ---> 总结: 模型增大(参数量增加时), 要同步提升 d_model 和 n_layers, 使得 d_model / n_layers 保持在 100至200 左右的甜点区
+4. vocab_size 即字典大小, 有无一个最优值? 答：GPT2/3 50257, Llama 32000, original transformer 37000, GPT4 100276, DeepSeek 100000, Qwen 152064
+   ---> 总结: 单语言模型在 3-5W 左右, 多语言模型普遍在 10W 以上.
+5. dropout/weight decay, 预训练中一般来说数据量信息 >> 参数容量, single pass --> 很难过拟合, 基本是欠拟合, 还需要正则化吗? 答: weight decay一般都有, dropout 不一定
+    实证研究证实, weight decay 没有抑制过拟合(大模型预训练中一般不会有过拟合), 而是在“深度耦合学习率” --> 提升收敛稳定性
+   ---> 总结: 大模型预训练single epoch数据量充足, 过拟合风险极低, 所以一般不需要dropout正则化. weight decay 被保留是为了保证收敛稳定性. 上述是针对主流开源模型而言.
+
+
+
+训练稳定性: stable training 的关注度很高，loss曲线不能有太多尖刺spike, 更不能出现loss NaN. 尤其关注 softmax 操作在稳定性上的作用:
+softmax数值稳定:
+   很多 NaN 数值的出现是因为softmax步骤的不稳定性, 因为该步骤涉及了大量指数/累加和除法运算. 指数运算尤其容易出现overflow(if 低精度FP16/BP16)
+   另外很多 NaN 数值的出现是因为 logits 过大/分布退化(锐化), 所以即使 softmax 步骤稳定, logits 也值得一些做一些处理, 使得 logits 值分布更合理
+
+1. softmax 在 attention 内: attention(Q, K, V) = softmax(Q @ K' / scale) @ v, 这里前向时点积容易overflow, 在反向里巨大的指数值使得梯度计算极不稳定
+稳定处理方法:
+   QK 计算相似性时, 1/sqrt(d_k) 缩放scale, 来"摊平" logits 之间的差距以防止分布退化成 one-hot;           ---> 防止梯度消失/分布退化, 保障梯度有效
+   softmax计算时, 采用stable实现(torch函数基本都实现), 即 row-wise log-sum-exp(即max substraction);     ---> 防止出现 inf, 保障数值安全
+上述两个处理的次序在数学上是等价的, 不过工程上只能先 scale 再 stable-softmax. 当然了 flash-attn 这样的融合算子, 在内部实现了相关计算优化.
+
+对于超深模型, 即使用了上述两个处理方法, Attention仍然可能不稳定(因为方差累积过多), 那么就需要引入一些架构上的处理, 比如:
+有一种架构处理叫 QK Norm, 即在 QK 计算相似性前, 首先对 Q / K 作 layernorm 以控制模长、杜绝点积过大. 即 ln(Q) @ ln(K).T / sqrt_d, 然后再softmax
+
+
+2. softmax 在 模型输出 时: softmax(logits) --> probs_hat --label--> cross-entropy Loss --> gradient
+其中 celoss 直接用 logits+label 就可以计算, 梯度 gradient 需要计算 probs_hat: celoss = -xY + log{sum_e_X}, gradient = e_X / sum_e_X - labels
+稳定处理方法:
+   celoss/gradient 仍然使用 max substraction/log-sum-exp: celoss = -(xY-M) + log{sum_e_(X-M)}, gradient = e_(X-M) / sum_e_(X-M) - labels
+   zloss 是指在celoss之外, 再额外惩罚 logits 值的正向/负向漂移程度, 迫使 logits 值稳定. 原文PaLM里是加一个惩罚项 zloss = log(sum_e_X) ^ 2
+处理方法一仍然是 log-sum-exp 在 softmax 计算中的数值稳定作用. 但它只能保护 softmax 步骤: 若 logits 就出现blow up/overflow, 则无法避免数值崩溃. 所以要尽全力避免 logits 过大.
+处理方法二 z-loss 正是避免 logits 出现正向漂移(漂向+inf) / 全面负向漂移(漂向-inf), 迫使 logits 合理分布.
+
+详解zloss: 对于 logits X, zloss Z = log(sum_exp_X) ^ 2, 即 log-sum-exp of X 的 square
+首先, 它和 celoss 中的 lse 项 log{sum_e_(X-M)} 存在一个偏移关系: log(sum_exp_X) = M + log{sum_e_(X-M)}, 所以在一些融合算子实现的zloss内部, 会复用这个 lse 项.
+在非融合实现的zloss, 使用 torch.logsumexp(logits) 来计算 zloss(这个lse计算内部还是使用 max平移 来保证计算稳定性, 所以不用担心它的稳定性).
+其次, zloss 作为惩罚项, 是为了弥补 celoss 的一个弱点: celoss 只关注 logits 的相对分布, 但忽视了 logits 值的绝对值漂移倾向对训练的破坏作用:
+如果没有 zloss 只有 celoss, 那么 logits 的绝对值可能会发生漂移, 比如所有值都很大. 这种漂移可能对loss有正向作用, celoss也依旧能算, 但极大的logits值会压缩精度
+简而言之: celoss负责优化相对概率, 利用max-substraction忽略绝对大小, 保证优化方向正确; zloss负责约束绝对大小, 利用包含max的logsumexp Z, 防止logits漂移到数值不安全的区域
+最后, zloss 的优化动力学: 逼迫 log(sum_exp_X) ^ 2  --> 0, 即逼迫 sum_exp_X --> 1. 那么分析其优化过程:
+1. 逼迫每一项 exp_x_i <= 1 即 logits X 的每一项 x_i <= 0   ---> 直接杜绝了 logits 向正无穷漂移的可能性, 解决了正向漂移爆炸的问题
+2. 抑制全面负向漂移 即 logits X 的每一项 x_i 不能全都是 -100 这样的极端负数. 但是 logits 的相对分布不受影响: 依然可以表达近似one-hot的分布信息
+3. zloss对 logits 的抑制是平滑的: zloss 对 logits 求偏导, 得到偏导=2*log(sum_exp_X)*Prob(x_i), 所以 zloss 对高概率 logit 值的抑制作用要更大, 促使 高logit值以更大的动力被抑制.
+总而言之, zloss 促使 logits 的值分布在浮点硬件比较舒适的区域(最大值在 0 附近, 大概率小于0, 值不极端) ---> zloss 通过约束 sum_exp(logits) = 1, 抑制logits的漂移
+同时 zloss 对 logits 的相对分布没有影响: 相对分布依然是 celoss 发挥主要作用
+
+
+除此之外, 还可以给logits使用 高精度FP32 / 监控logits幅值 / soft-capping 等方法.
+其中 soft-capping on logits 指的是如下变换: logits <- soft_cap * tanh(logits/soft_cap)
+系数 soft_cap 在不同的 softmax 层不同: 在 attention 内取 50, 在 输出层 取 30. 此变换把 logits 限制在 [-soft_cap, soft_cap] 区间内.
+
+
+
+
+
+
+回顾 多头自注意力 MHA:
+训练/推理.prefill阶段(1次前向):
+X --W_q--> Q[B, L, H*d], X --W_k[B, L, H*d]--> K, X --W_v--> V[B, L, H*d], Q/K/V --reshape--> Q/K/V[B, H, L, d]
+Q @ K' --> logits[B, H, L, L] --softmax--> probs[B, H, L, L], probs @ V --reshape--> output[B, L, H*d] -->W_o--> output[B, L, H*d]
+计算量: 三个线性映射 3*B*2*L*D^2 = 6BLD^2, logits计算 2*B*H*L*d*L = 2BDL^2, softmax计算忽略, @V计算 2*B*H*L*L*d = 2BDL^2, 输出投影 2*B*L*D^2 = 2BLD^2
+总计: 8BLD^2 + 4BDL^2  --> 序列长度远大于模型宽度时, BDL^2 占主导; 模型宽度远大于序列长度时, BLD^2 占主导 --> L和D量级接近, 所以直接用 BLD^2 计算 
+存储量: 激活值 Q/K/V 分别占用 BLD, 激活值 logits/softmax 占用 BHL^2, 权重 W_qkvo 分别占用 D^2
+算术密度(忽略系数, 且L&D接近) = 计算量/存储量 = BLD^2 / (BLD + BHL^2 + D^2) = 1/( 1/D + HL/D^2 + 1/BL ) = 1/(1/Hd + 1/d + 1/BL) = 1/(1/k + 1/BL)
+即算术密度 = 1/(1/k + 1/BL)，这里 k 是一个正比于d的常数, B和L分别是指 batch_size 和 seq_len ---> 当 BL 更大时, 算术密度 也更大, 且往 k 逼近 ---> 能保证GPU一直跑
+
+
+推理.decode阶段(1次前向):
+X --W_q--> Q[B, 1, H*d], K_cache/V_cache[B, H, L, d]是直接读取的, Q --reshape--> Q [B, H, 1, d]
+Q @ K' --> logits[B, H, 1, L] --softmax--> probs[B, H, 1, L], probs @ V --reshape--> output[B, 1, H*d] -->W_o--> output[B, 1, H*d]
+计算量: 一个线性映射 B*2*1*D^2 = 4BD^2, logits计算 2*B*H*1*d*L = 2BDL, softmax计算忽略, @V计算 2*B*H*1*L*d = 2BDL, 输出投影 2*B*L*D^2 = 2BD^2
+总计: 6BD^2 + 4BDL --> L和D量级接近, 直接用 BD^2 计算
+存储量: 激活值 Q or KV 分别占用 BD or BLD, 激活值 logits/softmax 占用 BHL, 权重 W_qkvo 分别占用 D^2
+算术密度(忽略系数, 忽略logits) = BD^2 / (BLD + D^2) = 1 / (L/D + 1/B) ---> 当 B 更大时, 算术密度确实更大, 但是往 D/L 项逼近 ---> L越长, 计算密度越低
+
+---> 序列长度/上下文长度 限制了 decode 阶段的计算密度, 导致 GPU 经常跑不满(计算等待存储读取)
+
+
+拓展注意力计算 之 MQA: multi-query attention
+K 和 V 坍缩成 single head, 被所有 Q head 共享.  以此计算 推理.decode阶段的算术密度:
+计算量: BD^2 不变
+存储量: 激活值 Q / KV 分别占用 BD / BLd, 激活值 logits/softmax 占用 BHL, 权重 W_qkvo 分别占用 D^2 / d^2(qo前者, kv后者) --> 用 BD + BLd + D^2 计算
+算术密度(忽略系数, 忽略logits) = BD^2 / (BD + BLd + D^2) = 1 / (1/D + Ld/D^2 + 1/B) = 1 / (1/D + L/DH + 1/B) --> 往 DH/(L+H) 项逼近 --> 计算密度接近H倍提升
+
+拓展注意力计算 之 GQA: grouped-query attention
+K 和 V 坍缩成 num_kv_heads 个 head, 分别被 n_rep 个 Q head 共享( num_kv_heads*n_rep = H), 平衡推理阶段的算术密度和模型的表达能力
+
+
+
+稀疏注意力/滑动注意力:
+全context注意力计算 entire context: Q @ K' --> logits, which is [B, H, L, d] @ [B, H, L, d]' --> [B, H, L, L] causal 后就是下三角
+即 Q 作为 [L, d] 的矩阵, 与 K [L, d] 的矩阵 算出一个 [L, L] 的 logits 矩阵, 取因果下三角之后, 再softmax --> 最多有 L^2 次 QK 相关性计算, 需要存储 L^2 个结果值
+---> 涉及的计算复杂度 O(L^2), 存储复杂度 O(L^2)
+
+稀疏注意力 --> 是一种“算法逻辑”上的稀疏, 即结构化降低 Q/K 之间相关性计算次数, 而不是 "tensor 中0值较多" 的那种稀疏
+古早的结构化稀疏注意力:
+一: strided-sparse attention
+步长 k, 即意味着位置 i 的 token 由位置 i-k, i-2k, ... 生成
+例如for k = 2:
+  0  1  2  3  4  5  6
+0 a                  
+1 x  a               
+2 a  x  a            
+3 x  a  x  a         
+4 a  x  a  x  a      
+5 x  a  x  a  x  a   
+6 a  x  a  x  a  x  a
+通常来说会采用混合模式: sliding-window + strided, 即: 对于位置 i 的 token, 首先考虑相邻窗口 w 内: i-(w-1), ..., i. 然后考虑 strided: i-w, i-2w, ... 等
+
+
+二: block-sparse attention
+一般以 block_size = b, non-overlapping 地划分 序列长度 L 至 L/b = B 块. 用[B,B]形状的邻接矩阵, 而不是[L,L]形状的系数矩阵 来考虑 qk 之间的相互关系
+例如 B = 5:
+    B1  B2  B3  B4  B5
+B1  0/1 0/1 0/1 0/1 0/1      
+B2  0/1 0/1 0/1 0/1 0/1   
+B3  0/1 0/1 0/1 0/1 0/1   
+B4  0/1 0/1 0/1 0/1 0/1   
+B5  0/1 0/1 0/1 0/1 0/1   
+形成的[5,5]邻接矩阵是一个 0/1 矩阵, 其中 1 代表该行/列块相关, 而 0 代表该行/列块不相关. 比如 行B2 下的 列B4,B5 为 1, B1/2/3 都是 0, 那么代表
+q中的 B2 tokens 与 k 中的 B4/B5 tokens 执行相关性计算, 得到 logits, 而 B2 tokens 与 k 中其他 tokens 的 logits 直接就是 -inf
+---> 原本巨大的 [L, L]logits 矩阵计算, 变成了由 邻接矩阵指定的 多个 [b,b] logits 矩阵计算
+---> 每个 [b,b] logits 计算还要经过 causal 处理, 因为邻接矩阵不负责传递 causal, 同时也无法传递 block 内部的 causal
+---> 整体矩阵是稀疏的, 但是局部计算是稠密的: 多个 [b,b] 矩阵以连续存储的方式一次性加载到高速缓存并在tensor core执行. 效率极高
+
+显然 block-sparse attention 一需要编写特定的算子kernel而不是使用 matmul/sdpa, 二需要设计有效的邻接矩阵, 以兼顾模型能力和计算效率
+邻接矩阵设计模式:
+1. block-wise sliding-window / local band 模式: 对角线附近的带状区域, 目的是捕捉每一个token的局部上下文. 一般作为混合设计模式的基础存在
+    B1  B2  B3  B4  B5
+B1   1   1   0   0   0
+B2   1   1   1   0   0
+B3   0   1   1   1   0
+B4   0   0   1   1   1
+B5   0   0   0   1   1
+sliding-window 的工程实现极其高效: 直接通过 token position ID 就可以知道所属的 block, 以及作为语境需要的 blocks --> 确定性极高, 访问连续性极高
+
+2. global block / 全局块模式: 指定少数几个block, 让它们和所有block作相关性计算, 目的是充当信息枢纽, 让信息在整个序列中快速传递
+举例, 比如这里 块1 是 cls块, 那么让 q 里的 B1 和所有块作相关性计算, 同时让 q 所有的块与 k 里的 B1 作相关性计算
+    B1  B2  B3  B4  B5
+B1   1   1   1   1   1
+B2   1   1   1   0   0
+B3   1   1   1   1   0
+B4   1   0   1   1   1
+B5   1   0   0   1   1
+
+3. random / 随机块模式: q 里的每个块随机选择 r 个其他块进行连接, 目的是增加图的连通性 让信息能以更短的路径传播
+
+一般是混合模式: 以block-wise sliding window为基础, 让大部分计算集中在滑动窗口以保证局部语义, 少量全局block/token 负责长距离聚合, 少量随机连接保证鲁棒性
+注意在局部计算之后, 还要因果 causal 掩码, 即 if row_id > col_id then set to -inf 
+   --> 邻接矩阵是粗筛, 把规则外的块直接扔掉以省计算量, 块级优化. 实际上 flash-attn 在kernel内部会动态计算 window_end, 即即时判断下一个block是否需要读取
+       因果掩码是细筛, 保证token的因果逻辑, 块内细化
+
+
+
+block-sparse attention的优点:
+1.内存连续，GPU可以一次性加载block到SRAM / 2.tensor core举证乘法优化, 尽管整体稀疏, 但局部计算稠密 / 3.控制开销低因为控制逻辑是在block粒度执行
+实现效果 --> 线性计算复杂度/线性存储需求/通过全局块随机块实现长距离依赖/硬件高效, 但是 软件实现复杂/邻接矩阵需要人工设计/邻接矩阵的设计是固定的，没有动态性
+
+
+
+
+
+三: token-wise sliding-window attention
+窗口大小 w, 即意味着位置 i 的 token 由位置 i-(w-1), ..., i 生成
+例如for w = 3:
+  0  1  2  3  4  5  6
+0 a                  
+1 a  a               
+2 a  a  a            
+3 x  a  a  a         
+4 x  x  a  a  a      
+5 x  x  x  a  a  a   
+6 x  x  x  x  a  a  a
+token-wise sliding window 的设计思想非常直接, 但是它的工程实现实际是 block-wise sliding window高效近似 + token-level mask精细对齐
+因为对于单个 token i 取 w 个near-tokens 这种非规整的锯齿状读取 / 非连续内存读取gather & scatter, 是非常低效的. 因为此时 GPU核心在等待数据, 分支预测容易失败
+实际上具体实现是, 取 block_size <= window_size, 根据 window_size 确定每block至少该读取 若干个block 以完整覆盖 window, 然后在局部计算内部执行 token-level mask:
+if col_id > row_id(causal之外) or row_id - col_id > M(window之外), then set logits to -inf
+
+现代 flash-attn 框架:
+1. tiling: 将 QKV 切分成固定大小的 block
+2. scheduling: 对于每个 Q-block, 根据 window_size 计算需要遍历的 K-block 范围(保证完整覆盖)
+3. SRAM loading: 将这些 K-blocks 连续地从 HBM 拷贝到 SRAM(整块拷贝)
+4. masked matmul: 在SRAM中执行矩阵乘法, 在累加器中应用 token-level 的 causal/window 掩码 --> 那些"多算位置"的logits在累加之前就是-inf, 或者是在softmax的max/sum运算中被忽略
+---> 用少量冗余的 FLOPs 运算换取巨大的内存带宽节省和计算并行度提升
+
+
+
+模型的深度会给 sliding-window attention 自动带来感受野的扩大.

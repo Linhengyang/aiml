@@ -7,41 +7,35 @@
 * invoke function from `_jobs.py` to `main.py`, run `main.py` for official execution
 
 ## src:
-* core:  
-    * base: 
-        * tool:&nbsp;&nbsp;wrapped objects for specific purpose  
-        * functions:&nbsp;&nbsp;fundamental functions  
-    * design:&nbsp;&nbsp;macro designed pipeline   
+* core(torch code):
+    * layers:&nbsp;&nbsp;basic layers   
+    * blocks:&nbsp;&nbsp;network blocks   
+    * models:&nbsp;&nbsp;complete network   
     * loss:&nbsp;&nbsp;customized useful loss functions  
-    * nn_components:  
-        * meta_frames:&nbsp;&nbsp;frameworks  
-        * root_layers:&nbsp;&nbsp;nn layers  
-        * sub_modules:&nbsp;&nbsp;customized module blocks/bulks for projs
     * optim:&nbsp;&nbsp;customized optimizers 
-    * utils:&nbsp;&nbsp;data & algo & preprocess  
+    * data:&nbsp;&nbsp;data process  
+    * evaluation:&nbsp;&nbsp;evaluation tools  
+    * ...
 * kits:  
-    * huggingface:  &nbsp;&nbsp;utilities for adapting huggingface-style to custom-style
+    * huggingface:  &nbsp;&nbsp;utilities for adapting huggingface-style to self-developed
+    * ...
 * lib:  
     * share: &nbsp;&nbsp;shared cpp headers & files  
     * tokenizer:  &nbsp;&nbsp;cpp & cython files to boost tokenizer bpe train  
-* projs:  
-&nbsp;&nbsp;&nbsp;&nbsp;a complete proj needs to implement followings:  
-    * function
-    * dataset
-    * network
-    * trainer
-    * evaluator
-    * predictor
-    * optimizer
-    * loss
-    * configs
-    * _jobs
-* apps:  
-&nbsp;&nbsp;&nbsp;&nbsp;a complete application needs to implement followings:  
-    * functions
-    * configs
-    * _jobs
-
+* utils:
+    * text:&nbsp;&nbsp;tokenzier, preprocess, etc   
+    * image:&nbsp;&nbsp;image related   
+    * parquet:&nbsp;&nbsp;parquet format related   
+    * ...
+* projs:
+    * gpt2:   
+    * bert:   
+    * transformer:   
+    * ...
+* apps:
+    * rag:   
+    * bpe_build:
+    * ...
 
 ## Work Note:
 
@@ -71,60 +65,3 @@ _bin_dir = os.path.abspath(_bin_dir)
 if _bin_dir not in sys.path:
     sys.path.insert(0, _bin_dir)
 ```
----
-    aiml
-    ├── src
-    │   ├── core
-    │   │   ├── base
-    │   │   │   ├── compute
-    │   │   │   └── functions
-    │   │   ├── design
-    │   │   ├── loss
-    │   │   ├── nn_components
-    │   │   │   ├── meta_frames
-    │   │   │   ├── root_layers
-    │   │   │   └── submodules
-    │   │   ├── optim
-    │   │   │   └── torch_optim
-    │   │   └── utils
-    │   │       ├── common
-    │   │       ├── data
-    │   │       ├── file
-    │   │       ├── image
-    │   │       ├── system
-    │   │       └── text
-    │   ├── kits
-    │   │   └── huggingface
-    │   ├── lib
-    │   │   ├── share
-    │   │   └── tokenizer
-    │   ├── apps
-    │   │   ├── bpe_build
-    │   │   ├── semantic_segmentation
-    │   │   └── sentiment_analysis
-    │   └── projs
-    │       ├── bert
-    │       ├── gpt2
-    │       ├── transformer
-    │       └── vit
-    ├── ext
-    │   └── bpeboost
-    ├── bin
-    ├── tests
-    ├── README.md
-    ├── main.py
-    ├── test.py
-    artifact
-    ├── app
-    cache
-    ├── proj
-    model
-    ├── proj
-    logs
-    ├── app
-    tmp
-    ├── proj
-    tool
-    ├── database
-    └── hf_download.py
----

@@ -68,7 +68,9 @@ MLM部分的输出:
 上下句判断: Next Sentence Prediction(NSP)
     每一行样本取上下句, 50%的概率上下句在原文中相连, 50%的概率上下句在原文中不相连
     在样本句首添加代表位置的cls_token, 在encoder前向过程中, 由于cls_token与所有的tokens都经过了self-att运算, 所以它可以认为是「句向量」(两个sentences的综合)
-    用cls_token的embdding预测, 这一行样本是否代表相邻的两个sentences
+    用cls_token的 params, 这一行样本是否代表相邻的两个sentences
+    ---> cls token 的 params 是以 expand 的方式添加到 data 最左边, 而不是 repeat. 这意味着在模型训练中, 整个batch data的信息会综合到cls token params
+    这是因为 cls token 应该视作 参数 而不是 数据 来看待. 它应该是 sequence data的一个具备共性的特征提取器，在与data的交互计算中, 提取出了整个sequence的信息.
 
 NSP部分的输入:
     1. 每一个text pair的第一个位置cls_token的embedding: (batch_size, num_hiddens)

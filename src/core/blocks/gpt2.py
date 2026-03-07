@@ -29,10 +29,10 @@ class GPT2DecoderBlock(nn.Module):
                  use_rope:bool,
                  use_cached_causal_mask:bool):
         super().__init__()
-        self.layer_norm1 = nn.LayerNorm(embd_size)
+        self.layer_norm1 = nn.LayerNorm(embd_size, bias=use_bias)
         self.causal_attention = CausalSelfMHA(embd_size, num_heads, use_bias, max_context_size, attn_p_drop,
                                               resid_p_drop, use_rope, use_cached_causal_mask)
-        self.layer_norm2 = nn.LayerNorm(embd_size)
+        self.layer_norm2 = nn.LayerNorm(embd_size, bias=use_bias)
         self.gelu_ffn = gelu_ffn(embd_size, use_bias, resid_p_drop)
 
     def forward(self,

@@ -157,7 +157,7 @@ class gpt2Model(DecoderOnly):
                 config.use_rope,
                 config.use_cached_casual_mask) for _ in range(config.num_block)])
         
-        self.layer_norm_final = nn.LayerNorm(config.embd_size)
+        self.layer_norm_final = nn.LayerNorm(config.embd_size, bias=config.use_bias)
 
         # tied weight with embedding layer: 可以看作 隐藏状态和 token_embd 的语义相似度计算, 也可以视作 正则化手段防止过拟合
         self.head_tok = nn.Linear(config.embd_size, config.vocab_size, bias=False)
