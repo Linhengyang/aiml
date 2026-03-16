@@ -1,0 +1,12 @@
+根据 Dense LLM accounting 的结果, 线性运算占总运算的 90% 以上, 以线性运算计, 前向运算量 FLOPs = 2*参数量，反向运算量 FLOPs = 4*参数量
+也就是说, 训练运算量 FLOPs-train = 6*参数量, 推理运算量 FLOPs-infer = 2*参数量
+在经典的decoder架构中, attention部分参数量 P_attn : ffn部分参数量 P_ffn = 1:2，也就是说 FLOPs-ffn = 2/3 * FLOPs
+
+MoE LLM 就是把 大的FFN 部分改成多个 expert-FFN 网络, 每次运算只激活其中 top-k 个 export-FFN. 考虑 N 个专家, 每次激活 k 个.
+Params-active = Params-attn + k * Params-expert
+Params-total = Params-attn + N * Params-export
+
+在设计 MoE 模型时, 如果参考 经典decoder架构, Params-attn = 1/2 * k * Params-export, 即每次运算中, attn部分参数量 = 1/2 * ffn部分参数量
+故 active-ratio = (P_attn + k*P_expert) / (P_attn + N*P_expert) = (k/2 + k) / (k/2 + N) = 3k/(2N+k)
+
+---> 可以保持FLOPs的同时，增加exports数量, 以获得更多专业知识储存 ---> MoE 具备更好的效果
