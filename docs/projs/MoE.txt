@@ -9,4 +9,31 @@ Params-total = Params-attn + N * Params-export
 在设计 MoE 模型时, 如果参考 经典decoder架构, Params-attn = 1/2 * k * Params-export, 即每次运算中, attn部分参数量 = 1/2 * ffn部分参数量
 故 active-ratio = (P_attn + k*P_expert) / (P_attn + N*P_expert) = (k/2 + k) / (k/2 + N) = 3k/(2N+k)
 
----> 可以保持FLOPs的同时，增加exports数量, 以获得更多专业知识储存 ---> MoE 具备更好的效果
+---> 可以保持FLOPs的同时，增加exports数量, 以获得更多专业知识储存 ---> 相同激活参数量下，MoE 一般具备更好的效果
+---> 相同激活参数下（比如1.3B dense模型 vs 1.3B/6.9B MoE模型, 达到相同的效果（training loss/validation loss/HellaSwag等）所需的tokens/training time，
+     MoE模型只需dense模型的 1/3 - 1/2
+
+
+MoE模型可以实现独特的 token粒度-专家匹配，并在FFN部分作 数据流并行化 ---> Expert-Parallelism
+首先LLM pretrain必备DP模式：DP即 Data Parallelism，即 不同的 batch数据 交给 完全相同的model-optimizer副本，计算出不同的grad, all-reduce并执行相同的更新
+其次, MoE LLM 共享 attention 部分, 但是却将 FFN部分的不同专家并行部署在不同设备上.
+
+-->当每个设备完成各自的 attention 之后, 各自得到了不同batch的 tokens 激活值 [B, S, D]. 然后通过一个路由网络 router, 计算各自每个 token 应该去哪个设备
+   然后是 all-to-all dispatch: 即每台设备留下属于自己的tokens, 发送其他tokens去该去的设备，并接收来自其他设备、该自己计算的tokens，组装成 [N, D]数据
+   执行完 expert-parallel-FFN 之后是 all-to-all combine: 即将接收的tokens发送回原来的位置
+(Typically models are trained using data-parallelism where different machines will get different slices of the trainig/inference data.
+ The machines used for operating on the different slices of data can now be used to host many more model parameters)
+-->DP必然多机，多机必然总是可以host更多专家参数，而EP解决了专家并行的问题，从而吞吐量更高.
+
+--> MoE模型的效果一般更好：以Qwen系列为例, Qwen1.5-MoE-14.3B-A2.7B 的效果与 Qwen1.-7B 相当接近, 也就是说 MoE 以 2.7B 的激活参数打平 7B 激活参数的 Dense.
+
+--> MoE模型的缺点: 1. 训练不稳定，loss容易急剧上升最终发散
+
+
+
+MoE模型的真正不同之处：
+1. routing function 路由网络/方程
+
+2. expert size 专家大小
+
+3. traning objectives 训练目标
