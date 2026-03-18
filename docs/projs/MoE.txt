@@ -25,14 +25,19 @@ MoE模型可以实现独特的 token粒度-专家匹配，并在FFN部分作 数
  The machines used for operating on the different slices of data can now be used to host many more model parameters)
 -->DP必然多机，多机必然总是可以host更多专家参数，而EP解决了专家并行的问题，从而吞吐量更高.
 
---> MoE模型的效果一般更好：以Qwen系列为例, Qwen1.5-MoE-14.3B-A2.7B 的效果与 Qwen1.-7B 相当接近, 也就是说 MoE 以 2.7B 的激活参数打平 7B 激活参数的 Dense.
+--> MoE模型的效果一般更好：以Qwen系列为例, Qwen1.5-MoE-14.3B-A2.7B 的效果与 Qwen1.5-7B 相当接近, 也就是说 MoE 以 2.7B 的激活参数打平 7B 激活参数的 Dense.
 
---> MoE模型的缺点: 1. 训练不稳定，loss容易急剧上升最终发散
+--> MoE模型的缺点: 1. 训练不稳定，loss容易急剧上升最终发散  2. 模型更复杂, router/top_k 步骤是离散的，无法反传梯度以训练.需要特定的设计.
 
 
 
-MoE模型的真正不同之处：
+如何实现MoE并解决其缺点:
 1. routing function 路由网络/方程
+总共有 N 个设备, 对于 设备i 上的 L 个tokens: [B, L, D], 每个 token 都有 N 个潜在去处. 如何选择 device-token 之间的映射关系?
+主流方案：token 选择 expert --> 对每个设备的每个token, 计算top_k个最该去的expert, 并加权平均k个expert的结果
+非主流：expert 选择 token / 共同选择 等, 会存在严重的不可控和遗漏问题（比如有些token没有专家选等），必须引入复杂的兜底机制. 效果也没有 token-choose-expert 好
+
+
 
 2. expert size 专家大小
 
