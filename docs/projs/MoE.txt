@@ -32,11 +32,25 @@ MoE模型可以实现独特的 token粒度-专家匹配，并在FFN部分作 数
 
 
 如何实现MoE并解决其缺点:
-1. routing function 路由网络/方程
+一. routing function 路由网络/方程
 总共有 N 个设备, 对于 设备i 上的 L 个tokens: [B, L, D], 每个 token 都有 N 个潜在去处. 如何选择 device-token 之间的映射关系?
 主流方案：token 选择 expert --> 对每个设备的每个token, 计算top_k个最该去的expert, 并加权平均k个expert的结果
 非主流：expert 选择 token / 共同选择 等, 会存在严重的不可控和遗漏问题（比如有些token没有专家选等），必须引入复杂的兜底机制. 效果也没有 token-choose-expert 好
 
+routing variants(都不常见):
+hash routing: 执行一个 D -> 1 的 Hash 映射, 为每个 token 提供确定的 expert 执行 FFN
+rl routing: 用强化学习策略的办法, 为每个 token 提供 experts. router nn 输出一些 rl_loss 到 最终的 损失 上
+BASE routing: 用线性分配算法的办法，以最小化总成本为目标，求解一个 token-expert 匹配问题
+
+
+top_k routing: 用一个 D -> k 的小型网络, 为每个 token[,D] 计算 N 个 expert 的scores, 取 top_k 的 expert 执行 FFN
+具体而言：token_embd 与 N 个代表 expert 的 exprt_embd 分别作 相似性+softmax 计算, 截断 top_k (即top_k之外的都下取0) 得到 gating 权重, 然后将gating权重作为FFN的权重
+
+top_k router variants: 主要是在 top_k 的 k 个 expert 择取上做一些变动
+1. 专家细粒度拆分 fine-grained segmentation: 本来是 N 个 D->4D->D 的 FFN 中选 top_k, 将它们拆成 2N 个 D->2D->D 的 FFN 中选 top_2k, 此为 fine-grained segment
+2. 隔离共享专家 shared expert: 所有tokens都必然择取 shared expert, 以及另外择取 k-1 个 top experts
+--> 从 deepseek-MoE ablation 实验报告来看，专家拆分、以及共享专家，都对模型性能有帮助.
+--> 从 OlMoE ablation 实验报告来看，专家拆分对模型性能有帮助，而共享专家没有
 
 
 2. expert size 专家大小
