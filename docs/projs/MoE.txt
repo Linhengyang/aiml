@@ -54,9 +54,11 @@ top_k router variants: 主要是在 top_k 的 k 个 expert 择取上做一些变
 
 路由网络 router 离散选择带来的训练问题:
 attn(token, W_attn) -> act_token
-router(act_token, W_rout) -> ind_expert
-expert_ffn(act_token, W_ffn) | ind_expert -> act_ffn -> .. -> loss
+router(act_token, W_rout) -> signal_expert
+based on signal_expert, expert_ffn(act_token, W_ffn) -> act_ffn -> .. -> loss
 
+如果 signal_expert 是以mask/indicator等离散的形式参与 act_ffn, 那么 mask/indicator 对 signal_expert = router(act_token, W_rout) 的梯度是0,
+导致 loss 无法参与更新 W_rout --> 无法通过loss学会让router选择专家. 不过 W_ffn 和 W_attn 还是是可以得到更新的
 
 2. expert size 专家大小
 
