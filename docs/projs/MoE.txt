@@ -43,22 +43,44 @@ rl routing: 用强化学习策略的办法, 为每个 token 提供 experts. rout
 BASE routing: 用线性分配算法的办法，以最小化总成本为目标，求解一个 token-expert 匹配问题
 
 
-top_k routing: 用一个 D -> k 的小型网络, 为每个 token[,D] 计算 N 个 expert 的scores, 取 top_k 的 expert 执行 FFN
-具体而言：token_embd 与 N 个代表 expert 的 exprt_embd 分别作 相似性+softmax 计算, 截断 top_k (即top_k之外的都下取0) 得到 gating 权重, 然后将gating权重作为FFN的权重
+top_k routing: 用一个 D -> k 的小型策略: 为每个 token[,D] 计算 N 个 expert 的 signal, 取 top_k 的 expert 执行 FFN, 最后为每个 token 加权 expert_FFN 作为输出
 
-top_k router variants: 主要是在 top_k 的 k 个 expert 择取上做一些变动
+两个 top_k router variants变种: 主要是在 top_k 的 k 个 expert 择取上做一些变动
 1. 专家细粒度拆分 fine-grained segmentation: 本来是 N 个 D->4D->D 的 FFN 中选 top_k, 将它们拆成 2N 个 D->2D->D 的 FFN 中选 top_2k, 此为 fine-grained segment
 2. 隔离共享专家 shared expert: 所有tokens都必然择取 shared expert, 以及另外择取 k-1 个 top experts
 --> 从 deepseek-MoE ablation 实验报告来看，专家拆分、以及共享专家，都对模型性能有帮助.
 --> 从 OlMoE ablation 实验报告来看，专家拆分对模型性能有帮助，而共享专家没有
 
-路由网络 router 离散选择带来的训练问题:
+路由网络 router 如果生成的 signals 是离散选择, 那么会带来训练问题:
 attn(token, W_attn) -> act_token
 router(act_token, W_rout) -> signal_expert
 based on signal_expert, expert_ffn(act_token, W_ffn) -> act_ffn -> .. -> loss
 
 如果 signal_expert 是以mask/indicator等离散的形式参与 act_ffn, 那么 mask/indicator 对 signal_expert = router(act_token, W_rout) 的梯度是0,
 导致 loss 无法参与更新 W_rout --> 无法通过loss学会让router选择专家. 不过 W_ffn 和 W_attn 还是是可以得到更新的
+另外专家选择缺少负反馈机制 --> 导致大量token趋同性地选择相同的专家, 负载不均.
+
+
+
+router的训练问题的解决方法:
+原始方法(Gshard from Shazeer 2017): 软路由 soft routing
+token_embd 与 N 个代表 expert 的 exprt_embd 分别作 score(相似性) 计算, 截断 top_k (即top_k之外的都下取0) softmax计算得到gating稀疏, 然后将gating稀疏权重作为FFN的权重
+这里可以
+1.先对scores作softmax计算, 然后再取top_k稀疏 --> deepseek.V1/2
+2.先对scores作top_k稀疏(其余都取-inf), 再作softmax计算 --> deepseek.V3
+3.在训练时保留所有N个expert的scores并softmax, 作为expert权重, 也就是说在训练时不稀疏以换取极致的可微性. 推理时取top_k experts以换取稀疏性.
+
+
+主流方法(Switch transformer from Fedus 2022): 辅助均衡损失 balancing loss
+不通过主任务(task loss)来update router, 而是构建一个 balancing loss which can lead to update date router 来强行引导 router 均匀分配tokens
+这里可以
+1. 对于 Batch 内所有 T 个tokens, 可以计算 单个 token x 选择 专家 i 的概率 p_i(x)
+2. 将 选择专家i 的概率求平均, 即得到专家i 被选择的概率, 即 P_i = mean(p_i(token)) over all tokens
+3. 将 
+
+
+
+
 
 2. expert size 专家大小
 
