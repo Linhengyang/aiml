@@ -7,7 +7,18 @@
 #include "mt_pair_count_merge.h"
 #include "optional"
 
+// 匿名的命名空间, 等价于声明 静态存储 & 本文件私有
 namespace {
+    // thread_local 声明线程隔离变量
+
+    // std::optional<TYPE> 构建了一个 可空容器, 它:
+    /*
+    1. 允许空构造(类似空指针)
+    2. 具备 .has_value() 方法以判断 容器是否为空
+    3. 具备 .emplace() 方法以从空构建对象(调用类的构造函数)
+    4. 具备 .value() / .value_or() 方法以取出容器内的对象
+    5. 重载了 * 和 -> 操作符, 使得可以用指针的语法作用在容器上, 解引用 或 调用方法
+    */
     thread_local std::optional<mempool> tls_pool;
 
     thread_local counter_st* counter_tls = nullptr;
@@ -24,6 +35,7 @@ extern "C" {
 void init_tls_pool(size_t block_size, size_t alignment) {
     /* 初始化 thread-local-storage 内存池 */
     if (!tls_pool.has_value()) {
+        // optional<TYPE> 对象具有 .emplace 方法, 以触发 TYPE 的构造函数
         tls_pool.emplace(block_size, alignment);
     }
 }
@@ -33,6 +45,7 @@ mempool& get_tls_pool() {
     if (!tls_pool.has_value()) {
         throw std::runtime_error("thread-local memory pool not initialzied.");
     }
+    // optional<TYPE> 重写了 * 和 -> 方法, 使得在语法上可以像指针一样 解引用 / 调用方法
     return *tls_pool;
 }
 

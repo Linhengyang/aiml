@@ -1,0 +1,207 @@
+根据 Dense LLM accounting 的结果, 线性运算占总运算的 90% 以上, 以线性运算计, 前向运算量 FLOPs = 2*参数量，反向运算量 FLOPs = 4*参数量
+也就是说, 训练运算量 FLOPs-train = 6*参数量, 推理运算量 FLOPs-infer = 2*参数量
+在经典的decoder架构中, attention部分参数量 P_attn : ffn部分参数量 P_ffn = 1:2，也就是说 FLOPs-ffn = 2/3 * FLOPs
+
+MoE LLM 就是把 大的FFN 部分改成多个 expert-FFN 网络, 每次运算只激活其中 top-k 个 export-FFN. 考虑 N 个专家, 每次激活 k 个.
+Params-active = Params-attn + k * Params-expert
+Params-total = Params-attn + N * Params-export
+
+在设计 MoE 模型时, 如果参考 经典decoder架构, Params-attn = 1/2 * k * Params-export, 即每次运算中, attn部分参数量 = 1/2 * ffn部分参数量
+故 active-ratio = (P_attn + k*P_expert) / (P_attn + N*P_expert) = (k/2 + k) / (k/2 + N) = 3k/(2N+k)
+
+---> 可以保持FLOPs的同时，增加exports数量, 以获得更多专业知识储存 ---> 相同激活参数量下，MoE 一般具备更好的效果
+---> 相同激活参数下（比如1.3B dense模型 vs 1.3B/6.9B MoE模型, 达到相同的效果（training loss/validation loss/HellaSwag等）所需的tokens/training time，
+     MoE模型只需dense模型的 1/3 - 1/2
+
+
+MoE模型可以实现独特的 token粒度-专家匹配，并在FFN部分作 数据流并行化 ---> Expert-Parallelism
+首先LLM pretrain必备DP模式：DP即 Data Parallelism，即 不同的 batch数据 交给 完全相同的model-optimizer副本，计算出不同的grad, all-reduce并执行相同的更新
+其次, MoE LLM 共享 attention 部分, 但是却将 FFN部分的不同专家并行部署在不同设备上.
+
+-->当每个设备完成各自的 attention 之后, 各自得到了不同batch的 tokens 激活值 [B, S, D]. 然后通过一个路由网络 router, 计算各自每个 token 应该去哪个设备
+   然后是 all-to-all dispatch: 即每台设备留下属于自己的tokens, 发送其他tokens去该去的设备，并接收来自其他设备、该自己计算的tokens，组装成 [N, D]数据
+   执行完 expert-parallel-FFN 之后是 all-to-all combine: 即将接收的tokens发送回原来的位置
+(Typically models are trained using data-parallelism where different machines will get different slices of the trainig/inference data.
+ The machines used for operating on the different slices of data can now be used to host many more model parameters)
+-->DP必然多机，多机必然总是可以host更多专家参数，而EP解决了专家并行的问题，从而吞吐量更高.
+
+--> MoE模型的效果一般更好：以Qwen系列为例, Qwen1.5-MoE-14.3B-A2.7B 的效果与 Qwen1.5-7B 相当接近, 也就是说 MoE 以 2.7B 的激活参数打平 7B 激活参数的 Dense.
+
+--> MoE模型的缺点: 1. 训练不稳定，loss容易急剧上升最终发散  2. 模型更复杂, router/top_k 步骤是离散的，无法反传梯度以训练.需要特定的设计.
+
+
+
+如何实现MoE并解决其缺点:
+一. routing function 路由网络/方程
+总共有 N 个设备, 对于 设备i 上的 L 个tokens: [B, L, D], 每个 token 都有 N 个潜在去处. 如何选择 device-token 之间的映射关系?
+主流方案：token 选择 expert --> 对每个设备的每个token, 计算top_k个最该去的expert, 并加权平均k个expert的结果
+非主流：expert 选择 token / 共同选择 等, 会存在严重的不可控和遗漏问题（比如有些token没有专家选等），必须引入复杂的兜底机制. 效果也没有 token-choose-expert 好
+
+routing variants(都不常见):
+hash routing: 执行一个 D -> 1 的 Hash 映射, 为每个 token 提供确定的 expert 执行 FFN
+rl routing: 用强化学习策略的办法, 为每个 token 提供 experts. router nn 输出一些 rl_loss 到 最终的 损失 上
+BASE routing: 用线性分配算法的办法，以最小化总成本为目标，求解一个 token-expert 匹配问题
+
+
+top_k routing: 用一个 D -> k 的小型策略: 为每个 token[,D] 计算 N 个 expert 的 signal, 取 top_k 的 expert 执行 FFN, 最后为每个 token 加权 expert_FFN 作为输出
+
+两个 top_k router variants变种: 主要是在 top_k 的 k 个 expert 择取上做一些变动
+1. 专家细粒度拆分 fine-grained segmentation: 本来是 N 个 D->4D->D 的 FFN 中选 top_k, 将它们拆成 2N 个 D->2D->D 的 FFN 中选 top_2k, 此为 fine-grained segment
+2. 隔离共享专家 shared expert: 所有tokens都必然择取 shared expert, 以及另外择取 k-1 个 top experts
+--> 从 deepseek-MoE ablation 实验报告来看，专家拆分、以及共享专家，都对模型性能有帮助.
+--> 从 OlMoE ablation 实验报告来看，专家拆分对模型性能有帮助，而共享专家没有
+
+路由网络 router 如果生成的 signals 是离散选择, 那么会带来训练问题:
+attn(token, W_attn) -> act_token
+router(act_token, W_rout) -> signal_expert
+based on signal_expert, expert_ffn(act_token, W_ffn) -> act_ffn -> .. -> loss
+
+如果 signal_expert 是以mask/indicator等离散的形式参与 act_ffn, 那么 mask/indicator 对 signal_expert = router(act_token, W_rout) 的梯度是0,
+导致 loss 无法参与更新 W_rout --> 无法通过loss学会让router选择专家. 不过 W_ffn 和 W_attn 还是是可以得到更新的
+另外专家选择缺少负反馈机制 --> 导致大量token趋同性地选择相同的专家, 负载不均.
+
+
+
+router的训练问题的解决方法:
+原始方法(Gshard from Shazeer 2017): 软路由 soft routing
+token_embd 与 N 个代表 expert 的 exprt_embd 分别作 score(相似性) 计算, 截断 top_k (即top_k之外的都下取0) softmax计算得到gating稀疏, 然后将gating稀疏权重作为FFN的权重
+这里可以
+1.先对scores作softmax计算, 然后再取top_k稀疏 --> deepseek.V1/2
+2.先对scores作top_k稀疏(其余都取-inf), 再作softmax计算 --> deepseek.V3
+3.在训练时保留所有N个expert的scores并softmax, 作为expert权重, 也就是说在训练时不稀疏以换取极致的可微性. 推理时取top_k experts以换取稀疏性.
+
+
+
+主流方法(Switch transformer from Fedus 2022): 辅助均衡损失 balancing loss
+不通过主任务(task loss)来update router, 而是构建一个 balancing loss which can lead to update date router 来强行引导 router 均匀分配tokens
+考虑某一层 Layer 共 N 个专家部署在 多块GPU上, 这里应该是:
+1. 对于 Batch 内所有 T 个tokens, 可以计算 单个 token x 选择 专家 i 的概率 p_i(x): [T, d_model] --router--> gates[T, N]
+2. 通过全局(all GPUs) 将 选择专家i 的概率求平均, 即得到专家i 被选择的概率, 即 P_i = mean(p_i(token)) over all tokens
+3. 通过全局(all GPUs) 将 选择专家i 的事实indicator求频率, 即得到专家i 被选择的频率（被top_k选择也一样）, 即 f_i = mean(indicator(token chose expert i)) over all tokens
+用 f_i 和 P_i 构建具备负反馈能力的 aux balancing loss, 其中 f_i 作为常数权重无可微参数, P_i 仅含router参数(detach掉tokens) 可微 可被引导调整router权重以平衡负载
+经典的 L_bal_global_of_one_layer = alpha * N * sum_over_N_experts(f_i * P_i)，则前向的最终 loss = L_task + sum of L_bal_global_of_one_layer of all layers
+这里 L_task 对于不同 DP Batch 是不同的, 但 L_bal_global_of_one_layer 由于是各层router的全局aux loss, 所以它是层内DP一致的 --> 某层不同DP Batch下的router会得到相同的更新
+
+--> 这个点积具备负反馈能力: 当专家i的实际负载很高时(f_i很大), 梯度下降会迫使router降低P_i, 即降低专家i的评分, 从而推流量给其他专家, 迫使专家分配平衡
+--> 辅助损失梯度作用专一：f_i作为无参常数, P_i由仅含router参数的softmax产出, 可微但不会传导梯度到router之外的权重 --> aux balancing loss 仅仅用来更新该层的router
+--> 全局聚合：某层所有设备上的router都接收到全局一致的负载不均信号（而不是设备本地的），并朝着一个方向更新权重
+--> 显然 aux balancing loss 是一种间接学习: router并没有学习哪个专家适合哪个token, 而是学如何让所有专家都能处理token. 而专家的处理能力则交给专家网络在主任务中学
+    这种“强制平衡”同时解决了“路由器不知道落选的专家是不是更好”的问题：因为负载均衡压力，router会主动尝试把token分配给用得少的专家
+--> 预防拥塞：aux balancing loss 公式使用的 fi 是路由决策后的比例(即top_k选中后的比例)，旨在预防拥塞，而不是事后统计每个expert的实际处理统计量.
+
+总结 aux balancing loss for N experts with top_K policy:
+L_aux = 0
+
+for layer_l in layers:
+    total_nums = 0
+    experts_probs = zeros_like(N) [N,]
+    experts_freqs = zeros_like(N) [N,]
+
+    for batch_data in parallel_data_batches:
+        // batch_tokens = ATTN(batch_data) [T, d_model]
+        expert_gates = ROUTER_layer_l(batch_tokens.detach()) [T, N] // token选择各个expert的估测概率
+        tokens_choice = TOP_K_SELECTION(expert_gates).detach() [T, K]
+        
+        experts_probs += expert_gates.mean(dim=0) [N,]
+        experts_freqs += tokens_choice.flatten().bincount(minlength=N) [N,]
+        total_nums    += T*K
+        
+        // pre-train task
+        L_task_batch = ...
+    
+    global_freqs = experts_freqs / total_nums     // 频率是各个专家的总选择次数/全部选择次数
+    gloabl_probs = experts_probs / (total_nums/K) // 概率是各个专家的总token选择概率/token总个数
+    Loss_aux_global = alpha * N * global_freqs @ gloabl_probs
+
+L_aux += Loss_aux_global
+L = L_task_batch + L_aux // L_task_batch is specific for different devices, L_aux is same for different devices
+
+olMOE显示, balancing loss在训练中可以显著降低 task training loss / validation loss 等
+而且若没有 balancing loss大部分token都会被其中几个专家处理, 严重负载不均
+DeepSeek甚至在 per-expert balancing 之外, 更增加了一个 per-device balancing: 用类似的方法给 device(其实就是专家组)计算 aux-balancing loss, 一起来更新router
+具体是先选择top_m device, 再从这些devices内选top_k experts.
+DeepSeek-V3还有一些小变动, 比如 aux-loss-free: per-expert bias: 每个expert的“基础吸引力分数”。它通过主动设置, 可以在训练冷启动阶段强制流量, 帮助破冰.
+--> DeepSeek-V3对于 expert-bias 的更新不是通过 aux balancing loss 的反向传播, 而是通过类似 PID 的 online-learning 方式, 根据当前 batch-expert 的负载统计, 在每个step
+直接根据负载偏差修正 bias: 计算专家的实际负载 Load, 计算专家的目标负载 Target, 直接启发式更新 bias <- bias - ida * (Load - Target), 然后用更新后的bias作前向/反向
+好处:
+1.可能可以移除aux balancing loss, 让router无需学习负载均衡, 只需学习语义匹配, 提升模型精度 --> aux-loss free
+2. online-learning可以在 batch单次前向内 就快速响应token路由负载均衡，更灵活地应对数据分布的剧烈波动
+
+
+
+
+废弃方法(Shazeer 2017/Fedus 2021, removed by Zoph 2022): router随机扰动 stochastic perturbation/jitter
+训练时router的logits添加随机噪声, 打破对称性强制router去探索, 确保了每个专家在早期都有机会接收到token以开始优化学习特征,延缓马太效应. 再float32_softmax(for数值稳定)
+后来由于以下原因被废弃:
+1. aux balancing loss已经足够强大精细, 确定性的梯度惩罚远比随机的噪声扰动更高效直接.
+2. 噪声引入使得收敛速度变慢，集群调试不方便
+在以下特殊场景, 噪声扰动仍然有效：
+1.训练初期严重路由坍塌 router collapse(大部分tokens去了少数几个专家，且aux loss拉不回来). 此时可以临时开启一个噪声jitter
+2.top-1 routing 且expert 数量极其巨大时，偶尔会保留噪声
+
+
+
+
+
+
+
+MoE 对 AI system的影响:
+MoE expert-parallelism 带来了 Data-parallelism 和 Model-parallelism(pipeline/tensor-parallelism) 之外的并行维度
+首先要明确一点：EP是跟着DP走的，EP是DP的衍生：DP是不同batch走向了相同权重，EP是不同batch走向了不同但会有all-to-all dispatch/combine以共享使用的权重
+
+DP: 不同的data_batch作用在相同的weight_replica上
+不同的data_batch --> 相同的weight_replica --> 不同的grad_batch --> 相同的grad_reduced --> 相同的weight_replica更新
+
+MP：同一个model_weight分布在多个device上，包括PP和TP两种基本形式
+同一个data_batch --> 同一个model_weight, 但是前向/反向里activation/grad流经不同的device --> 同一个grad_batch --> 同一个model_weight更新
+
+DP&MP：多个相同的weight_replica各自分布在多个device上，不同data_batch作用在这些weight_replica上
+不同的data_batch --> 相同的weight_replica, 但是前向/反向里activation/grad流经各自的device group --> 不同的grad_batch --> 相同的grad_reduced
+
+EP: DP的衍生，只是weight_replica不再是完全相同的复制品, 专家部分不同, 不同的data_batch因为有all-to-all通信所以还是可以共享
+不同的data_batch --> 部分相同部分不同的weight_replica_expert_specific --> router all-to-all通信, 得到不同的grad_batch, 相同的grad_router --> 相同的grad_reduced
+
+EP&DP&MP：多个 weight_replica_expert_specific 各自分布在多个device上，不同的data_batch作用在这些 weight_replica_expert_specific 上
+不同的data_batch --> 部分相同部分不同的weight_replica_expert_specific, 但是前向/反向里activation/grad流经各自的device group -->
+router all-to-all通信, 得到不同的grad_batch, 相同的grad_router --> 相同的grad_reduced
+
+
+
+
+MoE 对 AI compute的影响：
+token_a @ expert_A: [T, d_model] @ [d_model, d_hidden]
+token_b @ expert_B: [T, d_model] @ [d_model, d_hidden]
+token_c @ expert_C: [T, d_model] @ [d_model, d_hidden]
+可以使用 block-diagnal-matrix-multiplication 规约成一个 稀疏的 MM:
+token_a_b_c @ expert_A_B_C: [3T, d_model] @ [d_model, 3d_hidden] 取对角三个blocks[T, d_hidden], 即为等价的三次MM
+甚至可以是 block-sparse-matrix-multiplication 支持不同batch_size的token和不同大小的expert_size
+[T_a+T_b+T_c, d_model] @ [d_model, d_hidden_A+d_hidden_B+d_hidden_C] 取三个sparse blocks [T_a, d_hidden_A] [T_b, d_hidden_B] [T_c, d_hidden_C]
+--> MegaBlocks 库就是专为 MoE 中此类 sparse-MM 加速而创建的:
+    dMoE(MegaBlocks) 通过 padding 和 block-sparse-MM 处理, 将“动态路由"转化为“静态稀疏矩阵乘法”，不需要丢弃溢出的token，去掉了 expert-capacity_factor和动态控制
+--> 传统MoE存在 capacity_factor of expert，要丢弃溢出的token；有动态的批处理控制流
+
+--> 专家负载上限 expert capacity: 当某个专家接收到过多tokens时，会依据其capacity丢弃溢出的tokens. 这些dropped tokens会跳过该层的expert-ffn，
+    直接进入下一层，亦或者是进入shared dense ffn
+    --> dropped tokens对expert-ffn没有梯度回传, 对attention还是有梯度回传, 对router是有梯度回传(通过aux balancing loss的实际负载频率fi惩罚过高的专家分配)
+    --> expert-capacity-drop 在 batch-level 带来额外的随机性. 一般来说训练时设置此capacity最初是为了惩罚额外的负载不均, 推理时一般不引入expert-capacity
+
+
+
+
+Router网络的稳定性问题:
+由于router网络中涉及softmax计算, 而softmax计算对精度误差比较敏感（softmax存在 max-substraction 机制, 这会凸显出误差roundoff error），所以
+1. router网络一般使用float32精度, 或者计算logits后、计算softmax之前把logits用float32精度表示
+2.一般给router网络增加 辅助z-los 以促使 logits 合理分布在 机器精度比较舒服 的值域范围内
+
+
+
+
+MoE 的训练(续train):
+SFT:
+MoE的 小数据集Fine-Tuning 极容易overfit. 主要原因除了路由导致专家接收到的token样本数量格外少、冷门专家容易被噪声剧烈调整权重外, 有一个MoE独有的过拟合形式:
+路由崩溃: router发现某些专家处理小数据集里的某种pattern特别有效, 导致专家负载极度不均衡
+处理办法: 1.冻结专家, 只微调router和attention; 2.加大正则化力度; 3. 加大负载均衡损失，强迫专家平衡; 4. LoRA/数据增强等常规手段
+
+Upcycling:
+MoE可以从 dense 模型 upcycling 而来: 
+MoE 的 initialization from dense: 将一个 original dense block, 其 MLP(FFN) 部分换成 router(from scratch) + N MLP-copies + weighted_reduce
