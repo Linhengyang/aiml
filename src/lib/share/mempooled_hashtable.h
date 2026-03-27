@@ -64,7 +64,7 @@ private:
         if (!_table) throw std::bad_alloc();
     }
 
-    // 释放节点指针数组，相当于 vector.clear(). 但节点内存并没有释放，由mempool管理
+    // 释放节点指针数组(位于堆内存)，相当于 vector.clear(). 但节点内存(位于内存池)并没有释放，由mempool管理
     void free_table_ptrs() noexcept {
         std::free(_table);
         _table = nullptr;
