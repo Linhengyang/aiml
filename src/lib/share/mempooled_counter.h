@@ -66,7 +66,7 @@ public:
     */
     void increment(const TYPE_K& key) {
         // C++ 的lambda表达式: uint64_t& 表示 lambda function 需要个该类型的参数, []表示lambda函数体内没用到其他变量
-        // 若[&], 表示lambda函数体内涉及到的其他变量, 以引用的方式传入; 若[=], 表示以值得方式传入
+        // 若[&], 表示lambda函数体内涉及到的其他变量, 以引用的方式传入; 若[=], 表示以值的方式传入
         // C++的lambda表达式: 显示定义一个函数  std::function<void(int&)> f = [](int& x) {x+=1;};
         // 这里 void 是 return type, int& 是input arg type. 这里 f 是一个左值. 如果省去 std::function声明部分, 那就是右值
         // 这里 [](auto& value) { value += 1;} 就是一个右值临时函数, 意思是引用 value 并变化它的值.
