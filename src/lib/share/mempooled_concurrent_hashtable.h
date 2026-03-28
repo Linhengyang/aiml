@@ -23,7 +23,7 @@
 #include <atomic>
 #include <cstring>
 #include <new>
-
+#include <stdexcept>
 
 constexpr size_t next_pow2(size_t x) {
     if (x <= 1) return 1;
@@ -523,7 +523,7 @@ public:
             while (head) {
                 if (head->key == key) {
 
-                    value = cur->value;
+                    value = head->value;
                     parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
                     head->next = nullptr; // 置空 head 的 next以防止非法访问
 
@@ -573,7 +573,7 @@ public:
         }
         
         // 如果执行到这里, 说明从 head 遍历到 nullptr 都没能查找到 key. 那么这个是不应该的: key-hash在此index
-        throw std::runtime_error("Error in hashtable pop");
+        throw std::runtime_error("Error in concurrent hashtable pop");
     }
 
     void clear() {

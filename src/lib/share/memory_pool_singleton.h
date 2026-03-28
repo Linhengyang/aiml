@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <memory>
+#include <stdexcept>
 #include "memory_block.h"
 
 

@@ -17,6 +17,7 @@
 #include <cstring>
 #include <vector>
 #include <new>
+#include <stdexcept>
 
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
 class pooled_hashtable {
@@ -360,7 +361,7 @@ public:
         while (head) {
             if (head->key == key) {
 
-                value = cur->value;
+                value = head->value;
                 parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
                 head->next = nullptr; // 置空 head 的 next以防止非法访问
 
