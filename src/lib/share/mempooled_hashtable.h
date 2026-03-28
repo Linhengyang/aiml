@@ -1,4 +1,7 @@
 // mempooled_hashtable.h
+// 哈希表的 node* 指针数组适合放在内存池外, 而 nodes 适合放在内存池里
+// 这是因为 哈希表涉及到扩容(rehash), 而扩容后旧数组若在内存池里, 则无法回收复用(内存池reset之前). 放在系统内存则可以由系统立即回收复用.
+
 // 内存池上的哈希表由两部分组成: nodes 和 buckets(链表头node指针数组). 其中 nodes 类型是 HashTableNode, 在insert时逐一分配在内存池上
 // 而 buckets 类型是指针数组, 分配在内存池之外, 由创建方式分配内存, 即:
 // 方法1: HashTable* map = new HashTable(capacity, &mempool); 此时 buckets 分配在 堆内存 上, 由new/delete手动管理哈希表的生命周期
