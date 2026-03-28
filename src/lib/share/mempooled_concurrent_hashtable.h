@@ -22,7 +22,8 @@
 #include <mutex>
 #include <atomic>
 #include <cstring>
-
+#include <new>
+#include <stdexcept>
 
 constexpr size_t next_pow2(size_t x) {
     if (x <= 1) return 1;
@@ -73,7 +74,7 @@ private:
         TYPE_K key;
         TYPE_V value;
         HashTableNode* next;
-        HashTableNode* gc_next = nullptr;
+        HashTableNode* free_next = nullptr;
         HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
     };
     
@@ -86,7 +87,7 @@ private:
     // _capacity 的修改 必须在 表级写锁下, 这保证了它的线程安全性, 以及“同一把表级写锁在线程之间的内存同步性”，故不需要引入原子类型
     size_t _capacity;
 
-    const float _max_load_factor = 0.80f;
+    const float _max_load_factor = 0.75f;
 
     // _size的修改 存在并发写入的可能(不同条带/桶), 故 _size 类型需要引入原子类型
     std::atomic<size_t> _size{0};
@@ -110,8 +111,11 @@ private:
         _table = nullptr;
     }
 
-    // gc 链表: 链起所有node. gc链表 的修改 存在并发写入的可能(不同条带/桶), 故 gc链表 类型需要引入原子类型
-    std::atomic<HashTableNode*> _all_nodes_head{nullptr};
+    // gc链表 --> 已废弃
+    // std::atomic<HashTableNode*> _all_nodes_head{nullptr};
+
+    // 空闲 free 链表: 链起所有 析构后的 poped nodes. 其修改 存在并发写入的可能(不同条带/桶), 故需要引入原子类型
+    std::atomic<HashTableNode*> _free_nodes_head{nullptr};
 
     // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index类型要与 _capacity 类型对齐, 因为它是 hash成员函数的输出 取_capacity余
     // 要么给 _occuped_indices 另外加一个 锁, 要么去掉. 选择 去掉 _occupied_indices
@@ -145,16 +149,18 @@ private:
     void rehash(size_t new_capacity) {
         // rehash 的调用在 insert 里，调用前会加 独占表锁, 故这里不再加独占表锁避免死锁
 
+        // 初始化一个新的 table
         HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
         if (!_new_table) throw std::bad_alloc();
         
-        // 新的非空桶列表
+        // 新的非空桶列表 --> 废弃
         // std::vector<size_t> _new_occupied_indices;
         // _new_occupied_indices.reserve(_occupied_indices.size());
 
-        // 新的gc链表(仅地址, 将用 .store 原子操作移植到 _all_nodes_head)
-        HashTableNode* _new_all_nodes_head = nullptr;
+        // // 新的gc链表(仅地址, 将用 .store 原子操作移植到 _all_nodes_head)  --> 废弃
+        // HashTableNode* _new_all_nodes_head = nullptr;
 
+        // 重新计算 _size, 为缩容式 rehash 留下余地. 不过缩容式rehash必要性不大: 避免频繁rehash
         size_t actual_node_count = 0;
 
         // 遍历 _table 所有元素. _table 是通过 std::calloc 分配的指针地址, 无法用 range-for 的方式来遍历. 必须通过 index
@@ -163,20 +169,24 @@ private:
 
             HashTableNode* curr = _table[old_index];
             while (curr) {
-                HashTableNode* next = curr->next;
-                size_t new_index = hash(curr->key) % new_capacity;
-                // const bool was_empty = (_new_table[new_index] == nullptr);
+                HashTableNode* next = curr->next; // 先取出next node
+                size_t new_index = hash(curr->key) % new_capacity; // 计算得出新bucket
+
+                // const bool was_empty = (_new_table[new_index] == nullptr); --> 废弃
 
                 // 头插到新桶
-                curr->next = _new_table[new_index];
-                _new_table[new_index] = curr;
+                curr->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
+                _new_table[new_index] = curr; // 更新确认新bucket的链表头
 
-                // // 若空桶->非空, 记录
+                // // 若空桶->非空, 记录 --> 废弃
                 // if (was_empty) _new_occupied_indices.push_back(new_index);
 
-                // 头插到新的gc链表
-                curr->gc_next = _new_all_nodes_head;
-                _new_all_nodes_head = curr;
+                // // 头插到新的gc链表 --> 废弃
+                // curr->gc_next = _new_all_nodes_head;
+                // _new_all_nodes_head = curr;
+
+                // _free_nodes_head 不需要变动
+
                 // 更新计数
                 ++actual_node_count;
 
@@ -190,8 +200,9 @@ private:
         _capacity = new_capacity;
         _size.store(actual_node_count, std::memory_order_relaxed);
         _resize_threshold.store(static_cast<size_t>(new_capacity * _max_load_factor), std::memory_order_relaxed); // 更新 下一次 rehash 的 size 阈值
-        // _occupied_indices.swap(_new_occupied_indices);
-        _all_nodes_head.store(_new_all_nodes_head, std::memory_order_relaxed);
+        // _occupied_indices.swap(_new_occupied_indices); --> 废弃
+        // _all_nodes_head.store(_new_all_nodes_head, std::memory_order_relaxed); --> 废弃
+        // _free_nodes_head 不需要变动
     }
 
 
@@ -229,7 +240,7 @@ public:
     }
 
     bool get(const TYPE_K& key, TYPE_V& value) {
-        // 并发读: 此操作(get)不独占表锁
+        // 并发锁: 此操作(get)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
         if (_capacity == 0 || !_table) return false;
@@ -248,8 +259,16 @@ public:
         return false;
     }
 
+    /*
+    * 插入或更新键值对
+    * @param key
+    * @param value
+    * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
+    * 
+    * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
+    */
     bool insert(const TYPE_K& key, const TYPE_V& value) {
-        // 并发读: 此操作(insert)不独占表锁
+        // 并发锁: 此操作(insert)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
         
         if (_capacity == 0 || !_table) return false;
@@ -265,19 +284,62 @@ public:
                     return true;
                 }
             }
-            // const bool was_empty = (_table[index] == nullptr);
-            void* raw_mem = _pool->allocate(sizeof(HashTableNode));
-            if (!raw_mem) return false;
 
-            HashTableNode* new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+            // 如果执行到这里, 说明要么 _table[index] 是 nullptr, 要么 _table[index] 链表里没有 key
+
+            // const bool was_empty = (_table[index] == nullptr); 记录 _table[index]是否为空. _occupied_indices已经废弃
+
+            // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
+            HashTableNode* new_node = nullptr;
+            
+            // 首先复用 _free_nodes_head 里的地址. _free_nodes_head 是全局变量, 要考虑并发安全
+            // 单线程版本
+            /*
+            new_node = _free_nodes_head; // 获取第一个空闲地址
+            _free_nodes_head = std::launder(new_node)->free_next; // 更新空闲列表
+            */
+            while (_free_nodes_head.load(std::memory_order_relaxed) != nullptr) { 
+                // 尝试从 free list 中复用: 获取 _free_nodes_head(relaxed表示无同步成本)
+                HashTableNode* curr_head = _free_nodes_head.load(std::memory_order_relaxed);
+
+                if (_free_nodes_head.compare_exchange_weak(
+                    curr_head, std::launder(curr_head)->free_next,
+                    std::memory_order_acquire, std::memory_order_relaxed)
+                ) {
+                    // 语义: curr_head 是 全局变量 _free_nodes_head 尝试读到的旧值. 对比这个全局变量和旧值
+                    // 如果一致, 那么执行全局变量更新为 free_next(do 中算出来的新值); 如果不一致, 循环尝试再取一次全局变量, 直到重试成功
+
+                    // std::memory_order_acquire: 消费者(读操作)内存序, 代表CPU保证 --> 共享变量在执行该内存序操作后的所有指令, 必须不能重排到该内存序前面
+                    // 代表一种消费者逻辑: 必须先acquire东西再消费. 这里 insert 函数对 全局变量_free_nodes_head而言就是消费者: 它消费_free_nodes_head上的空闲地址
+
+                    // CAS 成功, 获取到的空闲列表头地址 --> new_node, 退出循环
+                    new_node = curr_head;
+                    break;
+                }
+                // CAS 失败, 重试: 重新去尝试获取空闲列表头. 如果此时空闲列表头已为空, 说明没有空闲地址了, 退出循环, new_node保持为nullptr
+            }
+
+            if (new_node) {
+                // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+                new(new_node) HashTableNode{key, value, _table[index]};
+            }
+            else {
+                // 空闲列表为空, 申请新内存
+                void* raw_mem = _pool->allocate(sizeof(HashTableNode));
+                if (!raw_mem) return false;
+
+                new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+            }
+
             _table[index] = new_node;
-            // 新的 node 要线程安全地插入gc链: 独占的桶锁(条带锁)仅锁住了当前桶(条带), 但是gc链是全局的, 可能有其他桶(条带)在写入, 故这里要线程安全
-            HashTableNode* old = _all_nodes_head.load(std::memory_order_relaxed);
-            do {
-                new_node->gc_next = old; // 头插 gc 链
-            } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
 
-            // // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全. REMOVE
+            // // 新的 node 要线程安全地插入gc链: 独占的桶锁(条带锁)仅锁住了当前桶(条带), 但是gc链是全局的, 可能有其他桶(条带)在写入, 故这里要线程安全 --> 废弃
+            // HashTableNode* old = _all_nodes_head.load(std::memory_order_relaxed);
+            // do {
+            //     new_node->gc_next = old; // 头插 gc 链
+            // } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
+
+            // // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全. --> 废弃
             // if (was_empty) _occupied_indices.push_back(index);
 
             // node数量自加1. 原子线程安全
@@ -334,9 +396,9 @@ public:
     }
 
     // upsert 操作: 当 key 存在时, 用 updater 更新对应 value; 当 key 不存在时, 插入 key-default_val
-    template <typename Func>
-    bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
-        // 并发读: 此操作(update by insert)不独占表锁
+    template <typename FUNC>
+    bool atomic_upsert(const TYPE_K& key, FUNC&& updater, const TYPE_V& default_val) {
+        // 并发锁: 此操作(update by insert)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
 
         if (_capacity == 0 || !_table) return false;
@@ -346,26 +408,69 @@ public:
             // 独占写: 此操作(花括号内部) 独占桶锁(条带锁)，即只有此操作发生
             std::unique_lock<std::shared_mutex> _lock_bucket_for_insert_(bucket_lock(index));
 
+            // 在该bucket中遍历寻找, 以尝试执行 update 逻辑
             for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
                 if (cur->key == key) {
-                    std::forward<Func>(updater)(cur->value);
+                    std::forward<FUNC>(updater)(cur->value);
                     return true;
                 }
             }
-            // const bool was_empty = (_table[index] == nullptr);
-            void* raw_mem = _pool->allocate(sizeof(HashTableNode));
-            if (!raw_mem) return false;
 
-            HashTableNode* new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+            // 如果执行到这里, 说明要么 _table[index] 是 nullptr, 要么 _table[index] 链表里没有 key, 无法执行 update 逻辑
+
+            // const bool was_empty = (_table[index] == nullptr); 记录 _table[index]是否为空. _occupied_indices已经废弃
+
+            // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
+            HashTableNode* new_node = nullptr;
+            
+            // 首先复用 _free_nodes_head 里的地址. _free_nodes_head 是全局变量, 要考虑并发安全
+            // 单线程版本
+            /*
+            new_node = _free_nodes_head; // 获取第一个空闲地址
+            _free_nodes_head = std::launder(new_node)->free_next; // 更新空闲列表
+            */
+            while (_free_nodes_head.load(std::memory_order_relaxed) != nullptr) { 
+                // 尝试从 free list 中复用: 获取 _free_nodes_head(relaxed表示无同步成本)
+                HashTableNode* curr_head = _free_nodes_head.load(std::memory_order_relaxed);
+
+                if (_free_nodes_head.compare_exchange_weak(
+                    curr_head, std::launder(curr_head)->free_next,
+                    std::memory_order_acquire, std::memory_order_relaxed)
+                ) {
+                    // 语义: curr_head 是 全局变量 _free_nodes_head 尝试读到的旧值. 对比这个全局变量和旧值
+                    // 如果一致, 那么执行全局变量更新为 free_next(do 中算出来的新值); 如果不一致, 循环尝试再取一次全局变量, 直到重试成功
+
+                    // std::memory_order_acquire: 消费者(读操作)内存序, 代表CPU保证 --> 共享变量在执行该内存序操作后的所有指令, 必须不能重排到该内存序前面
+                    // 代表一种消费者逻辑: 必须先acquire东西再消费. 这里 insert 函数对 全局变量_free_nodes_head而言就是消费者: 它消费_free_nodes_head上的空闲地址
+
+                    // CAS 成功, 获取到的空闲列表头地址 --> new_node, 退出循环
+                    new_node = curr_head;
+                    break;
+                }
+                // CAS 失败, 重试: 重新去尝试获取空闲列表头. 如果此时空闲列表头已为空, 说明没有空闲地址了, 退出循环, new_node保持为nullptr
+            }
+
+            if (new_node) {
+                // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+                new(new_node) HashTableNode{key, default_val, _table[index]};
+            }
+            else {
+                // 空闲列表为空, 申请新内存
+                void* raw_mem = _pool->allocate(sizeof(HashTableNode));
+                if (!raw_mem) return false;
+
+                new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+            }
+
             _table[index] = new_node;
 
-            // 新的 node 要线程安全地插入gc链: 独占的桶锁(条带锁)仅锁住了当前桶(条带), 但是gc链是全局的, 可能有其他桶(条带)在写入, 故这里要线程安全
-            HashTableNode* old = _all_nodes_head.load(std::memory_order_relaxed);
-            do {
-                new_node->gc_next = old; // 头插 gc 链
-            } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
+            // // 新的 node 要线程安全地插入gc链: 独占的桶锁(条带锁)仅锁住了当前桶(条带), 但是gc链是全局的, 可能有其他桶(条带)在写入, 故这里要线程安全 --> 废弃
+            // HashTableNode* old = _all_nodes_head.load(std::memory_order_relaxed);
+            // do {
+            //     new_node->gc_next = old; // 头插 gc 链
+            // } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
 
-            // // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全. REMOVE
+            // // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全. --> 废弃
             // if (was_empty) _occupied_indices.push_back(index);
 
             _size.fetch_add(1);
@@ -386,35 +491,118 @@ public:
         return true;
     }
 
+    /*
+    * 从哈希表获取值, 并移除键值对
+    * @param key: 不可变引用
+    * @param value: 可变引用, 存取查询到的值
+    * @return 如果查询到, 则将值拷贝进入value, 从哈希表移除键值对, 返回true; 如果未查询到则返回false
+    * 
+    * 行为: 若 key 存在, 则获取对应的 value 到可变引用, 返回 true; 否则返回 false
+    */
+    bool pop(const TYPE_K& key, TYPE_V& value) {
+        // 并发锁: 此操作(pop)不独占表锁
+        std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
+
+        if (_capacity == 0 || !_table) return false;
+
+        // 计算 bucket index
+        size_t index = hash(key) % _capacity;
+        {
+            // 独占写: 此操作(花括号内部) 独占桶锁(条带锁)，即只有此操作发生
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_pop_(bucket_lock(index));
+
+            // 遍历查询 key
+            
+            // 若 key-hash 不存在, 直接返回 false 结束
+            HashTableNode* head = _table[index];
+            if (!head) return false;
+
+            // 若 key-hash 存在, 遍历该链表以查询 key
+            HashTableNode* parent = head; // 为了"删除"节点, 需要跟随保留父节点指针
+
+            while (head) {
+                if (head->key == key) {
+
+                    value = head->value;
+                    parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
+                    head->next = nullptr; // 置空 head 的 next以防止非法访问
+
+                    // node数量自减1. 原子线程安全
+                    _size.fetch_add(-1);
+
+                    // 把 head 挂到 free_list 上, 然后析构 head. 这样该地址可被 insert/upsert 等插入方法复用
+                    // _free_nodes_head 是全局变量, 需要 CAS(compare and swap) 操作以保证 head 挂入时安全
+
+                    // 单线程版本
+                    /*
+                    head->free_next = _free_nodes_head; // 更新 head
+                    _free_nodes_head = head; // _free_nodes_head 改成 head
+                    */
+                    // 并发安全 CAS 版本
+                    // 竞争的线程AB各自读到了 _free_nodes_head 并执行了 head_A 更新 和 head_B 更新 --> do 部分
+                    // while 部分 <-- 线程A更快, 首先执行 compare_exchage: _free_nodes_head 对比 old_head. 此时一致
+                    //                compare_exchange给线程A执行 _free_nodes_head 改成 head_A, 返回 True, 从而线程A退出循环
+                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 old_head, 此时不一致(前者已经被线程A修改)
+                    //                compare_exchange 直接返回 False, 线程B重新进入do 部分 <-- 线程B读到了更新后的 _free_nodes_head, 再一次执行 head_B 更新
+                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 old_head. 此时终于一致
+                    //                compare_exchange给线程A执行 _free_nodes_head 改成 head_B, 返回 True, 从而线程B退出循环
+                    HashTableNode* old_head;
+                    do {
+                        old_head = _free_nodes_head.load(std::memory_order_relaxed);
+                        head->free_next = old_head;
+                    } while (!_free_nodes_head.compare_exchange_weak(old_head, head, std::memory_order_release, std::memory_order_relaxed));
+                    // 语义: old_head 是 全局变量 _free_nodes_head 在 do 中读到的旧值. 对比这个全局变量和旧值
+                    // 如果一致, 那么执行全局变量更新为 head(do 中算出来的新值); 如果不一致, 循环do 用 全局变量的新值再来一次, 直到重试成功
+
+                    // atomic_var.compare_exchange_weak(expect_val, new_val, success_memory_order, failure_memory_order) 语义:
+                    // 对比 atomic_var 和 expect_val
+                    //      如果相同, 则执行更新: atomic_var <- new_val, 内存序 success_memory_order, 返回 True;
+                    //      如果不相同, 内存序 success_memory_order, 返回 False
+
+                    // std::memory_order_release: 生产者(写操作)内存序, 代表CPU保证 --> 共享变量在执行该内存序操作前的所有指令, 必须不能重排到该内存序后面
+                    // 代表一种生产者逻辑: 东西全部生产完毕了才能release. 这里 pop 函数对 全局变量_free_nodes_head而言就是生产者: 它生产空闲地址发布到_free_nodes_head上
+
+                    destroy_node(head); // _free_nodes_head 指向的地址被析构了
+
+                    return true;
+                }
+                parent = head;
+                head = head->next;
+            }
+
+        }
+        
+        // 如果执行到这里, 说明从 head 遍历到 nullptr 都没能查找到 key. 那么这个是不应该的: key-hash在此index
+        throw std::runtime_error("Error in concurrent hashtable pop");
+    }
+
     void clear() {
         // 清空全表时, 清空过程要全程 独占表锁
         std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
 
-        if (_capacity == 0 || !_table) {
-            _size.store(0, std::memory_order_relaxed);
-            // _occupied_indices.clear();
-            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
-            return;
-        }
-
-        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
-            HashTableNode* curr = _all_nodes_head.exchange(nullptr, std::memory_order_acquire);
-            while (curr) {
-                HashTableNode* next = curr->gc_next;
-                destroy_node(curr);
-                curr = next;
-            }
-        } else {
-            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
-        }
-
-        // clear 和 destroy 的区别就在于: clear 保留了桶结构, _table 链表头数组不释放(但全部置空, 各链表不再可访问), _capacity/_resize_threshold不缩容
-        // 经过内存池的reset操作后, 本哈希表可以重新复用.
+        // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
+        // for (size_t index: _occupied_indices)
         for (size_t index = 0; index < _capacity; ++index) {
-            _table[index] = nullptr;
+            HashTableNode* head = _table[index];
+            // 若 node 需要非平凡析构. constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
+            if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+                // 遍历所有buckets, 沿着链表头析构所有node
+                while (head) {
+                    HashTableNode* next = head->next;
+                    destroy_node(head);
+                    head = next;
+                }
+            } // 若 node 不需要非平凡析构：就跳过析构环节
+
+            _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
 
+        // // gc 链表置空 --> 废弃
+        // _all_nodes_head = nullptr;
+        // // 非空桶置空 --> 废弃
         // _occupied_indices.clear();
+
+        _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
         _size.store(0, std::memory_order_relaxed);
 
     }
@@ -423,30 +611,28 @@ public:
         // 析构全表时, 析构过程要全程 独占表锁
         std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
 
-        if (_capacity == 0 || !_table) {
-            _size.store(0, std::memory_order_relaxed);
-            // _occupied_indices.clear();
-            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
-            return;
-        }
-
-        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
-            HashTableNode* curr = _all_nodes_head.exchange(nullptr, std::memory_order_acquire);
-            while (curr) {
-                HashTableNode* next = curr->gc_next;
-                destroy_node(curr);
-                curr = next;
-            }
-        } else {
-            _all_nodes_head.store(nullptr, std::memory_order_relaxed);
+        // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
+        // for (size_t index: _occupied_indices)
+        for (size_t index = 0; index < _capacity; ++index) {
+            HashTableNode* head = _table[index];
+            // 若 node 需要非平凡析构. constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
+            if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+                // 遍历所有buckets, 沿着链表头析构所有node
+                while (head) {
+                    HashTableNode* next = head->next;
+                    destroy_node(head);
+                    head = next;
+                }
+            } // 若 node 不需要非平凡析构：就跳过析构环节
         }
         
         // destroy 和 clear 的区别就在于: destroy 摧毁了桶结构, _table 链表头数组释放, 各链表不再可访问, _capacity/_resize_threshold置零
-        // 本哈希表不再可复用.
+        // 本哈希表不再可复用. 但内存尚未释放, 等待内存池操作
         free_table_ptrs();
+
         _capacity = 0;
         _resize_threshold.store(0, std::memory_order_relaxed);
-        // _occupied_indices.clear();
+        _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
         _size.store(0, std::memory_order_relaxed);
     }
 
