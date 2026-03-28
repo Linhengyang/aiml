@@ -56,23 +56,26 @@ void test_concurrent_hash_map() {
         }
     }
 
-    // // 测试删除
-    // vector<thread> deleters;
-    // for (int t = 0; t < num_threads / 2; ++t) {
-    //     deleters.emplace_back([&, t]() {
-    //         for (int i = 0; i < ops_per_thread; ++i) {
-    //             int key = t * ops_per_thread + i;
-    //             map.remove(key);
-    //         }
-    //     });
-    // }
+    // 测试删除
+    vector<thread> deleters;
+    for (int t = 0; t < num_threads / 2; ++t) {
+        deleters.emplace_back([&, t]() {
+            for (int i = 0; i < ops_per_thread; ++i) {
+                int key = t * ops_per_thread + i;
+                int val;
+                bool got = map.pop(key, val);
+                assert(got);
+                assert(val == key * 2);
+            }
+        });
+    }
 
-    // for (auto& d : deleters) {
-    //     d.join();
-    // }
+    for (auto& d : deleters) {
+        d.join();
+    }
 
-    // // 检查剩余元素数量
-    // assert(map.size() == (num_threads / 2) * ops_per_thread);
+    // 检查剩余元素数量
+    assert(map.size() == (num_threads / 2) * ops_per_thread);
 
     // clear 哈希表
     map.clear();
