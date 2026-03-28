@@ -392,13 +392,6 @@ public:
     * 由于保持了 bucket结构(堆内存上的链表头node指针数组, 全部是nullptr) 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
     */
     void clear() {
-        if (_capacity == 0 || !_table) {
-            _size = 0;
-            // _occupied_indices.clear();
-            // _all_nodes_head = nullptr;
-            return;
-        }
-
         // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
         // for (size_t index: _occupied_indices)
         for (size_t index = 0; index < _capacity; ++index) {
@@ -422,6 +415,7 @@ public:
         // // 非空桶置空 --> 废弃
         // _occupied_indices.clear();
 
+        _free_nodes_head = nullptr; // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
         _size = 0;
 
     }
@@ -429,13 +423,6 @@ public:
     // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0
     // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
-        if (_capacity == 0 || !_table) {
-            _size = 0;
-            // _occupied_indices.clear();
-            // _all_nodes_head = nullptr;
-            return;
-        }
-
         // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
         // for (size_t index: _occupied_indices)
         for (size_t index = 0; index < _capacity; ++index) {
@@ -463,6 +450,7 @@ public:
 
         _size = 0; // node数量置0
         _capacity = 0; // _capacity 置零
+        _free_nodes_head = nullptr; // 空闲链表置空
     }
 
 
