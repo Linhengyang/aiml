@@ -16,7 +16,7 @@
 #include "memory_block.h"
 
 
-
+// threadsafe_mempool 全局锁的 内存池 --> 低并发 使用
 
 class threadsafe_mempool {
 
@@ -75,10 +75,8 @@ public:
 
 
 
-// mempool 线程不安全、不带锁的 内存池：单线程使用
 
-
-
+// mempool 完全不带锁的 内存池 --> 单线程 or 纯 thread_local 使用. 适用于线程数固定, 不需要跨线程复用的场景
 
 class mempool {
 
@@ -124,6 +122,9 @@ public:
 
 }; // end of mempool
 
+
+// TODO
+// threadcache_mempool 分层锁内存池 --> 高频 thread-local 无锁, 低频 global-central 有锁. 适用于高并发场景
 
 
 #endif
