@@ -120,8 +120,7 @@ private:
                 HashTableNode* next = curr->next; // 先取出next node
                 size_t new_index = hash(curr->key) % new_capacity; // 计算得出新bucket
 
-                // const bool was_empty = (_new_table[new_index] == nullptr);
-                // // REMOVE _occupied_indices
+                // const bool was_empty = (_new_table[new_index] == nullptr); --> 废弃
 
                 // 头插到新bucket
                 curr->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
@@ -307,7 +306,7 @@ public:
 
             // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
             // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-            new(new_node) HashTableNode{key, value, _table[index]};
+            new(new_node) HashTableNode{key, default_val, _table[index]};
 
         }
         else { // 如果没有 _free_nodes_head 可复用地址
@@ -317,7 +316,7 @@ public:
             if (!raw_mem) return false; // 如果内存分配失败
 
             // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
-            new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+            new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
         }
 
         _table[index] = new_node;
