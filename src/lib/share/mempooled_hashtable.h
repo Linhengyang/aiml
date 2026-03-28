@@ -436,8 +436,6 @@ public:
                     head = next;
                 }
             } // 若 node 不需要非平凡析构：就跳过析构环节
-
-            _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
 
         // // gc 链表置空 --> 废弃
