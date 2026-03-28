@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <cstring>
 #include <vector>
-
+#include <new>
 
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
 class pooled_hashtable {
@@ -28,7 +28,8 @@ private:
         TYPE_K key; // 键
         TYPE_V value; // 值
         HashTableNode* next; // bucket链表，用于解决哈希冲突
-        HashTableNode* gc_next = nullptr; // gc链表，用于一次性析构所有node避免遍历bucket
+        // 废弃 gc_next gc链表
+        HashTableNode* free_next = nullptr; // free空闲链表，用于将 poped nodes 链接之后再析构, 供给insert/upsert等方法复用地址
         // 提供placement new 构造支持
         HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
     };
@@ -42,7 +43,7 @@ private:
 
     size_t _capacity; // 哈希表的容量, bucket数量
 
-    const float _max_load_factor = 0.80f; // 默认最大负载因子. 当 node 数量/_capacity 超过时, 触发扩容
+    const float _max_load_factor = 0.75f; // 默认最大负载因子. 当 node 数量/_capacity 超过时, 触发扩容
 
     size_t _size = 0; // node数量
 
@@ -70,12 +71,12 @@ private:
         _table = nullptr;
     }
 
-    // gc 链表: 链起所有node
-    HashTableNode* _all_nodes_head = nullptr;
+    // 废弃 gc 链表: 链起所有node
 
-    // // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index类型要与 _capacity 类型对齐, 因为它是 hash成员函数的输出 取_capacity余
-    // std::vector<size_t> _occupied_indices;
-    // // REMOVE _occupied_indices --> 引入 vector 得不偿失. 高性能版本的不需要这个
+    // 空闲 free 链表: 链起所有 析构后的 poped nodes
+    HashTableNode* _free_nodes_head = nullptr;
+
+    // 废弃 占用桶 vector: std::vector<size_t> _occupied_indices: 引入 vector 得不偿失. 高性能版本的不需要这个
 
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
@@ -101,14 +102,14 @@ private:
         HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
         if (!_new_table) throw std::bad_alloc();
 
-        // // 新的非空桶列表
+        // // 新的非空桶列表 --> 废弃
         // std::vector<size_t> _new_occupied_indices;
         // _new_occupied_indices.reserve(_occupied_indices.size());
 
-        // 新的gc链表
-        HashTableNode* _new_all_nodes_head = nullptr;
+        // 新的gc链表 --> 废弃
+        // HashTableNode* _new_all_nodes_head = nullptr;
 
-        // 重新计算 _size, 为缩容式 rehash 留下余地
+        // 重新计算 _size, 为缩容式 rehash 留下余地. 不过缩容式rehash必要性不大: 避免频繁rehash
         size_t actual_node_count = 0;
 
         // for (size_t old_index: _occupied_indices) // 遍历非空桶
@@ -126,13 +127,15 @@ private:
                 curr->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = curr; // 更新确认新bucket的链表头
 
-                // // 若空桶->非空, 记录
+                // // 若空桶->非空, 记录 --> 废弃
                 // if (was_empty) _new_occupied_indices.push_back(new_index);
-                // // REMOVE _occupied_indices
 
-                // 头插到gc链表
-                curr->gc_next = _new_all_nodes_head;
-                _new_all_nodes_head = curr;
+                // 头插到gc链表 --> 废弃
+                // curr->gc_next = _new_all_nodes_head;
+                // _new_all_nodes_head = curr;
+
+                // _free_nodes_head 不需要变动
+
                 // 更新计数
                 ++actual_node_count;
 
@@ -145,8 +148,9 @@ private:
         _table = _new_table;
         _capacity = new_capacity;
         _size = actual_node_count;
-        // _occupied_indices.swap(_new_occupied_indices);
-        _all_nodes_head = _new_all_nodes_head;
+        // _occupied_indices.swap(_new_occupied_indices); // 占用桶记录 --> 废弃
+        // _all_nodes_head = _new_all_nodes_head; // gc链表 --> 废弃
+        // _free_nodes_head 不需要变动
     }
 
 
@@ -174,7 +178,14 @@ public:
         destroy();
     }
 
-    // 哈希表关键方法之 get(key&, value&) --> change value, return true if success
+    /*
+    * 根据键获取值
+    * @param key: 不可变引用
+    * @param value: 可变引用, 存取查询到的值
+    * @return 如果查询成功, 返回true; 如果查询失败返回false
+    * 
+    * 行为: 若 key 存在, 则获取对应的 value 到可变引用, 返回 true; 否则返回 false
+    */
     bool get(const TYPE_K& key, TYPE_V& value) {
         if (_capacity == 0 || !_table) return false;
 
@@ -213,26 +224,42 @@ public:
             }
         }
 
-        // 如果执行到这里, 说明要么 cur 是 nullptr, 要么 _table[index] 链表里没有 key
+        // 如果执行到这里, 说明要么 _table[index] 是 nullptr, 要么 _table[index] 链表里没有 key
+
+        // const bool was_empty = (_table[index] == nullptr); 记录 _table[index]是否为空. _occupied_indices已经废弃
+
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
+        HashTableNode* new_node;
 
-        // 在 内存池 上分配新内存给新节点, raw_mem 内存
-        // const bool was_empty = (_table[index] == nullptr);
-        // REMOVE _occupied_indices
+        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址, 如果存在
+            // 直接复用 _free_nodes_head 地址: 
+            new_node = _free_nodes_head; // 这里 new_node 指向的地址已经被析构
 
-        void* raw_mem = _pool->allocate(sizeof(HashTableNode));
-        if (!raw_mem) return false; // 如果内存分配失败
+            // 更新 _free_nodes_head
+            // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
+            _free_nodes_head = std::launder(new_node)->free_next;
+            //new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
+            // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
 
-        // placement new 构造, 头插入bucket
-        HashTableNode* new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+            // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
+            // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+            new(new_node) HashTableNode{key, value, _table[index]};
+
+        }
+        else { // 如果没有 _free_nodes_head 可复用地址
+            // 在 内存池 上分配新内存给新节点, raw_mem 内存
+
+            void* raw_mem = _pool->allocate(sizeof(HashTableNode));
+            if (!raw_mem) return false; // 如果内存分配失败
+
+            // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
+            new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+        }
+
         _table[index] = new_node;
         
-        // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可
-        new_node->gc_next = _all_nodes_head;
-
-        // // 如果 空 -> 非空, 那么记录桶号
-        // if (was_empty) _occupied_indices.push_back(index);
-        // REMOVE _occupied_indices
+        // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可 --> gc链表已经废弃
+        // if (was_empty) _occupied_indices.push_back(index); --> _occupied_indices已经废弃
 
         // node数量自加1. 原子线程安全
         ++_size;
@@ -249,33 +276,56 @@ public:
     // 函数指针的左值引用 std::function<void(TYPE_V&)>& 或
     // 函数指针的const &引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
     // 这里采用最灵活的模板写法, 用 && 保证右值引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
-    template <typename Func>
-    bool atomic_upsert(const TYPE_K& key, Func&& updater, const TYPE_V& default_val) {
+    template <typename FUNC> // 类额外的模板参数
+    bool atomic_upsert(const TYPE_K& key, FUNC&& updater, const TYPE_V& default_val) {
         if (_capacity == 0 || !_table) return false;
 
         // 基本照搬 insert 逻辑, 除了修改节点value/插入新节点时, 分别使用updater/default_val来更新/插入
         size_t index = hash(key) % _capacity;
 
+        // 在该bucket中遍历寻找, 以尝试执行 update 逻辑
         for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
             if (cur->key == key) {
-                std::forward<Func>(updater)(cur->value); // 用forward 完美转发 updater
+                std::forward<FUNC>(updater)(cur->value); // 用forward 完美转发 updater
                 return true;
             }
         }
+        
+        // 如果执行到这里, 说明要么 _table[index] 是 nullptr, 要么 _table[index] 链表里没有 key, 无法执行 update 逻辑
+        // 执行 insert 逻辑. 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
+        HashTableNode* new_node;
 
-        // const bool was_empty = (_table[index] == nullptr);
-        // REMOVE _occupied_indices
-        void* raw_mem = _pool->allocate(sizeof(HashTableNode));
-        if (!raw_mem) return false;
+        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址, 如果存在
+            // 直接复用 _free_nodes_head 地址: 
+            new_node = _free_nodes_head; // 这里 new_node 指向的地址已经被析构
 
-        HashTableNode* new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+            // 更新 _free_nodes_head
+            // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
+            _free_nodes_head = std::launder(new_node)->free_next;
+            //new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
+            // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
+
+            // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
+            // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+            new(new_node) HashTableNode{key, value, _table[index]};
+
+        }
+        else { // 如果没有 _free_nodes_head 可复用地址
+            // 在 内存池 上分配新内存给新节点, raw_mem 内存
+
+            void* raw_mem = _pool->allocate(sizeof(HashTableNode));
+            if (!raw_mem) return false; // 如果内存分配失败
+
+            // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
+            new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+        }
+
         _table[index] = new_node;
+        
+        // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可 --> gc链表已经废弃
+        // if (was_empty) _occupied_indices.push_back(index); --> _occupied_indices已经废弃
 
-        new_node->gc_next = _all_nodes_head;
-
-        // if (was_empty) _occupied_indices.push_back(index);
-        // REMOVE _occupied_indices
-
+        // node数量自加1. 原子线程安全
         _size++;
 
         if (_size >= _capacity*_max_load_factor) {
@@ -285,77 +335,132 @@ public:
         return true;
     }
 
+    /*
+    * 从哈希表获取值, 并移除键值对
+    * @param key: 不可变引用
+    * @param value: 可变引用, 存取查询到的值
+    * @return 如果查询到, 则将值拷贝进入value, 从哈希表移除键值对, 返回true; 如果未查询到则返回false
+    * 
+    * 行为: 若 key 存在, 则获取对应的 value 到可变引用, 返回 true; 否则返回 false
+    */
+    bool pop(const TYPE_K& key, TYPE_V& value) {
+        if (_capacity == 0 || !_table) return false;
 
-    // 哈希表自身作为 链表头node指针数组 构建在 堆内存, node全部构建在内存池 
-    // 哈希表不应该负责 内存池 的 复位or销毁
-    // 内存池本身是只可以 整体复用/整体销毁，不可精确销毁单次allocate的内存
-    // 哈希表的"清空"：内存池上的node全部析构, 不再可访问, 但其分配的内存不会在这里被 复位or销毁. 链表头node指针数组全部置空
-    // 由于保持了 bucket结构(堆内存上的链表头node指针数组, 全部是nullptr) 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
+        // 计算 bucket index
+        size_t index = hash(key) % _capacity;
+
+        // 遍历查询 key
+        
+        // 若 key-hash 不存在, 直接返回 false 结束
+        HashTableNode* head = _table[index];
+        if (!head) return false;
+
+        // 若 key-hash 存在, 遍历该链表以查询 key
+        HashTableNode* parent = head; // 为了"删除"节点, 需要跟随保留父节点指针
+
+        while (head) {
+            if (head->key == key) {
+
+                value = cur->value;
+                parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
+                head->next = nullptr; // 置空 head 的 next以防止非法访问
+
+                // node数量自减1. 原子线程安全
+                --_size;
+
+                // 把 head 挂到 free_list 上, 然后析构 head. 这样该地址可被 insert/upsert 等插入方法复用
+                head->free_next = _free_nodes_head;
+                // _free_nodes_head 是 Node* 类链表头, 其自身以及其->free_next 指向的是析构后的nodes的地址们.
+                _free_nodes_head = head;
+                destroy_node(head); // _free_nodes_head 指向的地址被析构了
+
+                return true;
+            }
+            parent = head;
+            head = head->next;
+        }
+        
+        // 如果执行到这里, 说明从 head 遍历到 nullptr 都没能查找到 key. 那么这个是不应该的: key-hash在此index
+        throw std::runtime_error("Error in hashtable pop");
+    }
+
+    /*
+    * 哈希表自身作为 链表头node指针数组 构建在 堆内存, node全部构建在内存池 
+    * 哈希表不应该负责 内存池 的 复位or销毁
+    * 内存池本身是只可以 整体复用/整体销毁，不可精确销毁单次allocate的内存
+    * 哈希表的"清空"：内存池上的node全部析构, 不再可访问, 但其分配的内存不会在这里被 复位or销毁. 链表头node指针数组全部置空
+    * 由于保持了 bucket结构(堆内存上的链表头node指针数组, 全部是nullptr) 和 内存池, 故 reset 内存池之后, 本哈希表即可重新复用(insert/upsert node)
+    */
     void clear() {
         if (_capacity == 0 || !_table) {
             _size = 0;
-            // _occupied_indices.clear(); // REMOVE _occupied_indices
-            _all_nodes_head = nullptr;
+            // _occupied_indices.clear();
+            // _all_nodes_head = nullptr;
             return;
         }
 
-        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) { // constexpr: 编译时求值
-            // 若 node 需要非平凡析构：沿着 gc 链 析构所有node
-            HashTableNode* curr = _all_nodes_head;
-            while (curr) {
-                HashTableNode* next = curr->next;
-                destroy_node(curr);
-                curr = next;
-            }
-        } // 若 node 不需要非平凡析构：就跳过析构环节
+        // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
+        // for (size_t index: _occupied_indices)
+        for (size_t index = 0; index < _capacity; ++index) {
+            HashTableNode* head = _table[index];
+            // 若 node 需要非平凡析构. constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
+            if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+                // 遍历所有buckets, 沿着链表头析构所有node
+                while (head) {
+                    HashTableNode* next = head->next;
+                    destroy_node(head);
+                    head = next;
+                }
+            } // 若 node 不需要非平凡析构：就跳过析构环节
 
-        // gc 链表置空
-        _all_nodes_head = nullptr;
-
-        // _table 指针数组保持结构
-        // for (size_t index: _occupied_indices) // REMOVE _occupied_indices
-        for (size_t index = 0; index < _capacity; ++index)
-        {
-            _table[index] = nullptr;
+            _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
-        // // 非空桶置空
+
+        // // gc 链表置空 --> 废弃
+        // _all_nodes_head = nullptr;
+
+        // // 非空桶置空 --> 废弃
         // _occupied_indices.clear();
-        // REMOVE _occupied_indices
 
         _size = 0;
 
     }
 
-    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table
+    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0
     // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
         if (_capacity == 0 || !_table) {
             _size = 0;
-            // _occupied_indices.clear(); // REMOVE _occupied_indices
-            _all_nodes_head = nullptr;
+            // _occupied_indices.clear();
+            // _all_nodes_head = nullptr;
             return;
         }
-        // constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
-        if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
-            // 若 node 需要非平凡析构：沿着 gc 链 析构所有node
-            HashTableNode* curr = _all_nodes_head;
-            while (curr) {
-                HashTableNode* next = curr->next;
-                destroy_node(curr);
-                curr = next;
-            }
-        } // 若 node 不需要非平凡析构：就跳过析构环节
 
-        // gc 链表置空
-        _all_nodes_head = nullptr;
+        // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
+        // for (size_t index: _occupied_indices)
+        for (size_t index = 0; index < _capacity; ++index) {
+            HashTableNode* head = _table[index];
+            // 若 node 需要非平凡析构. constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
+            if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+                // 遍历所有buckets, 沿着链表头析构所有node
+                while (head) {
+                    HashTableNode* next = head->next;
+                    destroy_node(head);
+                    head = next;
+                }
+            } // 若 node 不需要非平凡析构：就跳过析构环节
+
+            _table[index] = nullptr; // _table指针数组(buckets)保持结构.
+        }
+
+        // // gc 链表置空 --> 废弃
+        // _all_nodes_head = nullptr;
+        // // 非空桶置空 --> 废弃
+        // _occupied_indices.clear();
 
         // 释放 节点指针(桶)数组, 置空 _table. 所有桶/节点不再可访问. 但内存尚未释放, 等待内存池操作
         free_table_ptrs();
 
-        // // 非空桶置空
-        // _occupied_indices.clear();
-        // // REMOVE _occupied_indices
-        
         _size = 0; // node数量置0
         _capacity = 0; // _capacity 置零
     }
