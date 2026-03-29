@@ -363,10 +363,19 @@ public:
 
         while (head) {
             if (head->key == key) {
-
+                // 获取 value
                 value = head->value;
-                parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
-                head->next = nullptr; // 置空 head 的 next以防止非法访问
+
+                // 摘除 node
+                if (!parent) { // parent为空, 说明头节点head就是待删除节点
+                    _table[index] = nullptr; // 直接置空指针摘除head
+                }
+                else { // 如果 parent 不为空, 说明待删节点head不是头节点
+                    parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
+                }
+
+                // 防御性编程 置空 head 的 next以防止非法访问
+                head->next = nullptr;
 
                 // node数量自减1. 原子线程安全
                 --_size;
