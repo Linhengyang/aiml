@@ -1,4 +1,7 @@
 // mempooled_concurrent_hashtable.h
+// 哈希表的 node* 指针数组适合放在内存池外, 而 nodes 适合放在内存池里
+// 这是因为 哈希表涉及到扩容(rehash), 而扩容后旧数组若在内存池里, 则无法回收复用(内存池reset之前). 放在系统内存则可以由系统立即回收复用.
+
 // 内存池上的哈希表由两部分组成: nodes 和 buckets(链表头node指针数组). 其中 nodes 在insert时逐一分配在内存池上
 // 而 buckets 由创建方式分配内存, 即:
 // 方法1: HashTable* map = new HashTable(capacity, &mempool); 此时 buckets 分配在 堆内存 上, 由new/delete手动管理哈希表的生命周期
@@ -518,17 +521,26 @@ public:
             if (!head) return false;
 
             // 若 key-hash 存在, 遍历该链表以查询 key
-            HashTableNode* parent = head; // 为了"删除"节点, 需要跟随保留父节点指针
+            HashTableNode* parent = nullptr; // 为了"删除"节点, 需要跟随保留父节点指针
 
             while (head) {
                 if (head->key == key) {
-
+                    // 获取 value
                     value = head->value;
-                    parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
-                    head->next = nullptr; // 置空 head 的 next以防止非法访问
+
+                    // 摘除 node
+                    if (!parent) { // parent为空, 说明头节点head就是待删除节点
+                        _table[index] = nullptr; // 直接置空指针摘除head
+                    }
+                    else { // 如果 parent 不为空, 说明待删节点head不是头节点
+                        parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
+                    }
+
+                    // 防御性编程 置空 head 的 next以防止非法访问
+                    head->next = nullptr;
 
                     // node数量自减1. 原子线程安全
-                    _size.fetch_add(-1);
+                    _size.fetch_sub(1);
 
                     // 把 head 挂到 free_list 上, 然后析构 head. 这样该地址可被 insert/upsert 等插入方法复用
                     // _free_nodes_head 是全局变量, 需要 CAS(compare and swap) 操作以保证 head 挂入时安全

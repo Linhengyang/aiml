@@ -56,7 +56,7 @@ void test_concurrent_hash_map() {
         }
     }
 
-    // 测试删除
+    // 测试删除-插入
     vector<thread> deleters;
     for (int t = 0; t < num_threads / 2; ++t) {
         deleters.emplace_back([&, t]() {
@@ -66,6 +66,7 @@ void test_concurrent_hash_map() {
                 bool got = map.pop(key, val);
                 assert(got);
                 assert(val == key * 2);
+                map.insert(key, key * 3);
             }
         });
     }
@@ -75,7 +76,7 @@ void test_concurrent_hash_map() {
     }
 
     // 检查剩余元素数量
-    assert(map.size() == (num_threads / 2) * ops_per_thread);
+    assert(map.size() == (num_threads) * ops_per_thread);
 
     // clear 哈希表
     map.clear();
