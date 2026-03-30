@@ -65,4 +65,5 @@
 // std::priority_queue<T, T_Compare> pq(cmp, std::move(init_data));
 // 复杂度: O(N) for heapify + O(1) for move, 副作用: init_data被移动掏空 --> 本质是pq底层容器 O(1) 接管init_data, 再执行 O(N) 的heapify算法
 
-// 
+// 以上两种就是最典型的 already-data --heapify--> priority_queue 的方式
+// 如果是需要 原始数据容器 in-place 堆化，那么请使用 std::make_heap from <algorithm>
