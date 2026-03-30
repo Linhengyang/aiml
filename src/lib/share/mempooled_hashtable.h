@@ -289,7 +289,7 @@ public:
         // 在该bucket中遍历寻找, 以尝试执行 update 逻辑
         for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
             if (cur->key == key) {
-                std::forward<FUNC>(updater)(cur->value); // 用forward 完美转发 updater
+                std::forward<FUNC>(updater)(cur->value); // 用forward 完美转发 updater(作为临时资源的 updater) 成函数类型
                 return true;
             }
         }

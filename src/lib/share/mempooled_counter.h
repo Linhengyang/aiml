@@ -50,7 +50,7 @@ public:
         increment(key);
     }
 
-    // 右值引用: counter(const TYPE_K& key) 可能引发拷贝, 当 TYPE_K 是复杂类型时, 移动语义提升性能
+    // 右值引用: counter(const TYPE_K& key) 若面对临时资源, 则可能引发拷贝, 当 TYPE_K 是复杂类型时, 移动语义提升性能
     void operator()(TYPE_K&& key) {
         increment(std::forward<TYPE_K>(key)); // 直接转发, 移动语义, 避免拷贝
     }
