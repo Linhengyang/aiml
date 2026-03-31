@@ -67,3 +67,12 @@
 
 // 以上两种就是最典型的 already-data --heapify--> priority_queue 的方式
 // 如果是需要 原始数据容器 in-place 堆化，那么请使用 std::make_heap from <algorithm>
+
+
+
+
+
+// 关于堆的泛型: std::priority_queue 针对三个地方作了泛型, 除了上文阐述的 元素T、严格弱序比较器T_comparator, 还有堆的底层容器 container<T>
+// 堆要求这个底层容器有类似数组的性质, 即支持 随机访问 --> 支持 偏移相加定位 / index取值 / 位置相减算偏移 等操作, 并且要求对 偏移 diff 有明确的定义
+// 典型的底层容器用 vector 即可.   <-- 事实上由于把 堆(动态数组二叉树) 放在系统内存, 所以vector已经是完美的底层容器. 此结论对于其他 八叉堆 等自定义堆类数据结构也成立
+
