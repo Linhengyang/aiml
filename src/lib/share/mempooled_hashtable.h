@@ -35,7 +35,19 @@ private:
         // 废弃 gc_next gc链表
         HashTableNode* free_next = nullptr; // free空闲链表，用于将 poped nodes 链接之后再析构, 供给insert/upsert等方法复用地址
         // 提供placement new 构造支持
+
+        // HashTableNode 的拷贝构造函数: k/v 类型都是 const TYPE&, 不可变动引用, 那么在用 k / v 初始化 key / value 时, 会分别触发 TYPE_K / TYPE_V
+        // 的 构造函数. 由于 k / v 都是不可变动引用, 无法移动掏空源对象, 故都会触发 TYPE_K 和 TYPE_V 的拷贝构造 --> 发生 k 和 v 的拷贝
         HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+
+        // 对于 资源管理类型(非平凡析构类型), 移动构造是刚需:
+        // 可能构造参数是临时资源(std::string('hello')等):  TYPE_K(std::string('hello'))
+        // 可能构造参数非常巨大希望避免拷贝成本，且不在乎构造后源对象: std::string s = 'hello'; TYPE_K(s);
+        // 对于 TYPE_K 和 TYPE_V, 要求这两个类型支持移动构造; 对于 节点指针, 浅拷贝即可
+        HashTableNode(TYPE_K&& k, TYPE_V&& v, HashTableNode* ptr): key(std::move(k)), value(std::move(v)), next(ptr) {}
+
+        // 完美转发（万能引用）TODO
+
     };
 
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构
