@@ -45,14 +45,18 @@ public:
 
     // counter 的析构函数: 用隐式析构即可：自动调用成员变量_hash_table的析构函数
 
-    // 函数调用操作符: 支持 counter(key)
+    // 函数调用操作符: 支持 counter(key). 针对值类型 和 资源管理类型, 重载操作符以提升性能
+    
     void operator()(const TYPE_K& key) {
         increment(key);
     }
 
     // 右值引用: counter(const TYPE_K& key) 若面对临时资源, 则可能引发拷贝, 当 TYPE_K 是复杂类型时, 移动语义提升性能
     void operator()(TYPE_K&& key) {
-        increment(std::forward<TYPE_K>(key)); // 直接转发, 移动语义, 避免拷贝
+        // increment(std::forward<TYPE_K>(key)); // 编译能过, 但有点混淆含义了
+        // std::forward<T> 专用于模板函数中的万能引用（T&& 其中 T 是模板参数）。它的作用是“完美转发”，保持参数的左值/右值属性。
+        // 这里不是模板函数, 而 key 明确是一个右值引用, 如果想把它当右值传给下一个函数，应该直接用 std::move(key)
+        increment(std::move(key));
     }
 
     /*
