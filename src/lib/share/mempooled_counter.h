@@ -45,8 +45,10 @@ public:
 
     // counter 的析构函数: 用隐式析构即可：自动调用成员变量_hash_table的析构函数
 
-    // 函数调用操作符: 支持 counter(key). 针对值类型 和 资源管理类型, 重载操作符以提升性能
-    
+    // 函数调用操作符: 支持 counter(key). 
+    // 如果仅仅是查找, 那确实 常左值引用 const& 函数参数签名就够了, 这种引用本来就没有拷贝成本，且也不会改变源对象的副作用（即使实参是右值也不怕），用来查找是最好的。
+    // 但是：计数不仅仅是查询，还涉及到插入（若没查到则构建插入新node），而构造新node的过程 可以 针对值类型 和 资源管理类型（移动语义）, 重载操作符以提升性能
+
     void operator()(const TYPE_K& key) {
         increment(key);
     }
@@ -55,30 +57,35 @@ public:
     void operator()(TYPE_K&& key) {
         // increment(std::forward<TYPE_K>(key)); // 编译能过, 但有点混淆含义了
         // std::forward<T> 专用于模板函数中的万能引用（T&& 其中 T 是模板参数）。它的作用是“完美转发”，保持参数的左值/右值属性。
-        // 这里不是模板函数, 而 key 明确是一个右值引用, 如果想把它当右值传给下一个函数，应该直接用 std::move(key)
+        // 这里不是模板函数, 而 key 明确是一个右值引用, 如果想把它当右值传给下一个函数，应该直接用 std::move(key)，因为函数内部具名变量都视作左值
         increment(std::move(key));
     }
 
     /*
-    * value 自增 1
-    * @param key
-    * @return void
+    * value 自增 1 if key 查找到; else 插入新 node key:1
+    * @param key: 可能是 左值/常左值引用, 也可能是右值引用（临时/移动）. 为了保证调用相应的atomic_upsert重载, 这里也要重载increment
     * 
-    * 行为: 若 key 已经存在, 则对应的 value 自增 1; 否则新建节点插入, value = 1
-    * 两次查找: 由于hash缓存的存在, 每个bucket不会太长(冲突不会严重), 两次查找的开销很低.
-    * get时共享表锁+共享桶锁, insert时共享表锁+独占桶锁, 为了线程安全, 使用原子更新/插入的 atomic_upsert方法
+    * 行为: 若 key 已经存在, 则对应的 value 自增 1; 否则新建节点插入, value = 1. 这里为了线程安全, 不使用先get再insert, 而是直接使用 atomic_upsert
+    * 
+    * 使用 C++ 的lambda表达式:
+    *   uint64_t& 表示 lambda function 需要个该类型的参数, []表示lambda函数体内没用到其他变量
+    *       若[&], 表示lambda函数体内涉及到的其他变量, 以引用的方式传入; 若[=], 表示以值的方式传入
+    * 
+    * 若用 lambda 表达式 显示定义一个函数  std::function<void(int&)> f = [](int& x) {x+=1;};
+    *   这里 void 是 return type, int& 是input arg type. 这里 f 是一个左值. 如果省去 std::function声明部分, 那就是右值
+    *   所以这里 [](auto& value) { value += 1;} 就是一个右值临时函数, 意思是引用 value 并变化它的值.
+        atomic_upsert 内部: 
+                std::forward<Func>(updater)(node->value); // 用forward 完美转发 updater
+        内部 node->value 被 lambda 函数引用, 并修改值.
     */
     void increment(const TYPE_K& key) {
-        // C++ 的lambda表达式: uint64_t& 表示 lambda function 需要个该类型的参数, []表示lambda函数体内没用到其他变量
-        // 若[&], 表示lambda函数体内涉及到的其他变量, 以引用的方式传入; 若[=], 表示以值的方式传入
-        // C++的lambda表达式: 显示定义一个函数  std::function<void(int&)> f = [](int& x) {x+=1;};
-        // 这里 void 是 return type, int& 是input arg type. 这里 f 是一个左值. 如果省去 std::function声明部分, 那就是右值
-        // 这里 [](auto& value) { value += 1;} 就是一个右值临时函数, 意思是引用 value 并变化它的值.
-        // atomic_upsert 内部: 
-        //      std::forward<Func>(updater)(node->value); // 用forward 完美转发 updater
-        // 内部 node->value 被 lambda 函数引用, 并修改值.
         // 这里 编译器可以从实参自动推导 Func 类型（隐式实例化），所以不需要手动模板化 atomic_upsert<...>
         _hash_table.atomic_upsert(key, [](uint64_t& value) { value += 1;}, 1);
+    }
+
+    void increment(TYPE_K&& key) {
+        // 移动右值引用 key, 保证触发 atomic_upsert 的移动语义版本
+        _hash_table.atomic_upsert(std::move(key), [](uint64_t& value) { value += 1;}, 1);
     }
 
     // 暴露哈希表的clear方法. 析构哈希表, 但不release/reset哈希表所占的内存池空间, 同时表结构也不会变化
