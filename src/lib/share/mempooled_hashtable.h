@@ -259,7 +259,7 @@ public:
         // 首先查找 key 是否已经存在. 若 key 存在, 修改原 value 到 新value
         for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
             if (cur->key == key) { // 在函数体内部, key 是具名变量, 所以不管其函数参数签名是 左/右值引用, 具名变量都被视为左值. ==操作符应该接受const&不改变操作数.key安全
-                 // 如果用value(具名变量作为左值), 会触发TYPE_V的拷贝赋值. 但语义上若value在参数签名处为 右值引用时, 调用本意应该是移动构造
+                // 如果用value(具名变量作为左值), 会触发TYPE_V的拷贝赋值. 但语义上若value在参数签名处为 右值引用时, 调用本意应该是移动构造
                 cur->value = std::forward<V>(value); // 用std::forward完美转发, 保持 value 的右值语义(如果最开始是右值), 得以触发TYPE_V的移动赋值(如果有)
                 return true;
             }
@@ -277,7 +277,7 @@ public:
             // 更新 _free_nodes_head
             // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
             _free_nodes_head = std::launder(new_node)->free_next;
-            //new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
+            // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
             // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
 
             // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next

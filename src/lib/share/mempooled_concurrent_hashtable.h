@@ -78,7 +78,16 @@ private:
         TYPE_V value;
         HashTableNode* next;
         HashTableNode* free_next = nullptr;
+        // 拷贝构造
         HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+        // 拷贝赋值
+        HashTableNode& operator=(const HashTableNode& other) = delete;
+        // 移动构造
+        HashTableNode(TYPE_K&& k, TYPE_V&& v, HashTableNode* ptr): key(std::move(k)), value(std::move(v)), next(ptr) {}
+        // 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形需要重载: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
+        HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
+        // 移动赋值
+        HashTableNode& operator=(HashTableNode&& other) = delete;
     };
     
     void destroy_node(HashTableNode* node) {
@@ -155,13 +164,6 @@ private:
         // 初始化一个新的 table
         HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
         if (!_new_table) throw std::bad_alloc();
-        
-        // 新的非空桶列表 --> 废弃
-        // std::vector<size_t> _new_occupied_indices;
-        // _new_occupied_indices.reserve(_occupied_indices.size());
-
-        // // 新的gc链表(仅地址, 将用 .store 原子操作移植到 _all_nodes_head)  --> 废弃
-        // HashTableNode* _new_all_nodes_head = nullptr;
 
         // 重新计算 _size, 为缩容式 rehash 留下余地. 不过缩容式rehash必要性不大: 避免频繁rehash
         size_t actual_node_count = 0;
@@ -175,18 +177,9 @@ private:
                 HashTableNode* next = curr->next; // 先取出next node
                 size_t new_index = hash(curr->key) % new_capacity; // 计算得出新bucket
 
-                // const bool was_empty = (_new_table[new_index] == nullptr); --> 废弃
-
                 // 头插到新桶
                 curr->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = curr; // 更新确认新bucket的链表头
-
-                // // 若空桶->非空, 记录 --> 废弃
-                // if (was_empty) _new_occupied_indices.push_back(new_index);
-
-                // // 头插到新的gc链表 --> 废弃
-                // curr->gc_next = _new_all_nodes_head;
-                // _new_all_nodes_head = curr;
 
                 // _free_nodes_head 不需要变动
 
@@ -203,8 +196,6 @@ private:
         _capacity = new_capacity;
         _size.store(actual_node_count, std::memory_order_relaxed);
         _resize_threshold.store(static_cast<size_t>(new_capacity * _max_load_factor), std::memory_order_relaxed); // 更新 下一次 rehash 的 size 阈值
-        // _occupied_indices.swap(_new_occupied_indices); --> 废弃
-        // _all_nodes_head.store(_new_all_nodes_head, std::memory_order_relaxed); --> 废弃
         // _free_nodes_head 不需要变动
     }
 
@@ -242,6 +233,14 @@ public:
         destroy();
     }
 
+    /*
+    * 根据键获取值
+    * @param key: 不可变引用即可. 查询不应该改变源. 即使源是右值(移动或临时资源等), const& 也能有效接收
+    * @param value: 可变引用, 存储查询到的值
+    * @return 如果查询成功, 返回true; 如果查询失败返回false
+    * 
+    * 行为: 若 key 存在, 则获取对应的 value 到可变引用, 返回 true; 否则返回 false
+    */
     bool get(const TYPE_K& key, TYPE_V& value) {
         // 并发锁: 此操作(get)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
@@ -263,14 +262,17 @@ public:
     }
 
     /*
-    * 插入或更新键值对
-    * @param key
-    * @param value
+    * 语义等同于 std::unordered_ma.insert_or_assign: 有则更新，无则插入
+    * @param key: 可能是左值/常左值, 此时 key 类型为 TYPE_K&/const TYPE_K&, 源对象不会被掏空; 也可能是右值(临时/移动), 此时 key 类型为 TYPE_K&&, 源对象会被掏空
+    * @param value: 同 key
+    * key-pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
+    * ---> 模板函数
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
     * 
     * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
     */
-    bool insert(const TYPE_K& key, const TYPE_V& value) {
+   template <typename K, typename V>
+    bool insert(K&& key, V&& value) {
         // 并发锁: 此操作(insert)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
         
@@ -283,14 +285,13 @@ public:
 
             for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
                 if (cur->key == key) {
-                    cur->value = value;
+                    // 如果用value(具名变量作为左值), 会触发TYPE_V的拷贝赋值. 但语义上若value在参数签名处为 右值引用时, 调用本意应该是移动构造
+                    cur->value = std::forward<V>(value); // 用std::forward完美转发, 保持 value 的右值语义(如果最开始是右值), 得以触发TYPE_V的移动赋值(如果有)
                     return true;
                 }
             }
 
             // 如果执行到这里, 说明要么 _table[index] 是 nullptr, 要么 _table[index] 链表里没有 key
-
-            // const bool was_empty = (_table[index] == nullptr); 记录 _table[index]是否为空. _occupied_indices已经废弃
 
             // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
             HashTableNode* new_node = nullptr;
@@ -324,14 +325,16 @@ public:
 
             if (new_node) {
                 // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-                new(new_node) HashTableNode{key, value, _table[index]};
+                new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+                // 完美转发以保持key和value的 左/右 值引用性质, 才能触发对应的 HashTableNode 构造函数(左(常)值引用-->拷贝, 右值引用-->移动)
+                // 如果传入的是右值引用，那么源对象会被掏空. 这样调用的本意就是转移资源，所以不介意源被掏空.
             }
             else {
                 // 空闲列表为空, 申请新内存
                 void* raw_mem = _pool->allocate(sizeof(HashTableNode));
                 if (!raw_mem) return false;
 
-                new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+                new_node = new(raw_mem) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
             }
 
             _table[index] = new_node;
@@ -341,9 +344,6 @@ public:
             // do {
             //     new_node->gc_next = old; // 头插 gc 链
             // } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
-
-            // // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全. --> 废弃
-            // if (was_empty) _occupied_indices.push_back(index);
 
             // node数量自加1. 原子线程安全
             // std::memory_order_relaxed 就可以保证原子安全. 但未来若需要在某些线程里仅靠_size来判断是否有数据写入, 这个模式不安全.
@@ -398,9 +398,22 @@ public:
         return true;
     }
 
-    // upsert 操作: 当 key 存在时, 用 updater 更新对应 value; 当 key 不存在时, 插入 key-default_val
-    template <typename FUNC>
-    bool atomic_upsert(const TYPE_K& key, FUNC&& updater, const TYPE_V& default_val) {
+    /*
+    * @param key: 可能是左值/常左值, 此时 key 类型为 TYPE_K&/const TYPE_K&, 源对象不会被掏空; 也可能是右值(临时/移动), 此时 key 类型为 TYPE_K&&, 源对象会被掏空
+    * @param updater: 
+        updater 应该是一个函数指针, 比如 函数指针 std::function<void(TYPE_V&)> 或
+        函数指针的左值引用 std::function<void(TYPE_V&)>& 或
+        函数指针的const&引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
+        这里采用最灵活的模板写法, &&万能引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
+    * @param default_val: 不同于 key, key的源对象不在乎会不会掏空 --> 计数或插入了就行. 而 default_value 完全很可能是重复使用的, 所以不应该被掏空 --> 用const&
+    * key-pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
+    * ---> 模板函数
+    * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
+    * 
+    * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
+    */
+    template <typename K, typename FUNC>
+    bool atomic_upsert(K&& key, FUNC&& updater, const TYPE_V& default_val) {
         // 并发锁: 此操作(update by insert)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
 
@@ -420,8 +433,6 @@ public:
             }
 
             // 如果执行到这里, 说明要么 _table[index] 是 nullptr, 要么 _table[index] 链表里没有 key, 无法执行 update 逻辑
-
-            // const bool was_empty = (_table[index] == nullptr); 记录 _table[index]是否为空. _occupied_indices已经废弃
 
             // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
             HashTableNode* new_node = nullptr;
@@ -455,14 +466,14 @@ public:
 
             if (new_node) {
                 // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-                new(new_node) HashTableNode{key, default_val, _table[index]};
+                new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
             }
             else {
                 // 空闲列表为空, 申请新内存
                 void* raw_mem = _pool->allocate(sizeof(HashTableNode));
                 if (!raw_mem) return false;
 
-                new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+                new_node = new(raw_mem) HashTableNode{std::forward<K>(key), default_val, _table[index]};
             }
 
             _table[index] = new_node;
@@ -472,9 +483,6 @@ public:
             // do {
             //     new_node->gc_next = old; // 头插 gc 链
             // } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
-
-            // // 如果 空 -> 非空, 那么记录桶号 ERROR: 表级读锁, 桶/条带级写锁, 无法保护 _occupied_indices 的 push_back 操作的线程安全. --> 废弃
-            // if (was_empty) _occupied_indices.push_back(index);
 
             _size.fetch_add(1);
         }
@@ -496,7 +504,7 @@ public:
 
     /*
     * 从哈希表获取值, 并移除键值对
-    * @param key: 不可变引用
+    * @param key: 不可变引用. pop不会涉及 new hashtable node的构造，故在key-value资源移动/拷贝之间的优化空间非常少.
     * @param value: 可变引用, 存取查询到的值
     * @return 如果查询到, 则将值拷贝进入value, 从哈希表移除键值对, 返回true; 如果未查询到则返回false
     * 
@@ -593,7 +601,6 @@ public:
         std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
 
         // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
-        // for (size_t index: _occupied_indices)
         for (size_t index = 0; index < _capacity; ++index) {
             HashTableNode* head = _table[index];
             // 若 node 需要非平凡析构. constexpr 关键字的意思是在编译期求值: 即编译期即可知道括号内是true还是false
@@ -608,11 +615,6 @@ public:
 
             _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
-
-        // // gc 链表置空 --> 废弃
-        // _all_nodes_head = nullptr;
-        // // 非空桶置空 --> 废弃
-        // _occupied_indices.clear();
 
         _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
         _size.store(0, std::memory_order_relaxed);
