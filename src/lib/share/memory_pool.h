@@ -59,7 +59,7 @@ public:
     // 分配指定大小的内存, 非静态, 依赖成员变量 _blocks 等
     void* allocate(size_t size); // 如果当前块不足以容纳, 则申请新块
 
-    void dealloc_large(void* ptr) ; //如果 ptr 记录在 _large_allocs 中，会被释放; 否则不会被释放
+    void dealloc_large(void* ptr); //如果 ptr 记录在 _large_allocs 中，会被释放; 否则不会被释放
 
     void shrink(size_t max_num = 1) ; //缩小block数量, 释放部分尚未使用的block. 必须要在 reset之前用. 因为reset会重置所有block.used=false
 
