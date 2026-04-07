@@ -1639,6 +1639,7 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
 
 
 import heapq
+from collections import defaultdict
 
 class BBPETokenizer(baseBBPETokenizer):
 
@@ -1676,7 +1677,7 @@ class BBPETokenizer(baseBBPETokenizer):
 
         # merge_loop
         merge_cnts = 0
-        while merge_cnts <= num_merges:
+        while merge_cnts < num_merges:
             _, ((l_tok, r_tok), counts, positions) = heapq.heappop(max_heap)
 
             if counts != pair_counts[(l_tok, r_tok)]:
@@ -1684,6 +1685,33 @@ class BBPETokenizer(baseBBPETokenizer):
                 heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
                 continue
 
+            # merge
+            new_tok = 256 + merge_cnts
+
+            # changes: records of new generated/vanished pairs triggered by mergeing l_tok, r_tok along with positions
+            generated = defaultdict() # dict of position: generated pairs pos: [(l_tok, r_tok), ]
+            vanished = defaultdict() # dict of position: vanished pairs pos: [(l_tok, r_tok), ]
             for pos in positions:
                 # generate changes for unique_words at index pos
-                
+                if pos not in generated:
+                    generated[pos] = []
+                if pos not in vanished:
+                    vanished[pos] = []
+
+                # abcbc -> aXbc -> aXX
+                # abcabc -> aXabc -> aXaX
+                # bcdbca -> Xdbca -> XdXa
+                word = unique_words[pos]
+                length = len(word)
+
+                for i in range(length-1):
+                    # index i & i+1 match l_tok, r_tok
+                    if word[i] == l_tok and word[i+1] == r_tok:
+                        # vanished 1: the matched pair
+                        vanished[pos].append((l_tok, r_tok))
+                        # vanished 2: if there is a previous token prev_tok, then pair (prev_tok, l_tok) vanished
+                        if i > 0:
+                            vanished[pos].append((word[i-1], l_tok))
+                        # vanished 3: if there is following token fol_tok, then pair (r_tok, fol_tok) vanished
+                        if i+1 < length-1:
+                            vanished[pos].append((r_tok, word[i+2]))
