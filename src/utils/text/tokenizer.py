@@ -1634,3 +1634,56 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
+
+
+
+
+import heapq
+
+class BBPETokenizer(baseBBPETokenizer):
+
+    def train_bpe(self, corpora, num_merges = None, verbose = False, *args, **kwargs):
+        # corpora: bag-of-words <-- list of unique words, counts, indices
+        unique_words = ['abcbc', 'abcabc', 'bcdbca']
+        unique_words = [list( map(ord, word) ) for word in unique_words]
+        counts = [3, 5, 2]
+        BoW = (unique_words, counts)
+
+        # pair_counts <-- dict of pairs-counts: (l_tok, r_tok): cnts_of_key_pair 
+        # where_to_update <-- dict of pairs-positions: (l_tok, r_tok): postions_of_key_pair
+        pair_counts = {}
+        where_to_update = {}
+        for iw, word in enumerate(unique_words):
+            for l_tok, r_tok in zip(word[:-1], word[1:]):
+                if (l_tok, r_tok) not in pair_counts:
+                    pair_counts[(l_tok, r_tok)] = counts[iw]
+                else:
+                    pair_counts[(l_tok, r_tok)] += counts[iw]
+
+                if (l_tok, r_tok) not in where_to_update:
+                    where_to_update[(l_tok, r_tok)] = set([iw])
+                else:
+                    where_to_update[(l_tok, r_tok)].add(iw)
+        
+        # heap: maxHeap to always pop out token-pairs with max counts along with its positions
+        max_heap = []
+
+        for tok_pair, positions in where_to_update.items():
+            # node: (tokens_pair, counts_pair, positions_pair)
+            to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
+            heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
+        
+
+        # merge_loop
+        merge_cnts = 0
+        while merge_cnts <= num_merges:
+            _, ((l_tok, r_tok), counts, positions) = heapq.heappop(max_heap)
+
+            if counts != pair_counts[(l_tok, r_tok)]:
+                to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
+                heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
+                continue
+
+            for pos in positions:
+                # generate changes for unique_words at index pos
+                
