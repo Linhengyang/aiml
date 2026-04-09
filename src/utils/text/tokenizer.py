@@ -1639,21 +1639,50 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
 
 
 import heapq
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 class BBPETokenizer(baseBBPETokenizer):
+    '''
+    Huggingface/Tokenizer:
+    step 0: 统计 词袋bag-of-word, 构建 序列unique_words 和 序列counts, 记录它们的 index 为 positions
+    step 1: 从 词袋bag-of-word 中统计token-pair的频数和倒排positions, 即 字典pair_counts{pair: int_counts} 和 字典where_to_update{pair: set_positions}
+    step 2: 构建 三元组(token-pair, p_cnts, positions), 分别指 token-pair, 其频数, 其倒排索引. 将 三元组 push 入一个 max_heap, 以频数排序. 清空 where_to_update
+    循环 num_merges 次 step 3:  --> 始终维持一个 绝对正确的pair频数统计 pair_counts, 从max_heap中取出顶端三元组, 将max-pair执行于 unique_words, 产出 changes 更新 pair_counts 和 where_to_update
+        step 3.1: 从 max_heap 中 pop 出顶端node三元组, 检查其 p_cnts 是否与 pair_counts 符合. 如果不符合说明该pair的p_cnts被更新过, 更新三元组并重新push入 max_heap 重排序.
+        step 3.2: 取得 有效的 最大p_cnts 三元组(token-pair, p_cnts, positions), 得到待合并tokens和new_token, 针对 positions 中的每一个 pos, 对该pos代表的 unique word 执行 pair-merge, 产出 changes
+            即已有 待合并tokens(l_tok, r_tok)-->new_tok, 遍历 positions 的所有 pos ---> 对 当前 pos 的 unique_word, 产出 该 pos 对应的 changes:
+                从 index = 0 开始扫描 unique_word 直到其末尾, 每当匹配到 一对(l_tok, r_tok) 时, 输出(l_tok, r_tok)-->nwe_tok与其前/后邻域 组成的 pair增减记录 到 changes
+                实时 in-place 改动 unique_word, 扫描 index 自增 1
+            ---> changes of the pos: 序列(changed_pair, change_signal)
+        step 3.3: 将 changes of all positions 用于更新 pair_counts 和 where_to_update.
+            changes of all positions: 对于某个pos, 其中每个 changed_pair, 其 changed_signal 代表了 该pair在该pos位置的unique_word中的增减信号
+            pair_counts 更新:
+                遍历 changes of all positions, 针对其中每个 changed_pair, changed_signal * counts[pos] 就是 单个pos 为该 changed_pair 贡献的 pair-counts 增量
+                加总所有 pos of positions, 可以更新该 changed_pair 到正确频数.
+            where_to_update 更新:
+                遍历 changes of all positions, 取出 正 changed_signal 的 changed_pair, 正信号意味着该 changed_pair在该unique_word是新增的
+                将 pos 增加到 where_to_update 中 该 changed_pair 对应的 positions 中. 如此意味着 where_to_update 收集了每个 new emerged pair 在 序列unique_words 中存在的最大可能位置索引候选集
+        step 3.4: 将 where_to_update 中所有 new emerged pair & positions, 构建三元组(token-pair, p_cnts, positions), push入 max_heap. 清空 where_to_update.
+            max_heap 自排序, 顶端将会是 旧pair和new emerged pair共同竞争出的当前最大p_cnts pair. ---> max_heap 是全周期内所有pair共同的竞技场, 除了被pop出去的胜者pair.
+    '''
+    def train_bpe(self, corpora, num_merges = None, verbose = True, *args, **kwargs):
+        self._clear()
+        self._prepare_train(num_merges)
 
-    def train_bpe(self, corpora, num_merges = None, verbose = False, *args, **kwargs):
-        # corpora: bag-of-words <-- list of unique words, counts, indices
-        unique_words = ['abcbc', 'abcabc', 'bcdbca']
-        unique_words = [list( map(ord, word) ) for word in unique_words]
-        counts = [3, 5, 2]
+        if isinstance(corpora, str):
+            corpora = [corpora]
+        corpus = ENDOFTEXT.join( corpora )
+        chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
+        BoW = Counter(chunks_str)
+
+        # bag-of-words <-- list of unique words, counts, indices
+        unique_words = [list( word.encode('utf-8') ) for word in BoW.keys()]
+        counts = list(BoW.values())
 
         # pair_counts <-- dict of pairs-counts: (l_tok, r_tok): int of cnts_of_key_pair 
         # where_to_update <-- dict of pairs-positions: (l_tok, r_tok): set of postions_of_key_pair
         pair_counts = defaultdict(int)
         where_to_update = defaultdict(set)
-
         for pos, word in enumerate(unique_words):
             for l_tok, r_tok in zip(word[:-1], word[1:]):
                 # defaultdict of int: 当 (l_tok, r_tok) 不存在时, 插入该 key 并设置 default value 为 0 / set()
@@ -1672,7 +1701,7 @@ class BBPETokenizer(baseBBPETokenizer):
 
         # merge_loop
         merge_cnts = 0
-        while merge_cnts < num_merges:
+        while merge_cnts < self._num_train_epochs:
             try:
                 _, (tok_pair, p_counts, positions) = heapq.heappop(max_heap)
             except IndexError:
@@ -1689,10 +1718,9 @@ class BBPETokenizer(baseBBPETokenizer):
             # BPE begin: we got tok_pair(l_tok, r_tok), positions(indices of unique words to execute merge)
             new_tok = 256 + merge_cnts
             l_tok, r_tok = tok_pair
-            print(f'merge {(l_tok, r_tok)} to {new_tok}: occurence {p_counts}')
+            self._update_tokenizer((l_tok, r_tok), new_tok, p_counts if verbose else None)
 
             for pos in positions:
-
                 # changes: records of emerged(+1)/vanished(-1) pairs triggered by mergeing l_tok, r_tok among this word at unique_words[pos]
                 changes = [] # list of pair-signal: [(l_tok, r_tok), +-1]
 
@@ -1703,11 +1731,12 @@ class BBPETokenizer(baseBBPETokenizer):
                 word = unique_words[pos] # in-place update word
                 i = 0
                 while True:
-                    # escape the loop when i reaches the last token
+                    # escape the loop when i reaches the last token(which means i+1 invalid)
                     if i >= len(word)-1:
                         break
+
                     # i+1 still valid
-                    # pair-found! when pair index i & i+1 match l_tok, r_tok.
+                    # the-pair found! when pair index i & i+1 match l_tok, r_tok.
                     if word[i] == l_tok and word[i+1] == r_tok:
                         # record the changes except the merging pair l_tok, r_tok: it was poped out from heap
                         # since the merging pair will no longer be used/encountered, no need to update its pair-counts to 0 --> no need to record in changes
@@ -1736,13 +1765,15 @@ class BBPETokenizer(baseBBPETokenizer):
             # use where_to_update to update heap
             for tok_pair, positions in where_to_update.items():
                 # node: (tokens_pair, counts_pair, positions_pair)
-                to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
-                heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
+                if pair_counts[tok_pair] > 0:
+                    to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
+                    heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
 
             merge_cnts += 1
             where_to_update = defaultdict(set)
 
-
+        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
+        self._register_special_tokens()
 
 
 
