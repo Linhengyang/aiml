@@ -1728,7 +1728,7 @@ class BBPETokenizer(baseBBPETokenizer):
                 # abcbc -> aXbc -> aXX
                 # abcabc -> aXabc -> aXaX
                 # bcdbca -> Xdbca -> XdXa
-                word = unique_words[pos] # in-place update word
+                word = unique_words[pos] # in-place update word, which in-place update unique_words
                 i = 0
                 while True:
                     # escape the loop when i reaches the last token(which means i+1 invalid)
