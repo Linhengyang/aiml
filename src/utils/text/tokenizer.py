@@ -1675,9 +1675,9 @@ class BBPETokenizer(baseBBPETokenizer):
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
         BoW = Counter(chunks_str)
 
-        # bag-of-words <-- list of unique words, counts, indices
+        # bag-of-words <-- list of unique words, freqs, indices
         unique_words = [list( word.encode('utf-8') ) for word in BoW.keys()]
-        counts = list(BoW.values())
+        freqs = list(BoW.values())
 
         # pair_counts <-- dict of pairs-counts: (l_tok, r_tok): int of cnts_of_key_pair 
         # where_to_update <-- dict of pairs-positions: (l_tok, r_tok): set of postions_of_key_pair
@@ -1686,7 +1686,7 @@ class BBPETokenizer(baseBBPETokenizer):
         for pos, word in enumerate(unique_words):
             for l_tok, r_tok in zip(word[:-1], word[1:]):
                 # defaultdict of int: 当 (l_tok, r_tok) 不存在时, 插入该 key 并设置 default value 为 0 / set()
-                pair_counts[(l_tok, r_tok)] += counts[pos]
+                pair_counts[(l_tok, r_tok)] += freqs[pos]
                 where_to_update[(l_tok, r_tok)].add(pos)
         
         # heap: maxHeap to always pop out token-pairs with max counts along with its positions
@@ -1757,7 +1757,7 @@ class BBPETokenizer(baseBBPETokenizer):
                 # apply the changes of this position to pair_counts & where_to_update
                 for pair, change in changes:
                     # update the counts of pair by change * cnts of the word
-                    pair_counts[pair] += change*counts[pos]
+                    pair_counts[pair] += change*freqs[pos]
                     # add the emerged pairs to where_to_udpate
                     if change > 0:
                         where_to_update[pair].add(pos)
