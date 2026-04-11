@@ -1690,6 +1690,8 @@ class BBPETokenizer(baseBBPETokenizer):
         unique_words: t.List[Word] = [Word(list(string.encode('utf-8'))) for string in BoW.keys()]
         freqs = list(BoW.values())
 
+        # unique_words 和 freqs 成为 BPE 的全部基础. 根据 freqs 是否大于等于一个阈值, 可以有效控制 BoW 的总size, 将整个过程控制在单机运行
+
         pair_counts = defaultdict(int)
         where_to_update = defaultdict(set)
         for pos, word in enumerate(unique_words):
