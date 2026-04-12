@@ -1677,7 +1677,7 @@ class Word:
 
 class BBPETokenizer(baseBBPETokenizer):
 
-    def train_bpe(self, corpora, num_merges = None, verbose = True, *args, **kwargs):
+    def train_bpe(self, corpora, num_merges = None, verbose = True, min_freq: int = None, *args, **kwargs):
         self._clear()
         self._prepare_train(num_merges)
 
@@ -1687,10 +1687,13 @@ class BBPETokenizer(baseBBPETokenizer):
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus)
         BoW = Counter(chunks_str)
 
-        unique_words: t.List[Word] = [Word(list(string.encode('utf-8'))) for string in BoW.keys()]
-        freqs = list(BoW.values())
-
         # unique_words 和 freqs 成为 BPE 的全部基础. 根据 freqs 是否大于等于一个阈值, 可以有效控制 BoW 的总size, 将整个过程控制在单机运行
+        unique_words = []
+        freqs = []
+        for k, v in BoW.items():
+            if min_freq and v >= min_freq: # min_freq典型取2, 即过滤掉只出现一次的超长尾unique_word. 这些words占用大量空间但对BPE的影响权重较小.
+                unique_words.append( Word(list(k.encode('utf-8'))) )
+                freqs.append( v )
 
         pair_counts = defaultdict(int)
         where_to_update = defaultdict(set)
@@ -1706,8 +1709,12 @@ class BBPETokenizer(baseBBPETokenizer):
 
         where_to_update = defaultdict(set)
 
-        merge_cnts = 0
-        while merge_cnts < self._num_train_epochs:
+        # 这里可以存下一个checkpoint: unique_words/freqs/pair_counts/max_heap, where_to_update为空, merge_cnts=0
+        # save checkpoint
+        # load checkpoint
+
+        merge_cnts = 0 # len(self._merge_ranks)
+        while merge_cnts < self._num_train_epochs: # _num_train_epochs = num_merges - len(merge_ranks)
             try:
                 _, (tok_pair, p_counts, positions) = heapq.heappop(max_heap)
             except IndexError:
