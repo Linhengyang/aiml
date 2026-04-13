@@ -1768,6 +1768,8 @@ class bbpeTokenizer(baseBBPETokenizer):
 
     pair_counts: hashmap{u64: u64} as {token_pair: p_cnts}, insert/update, valid-live during the BPE
     pos/iw/word_index: size_t, index of unique_words
-    positions: 
-    where_to_update: hashmap{u64: }
+    positions: unordered_set of pos correspondint to a token-pair, const once created, valid-live during untill the token-pair merged
+    
+    where_to_update: hashmap{u64: unordered_set} as {token_pair: positions}.                   --->drain    |---> empty
+    max_heap: max priority_queue with node{token-pair, p_cnts, positions} via p_cnts(max_order)--->push/pop |---> valid-live during the BPE
     '''
