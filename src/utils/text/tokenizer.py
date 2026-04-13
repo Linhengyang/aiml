@@ -354,8 +354,7 @@ class baseBBPETokenizer(Tokenizer):
              yield_tokens = e.map(encode_to_ints, chunks_str) # a generator
         
         # <merge循环有前后依赖，所以不能并行>
-        # <从init_merge_ranks_size续训num_train_epochs轮次, rank从init_merge_ranks_size到total_size-1>
-        for i in range(self._num_train_epochs):
+        for i in range(self._num_merges): # _num_merges == _num_train_epochs, i 从 0 到 num_merges-1
             # rank := i + init_merge_ranks_size = i + 0 = i: 0, ..., _num_mergs-1
             yield_output = self.bpe_single_merge(i, yield_tokens, verbose)
             occur_most_pair, occurence, new_token = next(yield_output) # first yield
@@ -1659,7 +1658,7 @@ class Word:
         
         return changes
     
-    def yield_tokpair(self):
+    def window_pair(self):
         for l, r in zip(self._tokens[:-1], self._tokens[1:]):
             yield (l, r)
 
@@ -1684,9 +1683,12 @@ class BBPETokenizer(baseBBPETokenizer):
         if isinstance(corpora, str):
             corpora = [corpora]
         corpus = ENDOFTEXT.join( corpora )
+
+        # 1. 计算 word_counts, 即 词袋 bag-of-word
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus)
         BoW = Counter(chunks_str)
 
+        # 2. 初步 tokenize, 将 string 切分成 tokens
         # unique_words 和 freqs 成为 BPE 的全部基础. 根据 freqs 是否大于等于一个阈值, 可以有效控制 BoW 的总size, 将整个过程控制在单机运行
         unique_words = []
         freqs = []
@@ -1695,10 +1697,11 @@ class BBPETokenizer(baseBBPETokenizer):
                 unique_words.append( Word(list(k.encode('utf-8'))) )
                 freqs.append( v )
 
+        # 3. 计算 pair_counts & where_to_update & max_heap. 可并行
         pair_counts = defaultdict(int)
         where_to_update = defaultdict(set)
         for pos, word in enumerate(unique_words):
-            for tok_pair in word.yield_tokpair():
+            for tok_pair in word.window_pair():
                 pair_counts[tok_pair] += freqs[pos]
                 where_to_update[tok_pair].add(pos)
         
@@ -1706,15 +1709,11 @@ class BBPETokenizer(baseBBPETokenizer):
         for tok_pair, positions in where_to_update.items():
             to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
             heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
-
         where_to_update = defaultdict(set)
 
-        # 这里可以存下一个checkpoint: unique_words/freqs/pair_counts/max_heap, where_to_update为空, merge_cnts=0
-        # save checkpoint
-        # load checkpoint
-
-        merge_cnts = 0 # len(self._merge_ranks)
-        while merge_cnts < self._num_train_epochs: # _num_train_epochs = num_merges - len(merge_ranks)
+        # 4. 执行 merge: 不断从 max_heap 中得到 max-occured-pair, 对 unique_words 作 inplace-merge, 产出相应 changes 来 update pair_counts & max_heap
+        merge_cnts = 0 # BBPETokenizer 和 baseBBPETokenizer 一样, 只支持从头开始BPE train, 不支持中途续train
+        while merge_cnts < self._num_merges: # _num_merges == _num_train_epochs
             try:
                 _, (tok_pair, p_counts, positions) = heapq.heappop(max_heap)
             except IndexError:
@@ -1734,6 +1733,7 @@ class BBPETokenizer(baseBBPETokenizer):
             self._update_tokenizer((l_tok, r_tok), new_tok, p_counts if verbose else None)
 
             changes = []
+            # 这里 positions 是 不会重复的 set, 所以可并行
             for pos in positions:
                 word = unique_words[pos]
                 _changes = word.merge(l_tok, r_tok, new_tok)
@@ -1753,3 +1753,21 @@ class BBPETokenizer(baseBBPETokenizer):
             
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
+
+
+
+class bbpeTokenizer(baseBBPETokenizer):
+    '''
+    token: u32
+    BoW: hashmap{string: u64} as {word_str: freq}
+
+    Word: class with vector of tokens, and method merge(in-place change vector of tokens, return changes), and method window_pair(const iterator of token-pair)
+    
+    unique_words: vector of Word, in-place change, valid-live during the BPE
+    freqs: vector of word_counts(u64), const, valid-live during the BPE
+
+    pair_counts: hashmap{u64: u64} as {token_pair: p_cnts}, insert/update, valid-live during the BPE
+    pos/iw/word_index: size_t, index of unique_words
+    positions: 
+    where_to_update: hashmap{u64: }
+    '''
