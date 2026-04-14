@@ -1756,20 +1756,52 @@ class BBPETokenizer(baseBBPETokenizer):
 
 
 
+def 
+
 class bbpeTokenizer(baseBBPETokenizer):
     '''
+    data structures:
     token: u32
-    BoW: hashmap{string: u64} as {word_str: freq}
-
     Word: class with vector of tokens, and method merge(in-place change vector of tokens, return changes), and method window_pair(const iterator of token-pair)
-    
+    pos/iw/word_index: size_t, index of unique_words
+
+    object:
+    BoW: hashmap{string: u64} as {word_str: freq}, useless once unique_words & freqs established
     unique_words: vector of Word, in-place change, valid-live during the BPE
     freqs: vector of word_counts(u64), const, valid-live during the BPE
 
     pair_counts: hashmap{u64: u64} as {token_pair: p_cnts}, insert/update, valid-live during the BPE
-    pos/iw/word_index: size_t, index of unique_words
     positions: unordered_set of pos correspondint to a token-pair, const once created, valid-live during untill the token-pair merged
     
-    where_to_update: hashmap{u64: unordered_set} as {token_pair: positions}.                   --->drain    |---> empty
-    max_heap: max priority_queue with node{token-pair, p_cnts, positions} via p_cnts(max_order)--->push/pop |---> valid-live during the BPE
+    where_to_update: hashmap{u64: unordered_set} as {token_pair: positions}---> drain ---> empty ---> update from changes ---> a lot of insert/remove
+    max_heap: max priority_queue with node{token-pair, p_cnts, positions} via p_cnts(max_order)---> push/pop ---> valid-live during the BPE
+
+    design-mode:
+    for objects who are valid-live untill termination, no need for rapid re-use/re-construction ---> stay in system heap memory, std::move when transfer
+    ---> unique_words, freqs, pair_counts, positions, max_heap
+    for objects who are with a lot of insert/remove operations, need for rapid re-use/re-construction --> built on memory pool
+    ---> where_to_update 
+    
+    where_to_update: hashmap{u64: unordered_set} as {token_pair: positions}: hashmap nodes on memory pool, but value(positions) managed on system heap memory
+    unique_words / freqs / pair_counts / max_heap: stay in system heap memory
     '''
+
+    def _get_bow(
+        corpora: t.List[str]|str,
+        column: t.List[str]|str|None,
+        save_dir: str|None,
+        save_schema,
+        to_bytes: bool = True) -> dict|None:
+        '''
+        args:
+        corpora: 语料. 文本或parquet文件path
+        column: 如果 corpora 是parquet文件path, 那么column是语料指定列名
+        save_dir: BoW保存地址. 如果None, 说明不需要保存, 直接返回 BoW as dict
+        save_schema: 如果保存BoW, 那么save_schema是保存结果的schema
+        to_bytes: if True, 把string转换为0-255的整数. else, 保持string
+
+        
+        '''
+        # 
+        local_counter = Counter()
+        local_counter.update()
