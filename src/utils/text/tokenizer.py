@@ -1760,9 +1760,13 @@ class bbpeTokenizer(baseBBPETokenizer):
         :save_schema: 如果保存BoW, 那么save_schema是保存结果的schema
         :to_bytes: if True, 把BoW的keys作utf-8编码并转换为0-255的整数. else, BoW的keys保持string
         '''
-        # 0. 对 corpora 启动 sharding 分片, 生成 pq.dataset 目录
-        # 1. 多进程并行对每个 shard 执行 worker:
-        # worker:
-        #   初始化一个local_counter, 读取parquet文件, iter_batches循环, 对每一个batch执行预切分
+        # 0 对 corpora 启动 sharding 分片, 生成 pq.dataset of text 目录
+        # 1 多进程并行对每个 shard 执行 worker:
+        # 2.map.worker:
+        #   初始化一个local_counter, 读取parquet文件, iter_batches循环, 对每一个batch执行预切分成 words 并 local_counter 计数. 如果to_bytes为True, words要utf8编码为0-255整数
+        #   worker部分可以使用 cython/C++ 加速: 使用 C++ 的unordered_map计数, local_counter计数完毕后, 遍历之至python dict对象.
+        # 2.reduce.collector:
+        #   使用Counter.update方法, 把map.worker得到的local_counter汇总 --> global_counter(python dict对象)
+        # 3 落盘 global_counter 的keys和values为parquet两列
         local_counter = Counter()
         local_counter.update()
