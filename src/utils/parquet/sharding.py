@@ -76,7 +76,7 @@ def shard_pq_to_ds(
 
     # 1. 确定 shard_row_size. 检查 总shard数量不能超过 10000
     if shard_size_mb:
-        shard_row_size = shard_size_mb // bytes_per_row
+        shard_row_size = max(1024, shard_size_mb*1024*1024 // bytes_per_row)
     assert num_total_rows // shard_row_size < 10000, \
         f'shard limitation {str(shard_size_mb)+'mb/shard' if shard_size_mb else shard_row_size + 'rows/shard'} too small'\
         f'which leads more than 10000 fragments in dataset.'

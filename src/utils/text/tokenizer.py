@@ -892,14 +892,15 @@ def text_to_byte_pa_table(pre_split_pat, text, tokens_schema):
     return batch_table
 
 
-def text_corpora_preprocess(
+def text_corpora_to_init_tokens_pqfiles(
         corpora: t.List[str]|str,
         column: t.List[str]|str|None,
+        pre_split_pat,
         save_dir,
         tokens_schema,
         batch_size) -> t.List[str]:
     '''
-    corpora_preprocess: 输入语料 corpora, 全部作 预切分+byte映射 之后, 存储 parquet 文件到 save_dir. 返回 byte-value parquet 目录列表
+    text_corpora_to_init_tokens_pqfiles: 输入语料 corpora, 全部作 预切分+byte映射 之后, 存储 parquet 文件到 save_dir. 返回 byte-value parquet 目录列表
     
     :param corpora: 语料. 可以是 1. parquet文件列表  2. 语料文本
     :param column: parquet列名. 与corpora对应. 若column is None, 说明corpora是语料文本而不是路径
@@ -916,7 +917,7 @@ def text_corpora_preprocess(
         else:
             import uuid
             init_tokens_path = os.path.join(save_dir, str(uuid.uuid3(uuid.NAMESPACE_DNS, corpora)))
-            tokens_table = text_to_byte_pa_table(GPT4_TOKENIZER_REGEX, corpora, tokens_schema)
+            tokens_table = text_to_byte_pa_table(pre_split_pat, corpora, tokens_schema)
             pq.write_table(tokens_table, init_tokens_path)
             return [init_tokens_path]
     
@@ -928,19 +929,19 @@ def text_corpora_preprocess(
         assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora]), \
             f'file-error with input copora {corpora}'
         
-        init_corpora = []
+        init_tokens_pq_files = []
         for (corpus, text_col) in zip(corpora, column):
             # 在 buffer_dir/内生成 对应的 byte-value tokens parquet file
             init_tokens_path = os.path.join(save_dir, os.path.basename(corpus))
             with pq.ParquetWriter(init_tokens_path, tokens_schema) as writer:
                 for batch in pq.ParquetFile(corpus).iter_batches(batch_size, columns=[text_col]):
                     text = ENDOFTEXT.join( batch[text_col].to_pylist() )
-                    tokens_table = text_to_byte_pa_table(GPT4_TOKENIZER_REGEX, text, tokens_schema)
+                    tokens_table = text_to_byte_pa_table(pre_split_pat, text, tokens_schema)
                     writer.write_table(tokens_table, batch_size)
 
-            init_corpora.append(init_tokens_path)
+            init_tokens_pq_files.append(init_tokens_path)
         
-        return init_corpora
+        return init_tokens_pq_files
 
 
 
@@ -1203,17 +1204,17 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
         
         assert keep_window >= 0
 
-        # 当 corpora is not None --> 作为语料从头train. 预处理语料 并 生成第一个tokens dataset: tokens/0
+        # 当 corpora is not None --> 作为语料从头train. 预处理语料(预切分/utf-8编码) 并 sharding生成第一个tokens dataset: tokens/0
         if corpora is not None:
             self._set_config(language, batch_size_level, memory_utilization) # 直接由输入参数确定 batch_size/num_workers/pool_batch_size_coef
             self._clear()
-            if format == 'text':
-                corpora = text_corpora_preprocess(corpora, column, self._buffer_dir, self.tokens_schema, self._batch_size)
-            else:
+            if format == 'text': # 如果输入 corpora 类型是 text, 要经过 预切分 -> utf-8编码成byte-value -> 重新写入为 tokens_schema 的 parquet文件
+                corpora = text_corpora_to_init_tokens_pqfiles(corpora, column, self.pat_str, self._buffer_dir, self.tokens_schema, self._batch_size)
+            else: # corpora类型若为 byte, 则默认上述预切分/utf-8编码已经执行完成. 检查parquet即可
                 assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora])
-            
+            # shard 语料, 方便并行处理
             self._init_tokens_dataset(corpora)
-        # 当 corpora is None --> 续train
+        # 当 corpora is None --> 续train. 直接从 buffer_tokens_dir 中取最新的 dataset
         else:
             # 从tokens/latest 推断 batch_size_level
             latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
@@ -1520,17 +1521,17 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
         
         assert keep_window >= 0
 
-        # 当 corpora is not None --> 作为语料从头train. 预处理语料 并 生成第一个tokens dataset: tokens/0
+        # 当 corpora is not None --> 作为语料从头train. 预处理语料(预切分/utf-8编码) 并 sharding生成第一个tokens dataset: tokens/0
         if corpora is not None:
             self._set_config(language, batch_size_level, memory_utilization) # 直接由输入参数确定 batch_size/num_workers/pool_batch_size_coef
             self._clear()
-            if format == 'text':
-                corpora = text_corpora_preprocess(corpora, column, self._buffer_dir, self.tokens_schema, self._batch_size)
-            else:
+            if format == 'text': # 如果输入 corpora 类型是 text, 要经过 预切分 -> utf-8编码成byte-value -> 重新写入为 tokens_schema 的 parquet文件
+                corpora = text_corpora_to_init_tokens_pqfiles(corpora, column, self.pat_str, self._buffer_dir, self.tokens_schema, self._batch_size)
+            else: # corpora类型若为 byte, 则默认上述预切分/utf-8编码已经执行完成. 检查parquet即可
                 assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora])
-            
+            # shard 语料, 方便并行处理
             self._init_tokens_dataset(corpora)
-        # 当 corpora is None --> 续train
+        # 当 corpora is None --> 续train. 直接从 buffer_tokens_dir 中取最新的 dataset
         else:
             # 从tokens/latest 推断 batch_size_level
             latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
@@ -1726,8 +1727,8 @@ class bbpeTokenizer(baseBBPETokenizer):
 
     object:
     BoW: hashmap{string: u64} as {word_str: freq}, useless once unique_words & freqs established
-    unique_words: vector of Word, in-place change, valid-live during the BPE
-    freqs: vector of word_counts(u64), const, valid-live during the BPE
+    BoW.keys().encode('utf-8')---Word---> unique_words: vector of Word, in-place change, valid-live during the BPE
+    BoW.values() ---> freqs: vector of word_counts(u64), const, valid-live during the BPE
 
     pair_counts: hashmap{u64: u64} as {token_pair: p_cnts}, insert/update, valid-live during the BPE
     positions: unordered_set of pos correspondint to a token-pair, const once created, valid-live during untill the token-pair merged
@@ -1745,22 +1746,23 @@ class bbpeTokenizer(baseBBPETokenizer):
     unique_words / freqs / pair_counts / max_heap: stay in system heap memory
     '''
 
-    def _get_bow(
+    def _get_BoW(
         corpora: t.List[str]|str,
         column: t.List[str]|str|None,
-        save_dir: str|None,
-        save_schema,
+        save_path: str|None,
+        save_schema: pa.Schema,
         to_bytes: bool = True) -> dict|None:
         '''
         args:
-        corpora: 语料. 文本或parquet文件path
-        column: 如果 corpora 是parquet文件path, 那么column是语料指定列名
-        save_dir: BoW保存地址. 如果None, 说明不需要保存, 直接返回 BoW as dict
-        save_schema: 如果保存BoW, 那么save_schema是保存结果的schema
-        to_bytes: if True, 把string转换为0-255的整数. else, 保持string
-
-        
+        :param corpora: 语料. 可以是 1. parquet文件列表  2. 语料文本
+        :param column: parquet列名. 与corpora对应. 若column is None, 说明corpora是语料文本而不是路径
+        :save_path: BoW保存为 parquet文件的 路径. 如果None, 说明不需要保存, 直接返回 BoW as dict
+        :save_schema: 如果保存BoW, 那么save_schema是保存结果的schema
+        :to_bytes: if True, 把BoW的keys作utf-8编码并转换为0-255的整数. else, BoW的keys保持string
         '''
-        # 
+        # 0. 对 corpora 启动 sharding 分片, 生成 pq.dataset 目录
+        # 1. 多进程并行对每个 shard 执行 worker:
+        # worker:
+        #   初始化一个local_counter, 读取parquet文件, iter_batches循环, 对每一个batch执行预切分
         local_counter = Counter()
         local_counter.update()
