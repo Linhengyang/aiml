@@ -951,6 +951,7 @@ from multiprocessing.util import Finalize
 
 import ext.bpeboost as bpeboost
 import pyarrow.dataset as ds
+from ..parquet.sharding import shard_pq_to_ds
 from ext.bpeboost import process_count_u16pair_batch, process_merge_u16pair_batch
 
 
@@ -1078,33 +1079,12 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
 
     # 从多个 init_tokens(parquet格式), 切分成 batches 到 fragments of init dataset: tokens/0
     def _init_tokens_dataset(self, init_tokens_pq_files: t.List[str]):
-        # 0. 检查 总的batch数量不能超过 10000
-        num_total_rows = sum( [pq.read_metadata(init_tokens_pq).num_rows for init_tokens_pq in init_tokens_pq_files] )
-        assert num_total_rows // self._batch_size < 10000, \
-            f'batch_size {self._batch_size} too small for parquet files {init_tokens_pq_files}, which leads more than 10000 fragments in dataset.'
-        
-        print(f'initalizing tokens dataset at merge 0: {num_total_rows//self._batch_size} fragments with batch_size {self._batch_size}')
-
-        # 1. 创建并清空 init_tokens_ds
-        init_tokens_ds = os.path.join(self._buffer_tokens_dir, '0')
-        os.makedirs(init_tokens_ds, exist_ok=True)
-
-        # 清空但保留 init_tokens_ds 文件夹
-        clean_folder(init_tokens_ds, method='all', keep=True)
-
-        # 2. 写入 common_metadata
-        pq.write_metadata(self.tokens_schema, os.path.join(init_tokens_ds, "_common_metadata"))
-
-        # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
-        # TODO: 改造成多线程/多进程 以加速
-        for init_tokens_pq in init_tokens_pq_files:
-            pq_file = pq.ParquetFile(init_tokens_pq)
-            for i, batch in enumerate( pq_file.iter_batches(self._batch_size, columns=[self.tokens_schema[0].name]) ):
-                b_table = pa.Table.from_batches([batch], self.tokens_schema)
-                b_path = os.path.join(init_tokens_ds, f'{os.path.basename(init_tokens_pq)}-part-{i:04d}.parquet')
-                pq.write_table(b_table, b_path)
-        
-        # 4. 写入完整 metadata --> 省略
+        shard_pq_to_ds(
+            pq_files = init_tokens_pq_files,
+            save_dir = os.path.join(self._buffer_tokens_dir, '0'),
+            shard_row_size = self._batch_size,
+            write_metadat = False
+        )
 
 
     def _start_tokens_ds(self, num_merges, executor):
@@ -1416,33 +1396,12 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
 
     # 从多个 init_tokens(parquet格式), 切分成 batches 到 fragments of init dataset: tokens/0
     def _init_tokens_dataset(self, init_tokens_pq_files: t.List[str]):
-        # 0. 检查 总的batch数量不能超过 10000
-        num_total_rows = sum( [pq.read_metadata(init_tokens_pq).num_rows for init_tokens_pq in init_tokens_pq_files] )
-        assert num_total_rows // self._batch_size < 10000, \
-            f'batch_size {self._batch_size} too small for parquet files {init_tokens_pq_files}, which leads more than 10000 fragments in dataset.'
-        
-        print(f'initalizing tokens dataset at merge 0: {num_total_rows//self._batch_size} fragments with batch_size {self._batch_size}')
-
-        # 1. 创建并清空 init_tokens_ds
-        init_tokens_ds = os.path.join(self._buffer_tokens_dir, '0')
-        os.makedirs(init_tokens_ds, exist_ok=True)
-
-        # 清空但保留 init_tokens_ds 文件夹
-        clean_folder(init_tokens_ds, method='all', keep=True)
-
-        # 2. 写入 common_metadata
-        pq.write_metadata(self.tokens_schema, os.path.join(init_tokens_ds, "_common_metadata"))
-
-        # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
-        # TODO: 改造成多线程/多进程 以加速
-        for init_tokens_pq in init_tokens_pq_files:
-            pq_file = pq.ParquetFile(init_tokens_pq)
-            for i, batch in enumerate( pq_file.iter_batches(self._batch_size, columns=[self.tokens_schema[0].name]) ):
-                b_table = pa.Table.from_batches([batch], self.tokens_schema)
-                b_path = os.path.join(init_tokens_ds, f'{os.path.basename(init_tokens_pq)}-part-{i:04d}.parquet')
-                pq.write_table(b_table, b_path)
-        
-        # 4. 写入完整 metadata --> 省略
+        shard_pq_to_ds(
+            pq_files = init_tokens_pq_files,
+            save_dir = os.path.join(self._buffer_tokens_dir, '0'),
+            shard_row_size = self._batch_size,
+            write_metadat = False
+        )
 
 
     def _start_tokens_ds(self, num_merges, executor):

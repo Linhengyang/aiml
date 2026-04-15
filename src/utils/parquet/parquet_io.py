@@ -2,7 +2,6 @@ import os
 import typing as t
 import pyarrow.parquet as pq
 import pyarrow as pa
-import os
 
 
 
