@@ -1751,7 +1751,7 @@ class bbpeTokenizer(baseBBPETokenizer):
         column: t.List[str]|str|None,
         save_path: str|None,
         save_schema: pa.Schema,
-        to_bytes: bool = True) -> dict|None:
+        word_format: str = True) -> dict|None:
         '''
         args:
         :param corpora: 语料. 可以是 1. parquet文件列表  2. 语料文本
@@ -1763,10 +1763,16 @@ class bbpeTokenizer(baseBBPETokenizer):
         # 0 对 corpora 启动 sharding 分片, 生成 pq.dataset of text 目录
         # 1 多进程并行对每个 shard 执行 worker:
         # 2.map.worker:
-        #   初始化一个local_counter, 读取parquet文件, iter_batches循环, 对每一个batch执行预切分成 words 并 local_counter 计数. 如果to_bytes为True, words要utf8编码为0-255整数
+        #   初始化一个local_counter, 读取parquet文件, iter_batches循环, 对每一个batch执行预切分成 words utf-8 编码后再local_counter计数
         #   worker部分可以使用 cython/C++ 加速: 使用 C++ 的unordered_map计数, local_counter计数完毕后, 遍历之至python dict对象.
         # 2.reduce.collector:
         #   使用Counter.update方法, 把map.worker得到的local_counter汇总 --> global_counter(python dict对象)
         # 3 落盘 global_counter 的keys和values为parquet两列
+
+        # 一: shard只作分片, 不作任何其他操作. 预切分和utf-8编码都 放在拿到batch后、counter计数前.
+        #   原因: parquet存储超多个独立字符串对象word造成压缩率下降, 而拿到batch后一股脑切分+编码+计数, 紧凑高效，IO效率高，原始数据只读取一次.
+        # 二：无论输出格式是binary还是string，在计数前都将word作utf-8编码
+        #   原因: bytes哈希更快, 只需要编码一次，在python侧bytes更紧凑; string哈希慢，且每次计数都要处理编码后再哈希，在python侧str对象开销更大
+        #   建议把utf-8编码操作放在cython/C++侧, 这样比python侧编码更快
         local_counter = Counter()
         local_counter.update()
