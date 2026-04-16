@@ -130,6 +130,8 @@ def get_BoW(
 
     # 2 输出格式转换: 这里 global_BoW 的 words 类型是 binary bytes
     words, freqs = global_BoW.keys(), list( global_BoW.values() )
+    del global_BoW # 节省内存
+
     if word_format == 'binary':
         words = list(words) # list of bytes
         word_dtype = pa.binary()
