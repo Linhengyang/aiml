@@ -40,7 +40,7 @@ def shard_pq_to_ds(
         shard_row_size: int|None = None,
         shard_size_mb: int|None = None,
         compression: str = 'snappy',
-        write_metadat: bool = True):
+        write_metadata: bool = True):
     '''
     将schema 一致的 Parquet文件 分片为一个 Parquet Dataset
     args:
@@ -99,7 +99,7 @@ def shard_pq_to_ds(
             pq.write_table(shard_data, shard_path, compression = compression, write_statistics = True)
     
     # 4. 写入完整 metadata
-    if write_metadat:
+    if write_metadata:
         # 扫描所有分片, 收集完整元数据
         shards_files = [os.path.join(save_dir, fname) for fname in os.listdir(save_dir) if fname.endswith('.parquet')]
         
