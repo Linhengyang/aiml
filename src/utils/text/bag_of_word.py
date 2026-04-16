@@ -25,7 +25,7 @@ from ...common.stream_control import stream_parallel_process_with_pending
 #   建议把utf-8编码(string-->bytes)操作放在cython/C++侧, 这样比python侧编码更快更紧凑.
 #   计数统一使用bytes类型, 在python侧拿到global_counter之后落盘前, 根据输出类型统一转换成目标类型（整数/bytes/字符）
 
-def bow_worker(pq_fpath, text_colname, ENDOFTEXT, split_pattern):
+def bow_worker(pq_fpath, text_colname, split_pattern):
     '''
     执行BoW的进程: 分发得到 parquet 文件地址, 遍历 batch, 对每一个 batch 执行 split / count, 累积更新至 local_counter
     '''
@@ -36,7 +36,7 @@ def bow_worker(pq_fpath, text_colname, ENDOFTEXT, split_pattern):
         batch_text = batch[text_colname].to_pylist()
         # accelerate by Cython/C++: 
         # input py-obj: list of text(string)
-        batch_counts = split_count_batch(ENDOFTEXT.join( batch_text ), split_pattern) # list of strings ->预切分/编码/计数-> dict of {bytes: uint64} 
+        batch_counts = split_count_batch('\n'.join( batch_text ), split_pattern) # list of strings ->预切分/编码/计数-> dict of {bytes: uint64} 
         # output py-obj: dict of {bytes: uint64} 
         local_counter.update(batch_counts)
     
@@ -47,7 +47,6 @@ def bow_worker(pq_fpath, text_colname, ENDOFTEXT, split_pattern):
 def get_BoW(
     corpora: t.List[str]|str,
     column: str|None,
-    ENDOFTEXT: str,
     split_pattern: str,
     word_format: t.Literal['string', 'binary', 'u32list'],
     bow_save_path: str|None,
@@ -72,8 +71,6 @@ def get_BoW(
             corpora = [corpora]
         # 若 column is None, corpora 作为语料文本 --> 保存成parquet文件
         else:
-            if not corpora.endswith(ENDOFTEXT):
-                corpora = corpora + ENDOFTEXT
             chunks_str = re.findall(split_pattern, corpora) # list of tokens(string)
             BoW = Counter(chunks_str)
             words, freqs = BoW.keys(), list( BoW.values() )
@@ -118,7 +115,7 @@ def get_BoW(
             process_fn = bow_worker,  # 初始化一个local_BoW, 读取parquet文件后 iter_batches遍历之, 对batch作切分-编码-计数->local_BoW
             result_handler = global_BoW.update, # 在父进程 global_BoW.update(local_BoW) 累积收集分片的 BoW
             max_pending = 12,
-            process_args = (column, ENDOFTEXT, split_pattern)
+            process_args = (column, split_pattern)
         )
 
     # 2 输出格式转换: 这里 global_BoW 的 words 类型是 binary bytes
