@@ -45,7 +45,7 @@ def bow_worker(pq_fpath, text_colname: str, split_pattern: str):
         text_bytes = '\n'.join(batch_text).encode('utf-8')
         # accelerate by Cython/C++: 
         # input py-obj: bytes + compiled_pattern
-        batch_counts = split_count_batch(text_bytes, compiled_regex) # list of strings ->预切分/编码(略)/计数-> dict of {bytes: uint64} 
+        batch_counts = split_count_batch(text_bytes, compiled_regex) # ->预切分/编码(略)/计数-> dict of {bytes: uint64} 
         # output py-obj: dict of {bytes: uint64}
 
         local_counter.update(batch_counts)
