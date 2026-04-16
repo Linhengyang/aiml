@@ -348,7 +348,7 @@ class baseBBPETokenizer(Tokenizer):
         self._clear()
         self._prepare_train(num_merges)
 
-        corpus = ENDOFTEXT.join( corpora )
+        corpus = '\n'.join( corpora )
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
         with ThreadPoolExecutor(max_workers=8) as e:
              yield_tokens = e.map(encode_to_ints, chunks_str) # a generator
@@ -880,8 +880,6 @@ def text_to_byte_pa_table(pre_split_pat, text, tokens_schema):
     :param text: 文本
     :param tokens_schema: pa.Table的schema
     '''
-    if not text.endswith(ENDOFTEXT):
-        text = text + ENDOFTEXT
     chunks_str = re.findall(pre_split_pat, text) # list of tokens(string)
     
     # list of list of integers(every list of integers as tokens)
@@ -935,7 +933,7 @@ def text_corpora_to_init_tokens_pqfiles(
             init_tokens_path = os.path.join(save_dir, os.path.basename(corpus))
             with pq.ParquetWriter(init_tokens_path, tokens_schema) as writer:
                 for batch in pq.ParquetFile(corpus).iter_batches(batch_size, columns=[text_col]):
-                    text = ENDOFTEXT.join( batch[text_col].to_pylist() )
+                    text = '\n'.join( batch[text_col].to_pylist() )
                     tokens_table = text_to_byte_pa_table(pre_split_pat, text, tokens_schema)
                     writer.write_table(tokens_table, batch_size)
 
@@ -1642,7 +1640,7 @@ class BBPETokenizer(baseBBPETokenizer):
 
         if isinstance(corpora, str):
             corpora = [corpora]
-        corpus = ENDOFTEXT.join( corpora )
+        corpus = '\n'.join( corpora )
 
         # 1. 计算 word_counts, 即 词袋 bag-of-word
         chunks_str: t.List[str] = re.findall(self.pat_str, corpus)
