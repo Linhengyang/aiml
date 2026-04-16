@@ -25,19 +25,29 @@ from ...common.stream_control import stream_parallel_process_with_pending
 #   建议把utf-8编码(string-->bytes)操作放在cython/C++侧, 这样比python侧编码更快更紧凑.
 #   计数统一使用bytes类型, 在python侧拿到global_counter之后落盘前, 根据输出类型统一转换成目标类型（整数/bytes/字符）
 
-def bow_worker(pq_fpath, text_colname, split_pattern):
+def bow_worker(pq_fpath, text_colname: str, split_pattern: str):
     '''
-    执行BoW的进程: 分发得到 parquet 文件地址, 遍历 batch, 对每一个 batch 执行 split / count, 累积更新至 local_counter
+    执行BoW的进程: 分发得到 parquet 文件地址, 遍历 batch, 对每一个 batch 执行 utf-8 encode / split / count, 累积更新至 local_counter
+    编码 预切分 计数, naive做法是在 python层预切分成list of string, 在Cython层逐一编码 然后计数. 比较低效
+    最高效做法是: 在python层一次性完成编码成bytes, 然后将bytes传入Cython，配合传入的compiled_pattern作预切分 + 计数
     '''
     local_counter = Counter()
     pf = pq.ParquetFile(pq_fpath)
 
+    compiled_regex = re.compile(split_pattern.encode('utf-8')) # 在python层编译好预切分的正则表达式
+
     for batch in pf.iter_batches(batch_size = 65536, columns=[text_colname]):
         batch_text = batch[text_colname].to_pylist()
+        batch_text = [t for t in batch_text if t]
+        if not batch_text:
+            continue
+        # 编码放在python层一次完成
+        text_bytes = '\n'.join(batch_text).encode('utf-8')
         # accelerate by Cython/C++: 
-        # input py-obj: list of text(string)
-        batch_counts = split_count_batch('\n'.join( batch_text ), split_pattern) # list of strings ->预切分/编码/计数-> dict of {bytes: uint64} 
-        # output py-obj: dict of {bytes: uint64} 
+        # input py-obj: bytes + compiled_pattern
+        batch_counts = split_count_batch(text_bytes, compiled_regex) # list of strings ->预切分/编码(略)/计数-> dict of {bytes: uint64} 
+        # output py-obj: dict of {bytes: uint64}
+
         local_counter.update(batch_counts)
     
     return local_counter
@@ -54,7 +64,7 @@ def get_BoW(
     compression: str = 'snappy') -> tuple|None:
     '''
     args:
-    :param corpora: 语料. 可以是 1. parquet文件列表  2. 语料文本
+    :param corpora: 语料. 可以是 1. parquet文件列表(要求具备相同schema)  2. 语料文本
     :param column: 语料 corpora 中代表文本的 parquet 列名. 若column is None, 说明corpora是语料文本而不是路径
     :split_pattern: 预切分文本的正则表达式
     :word_format: 输出保存的 BoW parquet文件中 word 的格式. string / bytes / list of uint32
@@ -101,7 +111,7 @@ def get_BoW(
 
     # 0 对 corpora 执行 sharding 分片, 直接存储在 BoW 所在文件夹
     shards_dir = os.path.dirname(bow_save_path)
-    shard_pq_to_ds(corpora, shards_dir, shard_size_mb = 2048, compression = compression, write_metadata=False)
+    shard_pq_to_ds(corpora, shards_dir, shard_size_mb = 2048, compression = compression, write_metadata = False)
     shards = [ os.path.join(shards_dir, pf) for pf in os.listdir(shards_dir) if pf.endswith('.parquet')]
 
     # 1 进程池并行对每个 shard 执行 worker, 主进程收集 worker 的 local_BoW 至 global_BoW
