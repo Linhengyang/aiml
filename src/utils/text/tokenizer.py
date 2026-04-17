@@ -1751,10 +1751,14 @@ class bbpeTokenizer(baseBBPETokenizer):
         # 0.py load BoW.parquet for unique_words(list of u32list), freqs(list of u64)
         # 1.cy->cpp cython层api调用 unique_words & freqs --> cython --> C++ Word构造 --> unique_words(vector of Word), freqs(vector of const u64)
         #   cpp  unique_words & freqs --> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set}). 该步骤可以并行
-        #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --> max_heap(8-ary heap of Merge)
-        # 2.cpp 初始化一个记录vector merges, 循环merge_cnts从0到num_merges
-        #   cpp  从max_heap取顶端Merge. 如果取顶失败, 说明pair已经全部merge完毕, throw一个runoutError.
-        #        拿到max Merge{pair, p_cnts, positions}. 如果 p_cnts 与 pair_counts[pair] 对不上, 更新该 Merge.p_cnts, push该Merge回max_heap, continue循环以重新取顶
-        #        取到max Merge{pair, p_cnts, positions}而且p_cnts相符. 如果p_cnts<1, 退出循环. 拿到待合并pair, 算出new_token, 记录其在merges中.
-        # 3.cpp 初始化一个共享线程安全的线性容器changes, 遍历(可并行)positions中的pos
-        #       取出unique_words[pos]位置的word, 执行 merge(待合并pair, new_token), 产出局部线程的 local_changes. 把所有local_changes合并到changes, 并给每个元素配上pos
+        #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge)
+        # loop.cpp 初始化一个记录vector merges(u64), 循环merge_cnts从0到num_merges
+        #   2. 从max_heap取顶端Merge. 如果取顶失败, 说明pair已经全部merge完毕, throw一个runoutError.
+        #      拿到max Merge{pair, p_cnts, positions}. 如果 p_cnts 与 pair_counts[pair] 对不上, 更新该 Merge.p_cnts, push该Merge回max_heap, continue循环以重新取顶
+        #      取到max Merge{pair, p_cnts, positions}而且p_cnts相符. 如果p_cnts<1, 退出循环. 拿到待合并pair, 记录其在merges中, 算出new_token.
+        #   3. 初始化一个共享线程安全的线性容器changes, 遍历(可并行)positions中的pos
+        #      取出unique_words[pos]位置的word, 执行 merge(待合并pair, new_token), 产出该pos局部线程的 local_changes. 把所有local_changes聚合到changes, 并给每个元素标记其pos
+        #   4. 线性扫描changes, 取出每个元素(pair, change, pos): 用change和freqs[pos]更新pair_counts[pair]; 为change>0的pair, 给where_to_update[pair]更新添加pos
+        #   5. 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --push--> max_heap
+        # 6.cpp->cy loop结束或跳出. 返回 vector merges(u64) 到cython层; 如果是throw runoutError, 该如何返回 vector of merges(u64) 到cython层?
+        # 7.cy->py 在cython层执行把vector of merges 转换为 list of merges 作为 bpe_core_loop 的返回. 在python层依据list of merges更新tokenizer.
