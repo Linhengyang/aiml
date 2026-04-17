@@ -240,7 +240,7 @@ public:
     }
 
     /*
-    * 语义等同于 std::unordered_ma.insert_or_assign: 有则更新，无则插入
+    * 语义等同于 std::unordered_map.insert_or_assign: 有则更新，无则插入
     * @param key: 可能是左值/常左值, 此时 key 类型为 TYPE_K&/const TYPE_K&, 源对象不会被掏空; 也可能是右值(临时/移动), 此时 key 类型为 TYPE_K&&, 源对象会被掏空
     * @param value: 同 key
     * key-pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
