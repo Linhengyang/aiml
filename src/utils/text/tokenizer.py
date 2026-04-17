@@ -1667,7 +1667,7 @@ class BBPETokenizer(baseBBPETokenizer):
         for tok_pair, positions in where_to_update.items():
             to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
             heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
-        where_to_update = defaultdict(set)
+        where_to_update.clear()
 
         # 4. 执行 merge: 不断从 max_heap 中得到 max-occured-pair, 对 unique_words 作 inplace-merge, 产出相应 changes 来 update pair_counts & max_heap
         merge_cnts = 0 # BBPETokenizer 和 baseBBPETokenizer 一样, 只支持从头开始BPE train, 不支持中途续train
@@ -1706,7 +1706,7 @@ class BBPETokenizer(baseBBPETokenizer):
                 if pair_counts[tok_pair] > 0:
                     to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
                     heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
-            where_to_update = defaultdict(set)
+            where_to_update.clear()
             merge_cnts += 1
             
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
@@ -1725,9 +1725,11 @@ class bbpeTokenizer(baseBBPETokenizer):
     pos/iw/word_index: size_t, index of unique_words
 
     object:
-    BoW: hashmap{string: u64} as {word_str: freq}, useless once unique_words & freqs established
-    BoW.keys().encode('utf-8')---Word---> unique_words: vector of Word, in-place change, valid-live during the BPE
-    BoW.values() ---> freqs: vector of word_counts(u64), const, valid-live during the BPE
+    BoW: hashmap{string: u64} as {word_str: freq}, useless once unique_words & freqs established ---> save on disk
+    unique_words:
+        BoW.keys().encode('utf-8')---Word构造--->: vector of Word, in-place change, valid-live during the BPE
+    freqs:
+        BoW.values() --->: vector of word_counts(u64), const, valid-live during the BPE
 
     pair_counts: hashmap{u64: u64} as {token_pair: p_cnts}, insert/update, valid-live during the BPE
     positions: unordered_set of pos correspondint to a token-pair, const once created, valid-live during untill the token-pair merged
@@ -1745,3 +1747,14 @@ class bbpeTokenizer(baseBBPETokenizer):
     unique_words / freqs / pair_counts / max_heap: stay in system heap memory
     '''
 
+    def train_bpe(self, corpora, num_merges = None, verbose = True, min_freq: int = None, *args, **kwargs):
+        # 0.py load BoW.parquet for unique_words(list of u32list), freqs(list of u64)
+        # 1.cy->cpp cython层api调用 unique_words & freqs --> cython --> C++ Word构造 --> unique_words(vector of Word), freqs(vector of const u64)
+        #   cpp  unique_words & freqs --> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set}). 该步骤可以并行
+        #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --> max_heap(8-ary heap of Merge)
+        # 2.cpp 初始化一个记录vector merges, 循环merge_cnts从0到num_merges
+        #   cpp  从max_heap取顶端Merge. 如果取顶失败, 说明pair已经全部merge完毕, throw一个runoutError.
+        #        拿到max Merge{pair, p_cnts, positions}. 如果 p_cnts 与 pair_counts[pair] 对不上, 更新该 Merge.p_cnts, push该Merge回max_heap, continue循环以重新取顶
+        #        取到max Merge{pair, p_cnts, positions}而且p_cnts相符. 如果p_cnts<1, 退出循环. 拿到待合并pair, 算出new_token, 记录其在merges中.
+        # 3.cpp 初始化一个共享线程安全的线性容器changes, 遍历(可并行)positions中的pos
+        #       取出unique_words[pos]位置的word, 执行 merge(待合并pair, new_token), 产出局部线程的 local_changes. 把所有local_changes合并到changes, 并给每个元素配上pos
