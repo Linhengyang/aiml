@@ -8,8 +8,7 @@ from cpython.bytes cimport PyBytes_AsString, PyBytes_GET_SIZE
 from cpython.dict cimport PyDict_SetItem
 from cpython.long cimport PyLong_FromLongLong
 
-# 定义 C++ 计数器类型
-cdef unordered_map[string, unsigned long long] cpp_counter
+
 
 def split_count_batch(bytes text_bytes, object compiled_regex):
     """
@@ -25,10 +24,9 @@ def split_count_batch(bytes text_bytes, object compiled_regex):
     # 2. C++ 计数器
     cdef unordered_map[string, unsigned long long] local_map
     cdef string token_str
-    cdef unsigned long long count
     
     # 3. 迭代匹配 (finditer 不会像 findall 那样一次性生成列表)
-    # 注意：这里仍然会创建 Match 对象，但避免了创建子串 bytes 对象
+    # 注意：这里仍然会创建 Match py对象，但避免了创建子串 bytes 对象
     for match in compiled_regex.finditer(text_bytes):
         cdef int start = match.start()
         cdef int end = match.end()
@@ -56,6 +54,6 @@ def split_count_batch(bytes text_bytes, object compiled_regex):
         # 但此时只针对唯一词表，而非所有 token
         py_key = bytes(key) 
         result[py_key] = val
-        it += 1
+        ++it
         
     return result
