@@ -339,17 +339,13 @@ class baseBBPETokenizer(Tokenizer):
             yield merge_pair(tokens, occur_most_pair, new_token)
     
 
-    def train_bpe(self, corpora:t.List[str]|str, num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
-        if isinstance(corpora, str):
-            corpora = [corpora]
-
+    def train_bpe(self, corpora:str, num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
         # baseTokenizer 因为没有中间结果可以缓存, 故续训（load merge_ranks 之后再输入corpus train），是没办法校对的
         # 所以 baseTokenizer 只能从头开始 train
         self._clear()
         self._prepare_train(num_merges)
 
-        corpus = '\n'.join( corpora )
-        chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
+        chunks_str: t.List[str] = re.findall(self.pat_str, corpora) # pre-split to list of string
         with ThreadPoolExecutor(max_workers=8) as e:
              yield_tokens = e.map(encode_to_ints, chunks_str) # a generator
         
@@ -1716,6 +1712,7 @@ class BBPETokenizer(baseBBPETokenizer):
 
 
 
+from .bag_of_word import get_BoW
 
 class bbpeTokenizer(baseBBPETokenizer):
     '''
@@ -1747,8 +1744,14 @@ class bbpeTokenizer(baseBBPETokenizer):
     unique_words / freqs / pair_counts / max_heap: stay in system heap memory
     '''
 
-    def train_bpe(self, corpora, num_merges = None, verbose = True, min_freq: int = None, *args, **kwargs):
-        # 0.py load BoW.parquet for unique_words(list of u32list), freqs(list of u64)
+    def train_bpe(self,
+                  corpora:t.List[str]|str,          # schema相同的parquet文件 或 语料文本自身
+                  column:str|None,                  # 如果corpora是parquet文件, column就是列名
+                  num_merges: int|None = None,      # 执行BPE合并的总次数. 本tokenzier没有续train的概念，所以它就是bpe-train的循环总次数
+                  verbose = True,
+                  bow_min_freq: int = None,         # 词袋BoW的最小频率. 低于此频率的word被剔除以保证内存容量
+                  *args, **kwargs):
+        # 0.py load BoW.parquet for unique_words(largelist of u32list), freqs(list of u64)
         # 1.cy->cpp cython层api调用 unique_words & freqs --> cython --> C++ Word构造 --> unique_words(vector of Word), freqs(vector of const u64)
         #   cpp  unique_words & freqs --> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set}). 该步骤可以并行
         #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge)
@@ -1761,4 +1764,20 @@ class bbpeTokenizer(baseBBPETokenizer):
         #   4. 线性扫描changes, 取出每个元素(pair, change, pos): 用change和freqs[pos]更新pair_counts[pair]; 为change>0的pair, 给where_to_update[pair]更新添加pos
         #   5. 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --push--> max_heap
         # 6.cpp->cy loop结束或跳出. 返回 vector merges(u64) 到cython层; 如果是throw runoutError, 该如何返回 vector of merges(u64) 到cython层?
-        # 7.cy->py 在cython层执行把vector of merges 转换为 list of merges 作为 bpe_core_loop 的返回. 在python层依据list of merges更新tokenizer.
+        # 7.cy->py 在cython层执行把vector of merges 转换为 list of merges 作为 bpe_core_loop 的返回. 在python层依据list of merges更新tokenizer
+
+        # 执行 BoW
+        BoW_pq_path = os.path.join(self._buffer_dir, 'bow.parquet')
+        get_BoW(corpora, column, self.pat_str, 'u32list', bow_save_path = BoW_pq_path)
+
+        # 读取 BoW parquet 文件, 零拷贝获取pyarrow内存地址
+        # 零拷贝的流程是: read_table -> combine_chunks -> buffers -> address
+        BoW = pq.read_table(BoW_pq_path, filters=('freq', '>=', bow_min_freq))
+        
+        word_arr = BoW.column('word').combine_chunks() # 关键：返回 arr 保持引用，防止在 Cython 调用期间被 GC
+        word_buf = word_arr.buffers() # large_list: [validity, offsets, values]
+        offsets_ptr = word_buf[1].address  # int64. large_list 的 offsets类型是 int64/long long
+        values_ptr = word_buf[2].address   # uint32. large_list of u32list. flattened values 类型是 uint32
+        num_words = len(word_arr)
+        
+

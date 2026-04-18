@@ -1,7 +1,6 @@
 # distutils: language = c++
 # cython: language_level=3, boundscheck=False, wraparound=False
 
-from libc.stdlib cimport malloc, free
 from libcpp.unordered_map cimport unordered_map
 from libcpp.string cimport string
 from cpython.bytes cimport PyBytes_AsString, PyBytes_GET_SIZE

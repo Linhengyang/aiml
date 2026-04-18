@@ -72,7 +72,7 @@ def get_BoW(
     :bow_save_colnames: 如果保存BoW为parquet, 那么 save_colnames 是parquet文件的列名
 
     returns: 生成corpora语料的词袋BoW
-        save_path is None, 那么返回 tuple of np.ndarray 形式的BoW (words, freqs); else via save_path, 那么保存BoW为parquet, 一列words & 一列freqs
+        save_path is None, 那么分别以list形式返回 BoW (words, freqs); else via save_path, 那么保存BoW为parquet, 一列words & 一列freqs
         word_format指定了word的格式: 字符串 / 二进制字节 / u32序列
     '''
     if isinstance(corpora, str):
