@@ -54,6 +54,15 @@ ext_modules = [
         language="c++",
         include_dirs=include_dirs,  # 包含 numpy 的头文件路径
         extra_compile_args=["-O3", "-std=c++17"],       # 优化编译选项
+    ),
+    Extension(
+        name="bytes_sequence_chunk_count",
+        sources=[
+            "bow_counter.pyx"
+        ],
+        language="c++",
+        include_dirs=include_dirs,
+        extra_compile_args=["-O3", "-std=c++17"],
     )
 ]
 

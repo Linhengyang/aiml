@@ -9,7 +9,7 @@ from cpython.long cimport PyLong_FromLongLong
 
 
 
-def split_count_batch(bytes text_bytes, object compiled_regex):
+def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
     """
     text_bytes: 已经 utf-8 编码的整个 batch 文本 (b'\n'.join(...))
     compiled_regex: 正则表达式字符串编译后缓存

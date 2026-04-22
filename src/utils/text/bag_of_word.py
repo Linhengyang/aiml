@@ -41,11 +41,12 @@ def bow_worker(pq_fpath, text_colname: str, split_pattern: str):
         batch_text = [t for t in batch_text if t]
         if not batch_text:
             continue
-        # 编码放在python层一次完成
+        # BoW的本质是预切分+计数. 由于计数的时候需要对字符串作哈希计算, 所以中间加一道字节编码，能有效加快计数.
+        # 不过编码可以放在python层一次完成, 然后用同样编码完成的正则表达式去切分字节序列而不是字符串序列
         text_bytes = '\n'.join(batch_text).encode('utf-8')
         # accelerate by Cython/C++: 
-        # input py-obj: bytes + compiled_pattern
-        batch_counts = split_count_batch(text_bytes, compiled_regex) # ->预切分/编码(略)/计数-> dict of {bytes: uint64} 
+        # input py-obj: text bytes + compiled_pattern
+        batch_counts = bow_chunk_count_bytes(text_bytes, compiled_regex) # 编码->切分+计数-> dict of {bytes: uint64} 
         # output py-obj: dict of {bytes: uint64}
 
         local_counter.update(batch_counts)
