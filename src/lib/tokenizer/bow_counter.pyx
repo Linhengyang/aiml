@@ -3,6 +3,9 @@
 
 from libcpp.unordered_map cimport unordered_map
 from libcpp.string cimport string
+from libcpp.utility cimport pair
+
+from cython.operator cimport dereference as deref, preincrement as inc
 from cpython.bytes cimport PyBytes_AsString, PyBytes_GET_SIZE
 from cpython.dict cimport PyDict_SetItem
 from cpython.long cimport PyLong_FromLongLong
@@ -23,12 +26,17 @@ def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
     # 2. C++ 计数器
     cdef unordered_map[string, unsigned long long] local_map
     cdef string token_str
+
+    # 对于def函数(而不是cpdef/cdef,它们有额外的准则), cdef类型变量必须要放在函数块的开头, 不能在for循环或其他控制流语句内部
+    cdef Py_ssize_t start
+    cdef Py_ssize_t end
+    cdef match
     
     # 3. 迭代匹配 (finditer 不会像 findall 那样一次性生成列表)
     # 注意：这里仍然会创建 Match py对象，但避免了创建子串 bytes 对象
     for match in compiled_regex.finditer(text_bytes):
-        cdef int start = match.start()
-        cdef int end = match.end()
+        start = <Py_ssize_t>match.start()
+        end = <Py_ssize_t>match.end()
         
         # 安全校验
         if start < 0 or end > total_len or start >= end:
@@ -47,12 +55,12 @@ def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
     cdef unsigned long long val
     
     while it != local_map.end():
-        key = it.first
-        val = it.second
+        key = deref(it).first
+        val = deref(it).second
         # 构造 Python bytes 对象 (这是必须的，因为要返回给 Python)
         # 但此时只针对唯一词表，而非所有 token
         py_key = bytes(key) 
         result[py_key] = val
-        ++it
+        inc(it)
         
     return result

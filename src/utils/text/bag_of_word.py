@@ -5,6 +5,7 @@ import regex as re
 import pyarrow as pa
 import pyarrow.parquet as pq
 from concurrent.futures import ProcessPoolExecutor
+from ext.bpeboost import bow_chunk_count_bytes
 from ..parquet.sharding import shard_pq_to_ds
 from ...common.stream_control import stream_parallel_process_with_pending
 

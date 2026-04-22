@@ -22,6 +22,9 @@ from mt_pair_count_merge import (
     merge_u32pair_batch as thread_merge_u32pair_batch
     )
 
+from bytes_sequence_chunk_count import (
+    bow_chunk_count_bytes
+)
 
 __all__ = [
     'initialize_process',
@@ -30,5 +33,6 @@ __all__ = [
     'close_process',
     'initialize_thread',
     'thread_count_u32pair_batch',
-    'thread_merge_u32pair_batch'
+    'thread_merge_u32pair_batch',
+    'bow_chunk_count_bytes'
     ]
