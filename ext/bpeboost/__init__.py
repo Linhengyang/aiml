@@ -22,7 +22,7 @@ from mt_pair_count_merge import (
     merge_u32pair_batch as thread_merge_u32pair_batch
     )
 
-from bytes_sequence_chunk_count import (
+from bytes_chunk_count import (
     bow_chunk_count_bytes
 )
 
