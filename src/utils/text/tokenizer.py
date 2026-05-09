@@ -1593,7 +1593,7 @@ class Word:
         self._tokens = tokens
 
     # word ----merge_(left, right)-->new_token----> changes[(emerged_tokens_pair, +1) / (vanished_tokens_pair, -1)] 
-    def merge(self, left_token, right_token, merged_token, *args, **kwargs):
+    def merge(self, left_token, right_token, merged_token, *args, **kwargs) -> t.List[tuple]:
         changes = []
         i = 0
         while True:
@@ -1630,8 +1630,8 @@ class Word:
 
 class BBPETokenizer(baseBBPETokenizer):
 
-    def train_bpe(self, corpora, num_merges = None, verbose = True, min_freq: int = None, *args, **kwargs):
-        self._clear()
+    def train_bpe(self, corpora, num_merges = None, verbose = True, min_freq: int = 0, *args, **kwargs):
+        self._clear() # BBPETokenizer 和 baseBBPETokenizer 一样, 只可以从头开始BPE train, 不支持中途续train
         self._prepare_train(num_merges)
 
         if isinstance(corpora, str):
@@ -1646,14 +1646,15 @@ class BBPETokenizer(baseBBPETokenizer):
         # unique_words 和 freqs 成为 BPE 的全部基础. 根据 freqs 是否大于等于一个阈值, 可以有效控制 BoW 的总size, 将整个过程控制在单机运行
         unique_words = []
         freqs = []
+
         for k, v in BoW.items():
-            if min_freq and v >= min_freq: # min_freq典型取2, 即过滤掉只出现一次的超长尾unique_word. 这些words占用大量空间但对BPE的影响权重较小.
+            if v >= min_freq: # 如果BoW确实存在超长尾以至于要用min_freq来缩减, 那么min_freq典型取2, 即过滤掉只出现一次的超长尾unique_word. 这些words占用大量空间但对BPE的影响权重较小.
                 unique_words.append( Word(list(k.encode('utf-8'))) )
                 freqs.append( v )
 
         # 3. 计算 pair_counts & where_to_update & max_heap. 可并行
-        pair_counts = defaultdict(int)
-        where_to_update = defaultdict(set)
+        pair_counts = defaultdict(int) # 记录 token-pair 的实时(正确)计数
+        where_to_update = defaultdict(set) # 记录 token-pair 的倒排索引. 倒排索引集合要保证不可重复, 所以用集合set
         for pos, word in enumerate(unique_words):
             for tok_pair in word.window_pair():
                 pair_counts[tok_pair] += freqs[pos]
@@ -1662,11 +1663,14 @@ class BBPETokenizer(baseBBPETokenizer):
         max_heap = []
         for tok_pair, positions in where_to_update.items():
             to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
-            heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
+            heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node)) # 最大堆(优先序列)保证 最大频数token-pair与其在words中出现的位置索引集合 处于堆顶
         where_to_update.clear()
 
+        # pair_counts是实时更新、保持正确的, 而where_to_update中的p_cnts是懒更新、positions是不更新的.
+        # 前者懒更新是指从heap pop出来时, 去和pair_counts对比, 如果不正确才更新并重新推入堆中(堆自平衡重新调整), 如果正确就拿来使用; 后者不更新是因为空扫描几个位置代价很小
+
         # 4. 执行 merge: 不断从 max_heap 中得到 max-occured-pair, 对 unique_words 作 inplace-merge, 产出相应 changes 来 update pair_counts & max_heap
-        merge_cnts = 0 # BBPETokenizer 和 baseBBPETokenizer 一样, 只支持从头开始BPE train, 不支持中途续train
+        merge_cnts = 0 # BBPETokenizer 和 baseBBPETokenizer 一样, 只可以从头开始BPE train, 不支持中途续train
         while merge_cnts < self._num_merges: # _num_merges == _num_train_epochs
             try:
                 _, (tok_pair, p_counts, positions) = heapq.heappop(max_heap)
@@ -1674,6 +1678,7 @@ class BBPETokenizer(baseBBPETokenizer):
                 self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
                 raise_run_out_corpus_error(merge_cnts, len(self._special_marks))
 
+            # 最大堆 p_cnts 懒更新, positions不更新
             if p_counts != pair_counts[tok_pair]:
                 to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
                 heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
@@ -1690,14 +1695,15 @@ class BBPETokenizer(baseBBPETokenizer):
             # 这里 positions 是 不会重复的 set, 所以可并行
             for pos in positions:
                 word = unique_words[pos]
-                _changes = word.merge(l_tok, r_tok, new_tok)
+                _changes = word.merge(l_tok, r_tok, new_tok) # list of (pair, signal)
                 changes.extend([ (change, pos) for change in _changes])
 
-            for (pair, change), pos in changes:
-                pair_counts[pair] += change*freqs[pos]
-                if change > 0:
+            for (pair, signal), pos in changes:
+                pair_counts[pair] += signal*freqs[pos]
+                if signal > 0:
                     where_to_update[pair].add(pos)
 
+            # flush where_to_update 到 maxHeap
             for tok_pair, positions in where_to_update.items():
                 if pair_counts[tok_pair] > 0:
                     to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
@@ -1751,7 +1757,7 @@ class bbpeTokenizer(baseBBPETokenizer):
                   verbose = True,
                   bow_min_freq: int = None,         # 词袋BoW的最小频率. 低于此频率的word被剔除以保证内存容量
                   *args, **kwargs):
-        # 0.py load BoW.parquet for unique_words(largelist of u32list), freqs(list of u64)
+        # 0.py load BoW.parquet for unique_words(largelist of u32list, 用u32list代表word/tokens, 即用u32代表token), freqs(list of u64)
         # 1.cy->cpp cython层api调用 unique_words & freqs --> cython --> C++ Word构造 --> unique_words(vector of Word), freqs(vector of const u64)
         #   cpp  unique_words & freqs --> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set}). 该步骤可以并行
         #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge)
