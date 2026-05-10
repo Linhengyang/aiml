@@ -1735,7 +1735,7 @@ class bbpeTokenizer(baseBBPETokenizer):
         BoW.values() --->: vector of word_counts(u64), const, valid-live during the BPE
 
     pair_counts: hashmap{u64: u64} as {token_pair: p_cnts}, insert/update v, valid-live during the BPE
-    positions: unordered_set of pos correspondint to every specific token-pair, const once created, valid-live during untill the token-pair merged
+    positions: unordered_set of pos corresponding to every specific token-pair, const once created, valid-live during untill the token-pair merged
     
     where_to_update: hashmap{u64: unordered_set} as {token-pair: positions}---> drain ---> empty ---> update from changes ---> a lot of insert/remove
     max_heap: max priority_queue with node{token-pair, p_cnts, positions} via p_cnts(max_order)---> push/pop ---> valid-live during the BPE
@@ -1745,8 +1745,8 @@ class bbpeTokenizer(baseBBPETokenizer):
     ---> unique_words, freqs, pair_counts, positions, max_heap
     for objects who are with a lot of insert/remove operations, need for rapid re-use/re-construction --> built on memory pool
     ---> where_to_update 
-    
-    where_to_update: hashmap{u64: unordered_set} as {token_pair: positions}: hashmap nodes on memory pool, but value(positions) managed on system heap memory
+    so that is:
+    where_to_update: hashmap{u64: unordered_set} as {token-pair: positions}: hashmap nodes on memory pool, but value(positions) managed on system heap memory
     unique_words / freqs / pair_counts / max_heap: stay in system heap memory
     '''
 
