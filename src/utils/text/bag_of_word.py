@@ -62,7 +62,7 @@ def get_BoW(
     split_pattern: str,
     word_format: t.Literal['string', 'binary', 'u32list'],
     bow_save_path: str|None,
-    bow_save_colnames: tuple[str, str]|None = ['word', 'freq'],
+    bow_save_colnames: tuple[str, str]|None = ('word', 'freq'),
     compression: str = 'snappy') -> tuple|None:
     '''
     args:
