@@ -83,7 +83,7 @@ def get_BoW(
             corpora = [corpora]
         # 若 column is None, corpora 作为语料文本 --> 保存成parquet文件
         else:
-            chunks_str = re.findall(split_pattern, corpora) # list of tokens(string)
+            chunks_str = re.findall(split_pattern, corpora) # 直接把语料切分为 list of tokens(string)
             BoW = Counter(chunks_str)
             words, freqs = BoW.keys(), list( BoW.values() )
             if word_format == 'binary':
@@ -108,7 +108,7 @@ def get_BoW(
                 bow_save_colnames[1]: freqs,
             }, schema = BoW_schema)
 
-            pq.write_table(table, bow_save_path, compression = compression)
+            pq.write_table(table, bow_save_path, compression = compression) # 写入 BoW 结果
             return
 
     # 0 对 corpora 执行 sharding 分片, 直接存储在 BoW 所在文件夹
@@ -135,13 +135,13 @@ def get_BoW(
     del global_BoW # 节省内存
 
     if word_format == 'binary':
-        words = list(words) # list of bytes
+        words = list(words) # list of bytes: cython函数bow_chunk_count_bytes返回的word类型就是bytes
         word_dtype = pa.binary()
     elif word_format == 'u32list':
-        words = [list(word) for word in words] # list of u32_lists
+        words = [list(word) for word in words] # list of u32_lists: list(bytes) --> list of ints
         word_dtype = pa.large_list(pa.field('token', pa.uint32()))
     else:
-        words = [word.decode('utf-8') for word in words] # list of strings
+        words = [word.decode('utf-8') for word in words] # list of strings: 解码成文本
         word_dtype = pa.string()
 
     # 3 落盘 global_BoW 的 words 和 freqs 为 parquet
