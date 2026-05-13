@@ -1724,7 +1724,7 @@ class bbpeTokenizer(baseBBPETokenizer):
     '''
     data structures:
     token: u32
-    Word: class with vector of tokens, and method merge(in-place change vector of tokens, return changes), and method window_pair(const iterator of token-pair)
+    Word: class with vector of tokens, and method merge(in-place change vector of tokens, return changes(vector of token-pair + signal)), and method window_pair(const iterator of token-pair)
     pos/iw/word_index: size_t, index of unique_words
 
     object:
