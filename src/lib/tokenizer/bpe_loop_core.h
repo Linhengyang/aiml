@@ -3,7 +3,10 @@
 #include <cstddef>
 #include <vector>
 #include <cstdint>
-
+#include "heap.h"
+#include <unordered_set>
+#include <unordered_map>
+#include <
 
 // 拼合两个 u32 token 成为一个 u64 的方法
 uint64_t combine_2tokens(const uint32_t left_token, const uint32_t right_token) {
@@ -128,11 +131,32 @@ public:
 };
 
 
+// 定义 优先队列的节点(node)
+struct MergeNode {
+    uint64_t token_pair;
+    uint64_t p_cnts;
+    std::unordered_set<size_t> positions;
+};
+
+
+// 定义 严格弱序优先级函数(compare)
+struct Comparator {
+    bool operator()(const MergeNode& a, const MergeNode& b) {
+        return a.p_cnts > b.p_cnts;
+    }
+};
+
+// 定义 优先队列(8-ary max_heap)
+using max_octanory_heap = octanary_heap<MergeNode, Comparator>;
 
 
 extern "C" {
 
-std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_non_par_bpe(
+// unique_words & freqs --window2_token遍历--> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set})
+// 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge)
+// 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, where_to_update, num_merges)
+// 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 并返回
+std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
     const int num_merges,
     const size_t num_words,
     const uint32_t* tokens_ptr,
@@ -140,8 +164,15 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_non_par_bpe(
     const uint64_t* freqs_ptr
 );
 
-std::vector<std::pair<uint64_t, uint64_t>> bpe_non_par_loop_core(
-    
+
+std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
+    max_octanory_heap& max_heap,
+    std::vector<Word>& unique_words,
+    const std::vector<uint64_t>& freqs,
+    std::unordered_map<uint64_t, uint64_t>& pair_counts,
+
+    const int num_merges
 );
+
 
 } // end of extern C

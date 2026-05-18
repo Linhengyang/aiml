@@ -79,4 +79,17 @@
 
 
 // 八叉堆 octanary heap / 8-ary heap
+#ifndef HEAP_H
+#define HEAP_H
 
+template<typename TYPE_NODE, typename NODE_COMPARE>
+class octanary_heap {
+
+    /*
+    TODO
+    */
+
+}; // end of octanary_heap definition
+
+
+#endif

@@ -1765,7 +1765,7 @@ class bbpeTokenizer(baseBBPETokenizer):
         #   2. 从max_heap取顶端Merge. 如果取顶失败, 说明pair已经全部merge完毕, throw一个runoutError.
         #      拿到max Merge{pair, p_cnts, positions}. 如果 p_cnts 与 pair_counts[pair] 对不上, 更新该 Merge.p_cnts, push该Merge回max_heap, continue循环以重新取顶
         #      取到max Merge{pair, p_cnts, positions}而且p_cnts相符. 如果p_cnts<1, 退出循环. 拿到待合并pair和p_cnts, 记录其在 merges 中, 算出new_token.
-        #   3. 初始化一个共享线程安全的线性容器changes, 遍历(可并行)positions中的pos, 即执行:
+        #   3. 初始化一个线性容器changes, 遍历(可并行,但需要容器changes共享线程安全)positions中的pos, 即执行:
         #      取出unique_words[pos]位置的word, 执行merge方法(待合并pair, new_token), 产出该pos局部线程的 local_changes. 把所有local_changes聚合到changes, 并给每个元素标记其pos
         #   4. 线性扫描changes, 取出每个元素(pair, change, pos): 用change和freqs[pos]更新pair_counts[pair]; 为change>0的pair, 给where_to_update[pair]更新添加pos
         #   5. 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --push--> max_heap
