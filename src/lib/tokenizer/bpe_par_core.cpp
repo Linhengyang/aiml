@@ -32,6 +32,7 @@ std::vector<std::pair<uint64_t, uint64_t>> par_bpe_loop_core(
     std::vector<Word>& unique_words,
     const std::vector<uint64_t>& freqs,
     std::unordered_map<uint64_t, uint64_t>& pair_counts,
+    mempool& pool,
     const int num_merges
 ) {
     
