@@ -1743,10 +1743,12 @@ class bbpeTokenizer(baseBBPETokenizer):
     design-mode:
     for objects who are valid-live untill termination, no need for rapid re-use/re-construction ---> stay in system heap memory, std::move when transfer
     ---> unique_words, freqs, pair_counts, positions, max_heap
-    for objects who are with a lot of insert/remove operations, need for rapid re-use/re-construction --> built on memory pool
-    ---> where_to_update 
+    for objects who are with a lot of insert/remove operations, need for rapid re-use/re-construction --> built on memory pool, except vector(.clear supports memory reuse)
+    ---> where_to_update, changes(vector)
+
     so that is:
     where_to_update: hashmap{u64: unordered_set} as {token-pair: positions}: hashmap nodes on memory pool, but value(positions) managed on system heap memory
+    changes: list(u64, int, size_t) as {token-pair, +-1 signal, position}: all plain basic datatype. can be managed on memory pool, but vector on system heap memory also can do
     unique_words / freqs / pair_counts / max_heap: stay in system heap memory
     '''
 
@@ -1766,8 +1768,8 @@ class bbpeTokenizer(baseBBPETokenizer):
         #      拿到max Merge{pair, p_cnts, positions}. 如果 p_cnts 与 pair_counts[pair] 对不上, 更新该 Merge.p_cnts, push该Merge回max_heap, continue循环以重新取顶
         #      取到max Merge{pair, p_cnts, positions}而且p_cnts相符. 如果p_cnts<1, 退出循环. 拿到待合并pair和p_cnts, 记录其在 merges 中, 算出new_token.
         #   3. 初始化一个线性容器changes, 遍历(可并行,但需要容器changes共享线程安全)positions中的pos, 即执行:
-        #      取出unique_words[pos]位置的word, 执行merge方法(待合并pair, new_token), 产出该pos局部线程的 local_changes. 把所有local_changes聚合到changes, 并给每个元素标记其pos
-        #   4. 线性扫描changes, 取出每个元素(pair, change, pos): 用change和freqs[pos]更新pair_counts[pair]; 为change>0的pair, 给where_to_update[pair]更新添加pos
+        #      取出unique_words[pos]位置的word, 执行merge方法(待合并pair, new_token), 产出该pos局部线程的 local_changes(list(u64,int)). 把所有local_changes安全聚合到changes, 并给每个元素标记其pos
+        #   4. 线性扫描changes, 取出每个元素(pair, change, pos): 用change和freqs[pos]更新pair_counts[pair]; 为change>0的pair, 插入或更新where_to_update[pair]添加pos
         #   5. 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --push--> max_heap
         # 6.cpp->cy loop结束或跳出. 返回 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)) 到cython层; 如果是throw runoutError, 该如何返回 merges 到cython层?
         # 7.cy->py 在cython层执行把 merges(vector of ((u32, u32), u64)) 转换为 list of (u32-pair, p_cnts) 作为 bpe_core_loop 的返回. 在python层依据其一次性全部更新入tokenizer
