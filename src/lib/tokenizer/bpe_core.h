@@ -76,7 +76,7 @@ public:
     /*
     * 只读 token-pair 迭代器
     * 
-    * 用法: 单一线程下 for(auto win2_it = word.begin_pair(); it != word.end_pair(); ++it) {uint64_t token_pair = *win2_it; //code//}
+    * 用法: 单一线程下 for(auto win2_it = word.begin_pair(); win2_it != word.end_pair(); ++it) {uint64_t token_pair = *win2_it; //code//}
     */
     class pair_iterator {
     private:
@@ -159,7 +159,7 @@ struct node_comparator {
 using max_octanory_heap = octanary_heap<merge_node, node_comparator>;
 
 
-// 定义 哈希表的 哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+// 定义 bpe 中用到的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
 struct hasher {
     size_t operator()(const uint64_t& key) const {
         return static_cast<size_t>(key);
