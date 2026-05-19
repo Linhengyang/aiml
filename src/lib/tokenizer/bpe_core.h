@@ -199,4 +199,22 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
 );
 
 
+std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_par_bpe(
+    const int num_merges,
+    const size_t num_words,
+    const uint32_t* tokens_ptr,
+    const int64_t* offsets_ptr,
+    const uint64_t* freqs_ptr
+);
+
+
+std::vector<std::pair<uint64_t, uint64_t>> par_bpe_loop_core(
+    max_octanory_heap& max_heap,
+    std::vector<Word>& unique_words,
+    const std::vector<uint64_t>& freqs,
+    std::unordered_map<uint64_t, uint64_t>& pair_counts,
+    const int num_merges
+);
+
+
 } // end of extern C
