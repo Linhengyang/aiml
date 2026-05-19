@@ -167,13 +167,14 @@ struct hasher {
 
 
 // non-parallel 的 BPE, 不需要线程安全
+// parallel 的 BPE 过程中全部使用 无锁/TLS 设计, 也不需要线程安全
 using hashmap = pooled_hashtable<uint64_t, position_set, mempool, hasher>;
 
 
 extern "C" {
 
 // unique_words & freqs --window2_token遍历--> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set})
-// 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge), 销毁where_to_update
+// 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge), 置空where_to_update
 // 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, pool, num_merges)
 // 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 并返回
 std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
@@ -192,7 +193,7 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
     std::vector<Word>& unique_words,
     const std::vector<uint64_t>& freqs,
     std::unordered_map<uint64_t, uint64_t, hasher>& pair_counts,
-    mempool& pool,
+    hashmap& where_to_update,
     const int num_merges
 );
 
@@ -201,7 +202,7 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
 // 方法2: 对 unique_words & freqs 执行chunk分块，每个线程计算一个大块，并实现TLS的无锁 pair_counts & where_to_update. 最后再加总少数个 pair_counts & where_to_update.
 // 调用 par_bpe_loop_core: merges(vector of (u64, u64)) = par_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, pool, num_merges)
 // 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 返回
-// ---> 考虑到并行版BPE LOOP也完全是TLS的，所以整个并行版BPE完全不需要引入线程安全的类
+// ---> 考虑到并行版BPE LOOP也完全是TLS的，所以整个并行版BPE 也完全不需要引入线程安全的类. 所以 where_to_update 完全不需要销毁-新建. 传给 loop_core 复用即可
 std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_par_bpe(
     const int num_merges,
     const size_t num_words,
@@ -219,7 +220,7 @@ std::vector<std::pair<uint64_t, uint64_t>> par_bpe_loop_core(
     std::vector<Word>& unique_words,
     const std::vector<uint64_t>& freqs,
     std::unordered_map<uint64_t, uint64_t, hasher>& pair_counts,
-    mempool& pool,
+    hashmap& where_to_update,
     const int num_merges
 );
 

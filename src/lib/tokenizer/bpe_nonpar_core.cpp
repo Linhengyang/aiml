@@ -49,7 +49,7 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
         }
     }
 
-    // 3. 移动语义遍历 where_to_update: pair & move(positions) + pair_counts[pair] --merge_node构造--> heapify--> max_octanory_heap. 销毁 where_to_update
+    // 3. 移动语义遍历 where_to_update: pair & move(positions) + pair_counts[pair] --merge_node构造--> heapify--> max_octanory_heap. 置空 where_to_update
     /*TODO*/
 
     // 4. 调用 nonpar_bpe_loop_core
@@ -58,9 +58,12 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
         unique_words,
         freqs,
         pair_counts,
-        pool,
+        where_to_update,
         num_merges
     );
+
+    // 5. 转换并返回 merges(vector of ((u32, u32), u64))
+    
    
 }
 
@@ -70,7 +73,7 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
     std::vector<Word>& unique_words,
     const std::vector<uint64_t>& freqs,
     std::unordered_map<uint64_t, uint64_t, hasher>& pair_counts,
-    mempool& pool,
+    hashmap& where_to_update,
     const int num_merges
 ) {
     
