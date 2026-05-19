@@ -7,7 +7,6 @@
 #include <unordered_set>
 #include <unordered_map>
 #include "mempooled_hashtable.h"
-#include "mempooled_concurrent_hashtable.h"
 #include "memory_pool.h"
 
 
@@ -167,19 +166,15 @@ struct hasher {
 };
 
 
-// 定义 基于内存池的哈希表(pool_hashtable & threadsafe_pool_hashtable)
-// where_to_update 用在两个地方: bpe 里用于 优先队列的初始化(随后置空), 以及 bpe_loop_core 里用于接收新产生的 token_pair-positions KV对.
-// 前者用完后即置空, 可并行(如果需要并行则需要 where_to_update 线程安全); 后者在循环中不断「插入-移动语义-空」，但没有并行的需求
-// 所以似乎在 bpe_loop_core 内部，loop开始前重新 初始化一个无需线程安全的 where_to_update(hashmap{u64: unordered_set}) 即可, 无需把循环之前的 where_to_update 传进去
+// non-parallel 的 BPE, 不需要线程安全
 using hashmap = pooled_hashtable<uint64_t, position_set, mempool, hasher>;
-using threadsafe_hashmap = pooled_concurrent_hashtable<uint64_t, position_set, threadsafe_mempool, hasher>;
- 
+
 
 extern "C" {
 
 // unique_words & freqs --window2_token遍历--> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set})
 // 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge), 销毁where_to_update
-// 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, num_merges)
+// 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, pool, num_merges)
 // 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 并返回
 std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
     const int num_merges,
@@ -190,15 +185,23 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
 );
 
 
+// 循环num_merges次, 不断从 max_heap 中取出top node with positions, 对每个pos代表的word执行 merge, 合并所有local_changes到线性容器changes, 最后扫描它以更新pair_counts
+// 和 where_to_update. 然后 drain遍历 where_to_update 去更新max_heap, 继续下一次循环
 std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
     max_octanory_heap& max_heap,
     std::vector<Word>& unique_words,
     const std::vector<uint64_t>& freqs,
-    std::unordered_map<uint64_t, uint64_t>& pair_counts,
+    std::unordered_map<uint64_t, uint64_t, hasher>& pair_counts,
+    mempool& pool,
     const int num_merges
 );
 
 
+// 与非并行版大致相同, 只是从 unique_words & freqs 生产 pair_counts & where_to_update 时并行. 这里方法1: 需要 pair_counts & where_to_update 都线程安全(从而必然引入线程安全的内存池pool)
+// 方法2: 对 unique_words & freqs 执行chunk分块，每个线程计算一个大块，并实现TLS的无锁 pair_counts & where_to_update. 最后再加总少数个 pair_counts & where_to_update.
+// 调用 par_bpe_loop_core: merges(vector of (u64, u64)) = par_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, pool, num_merges)
+// 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 返回
+// ---> 考虑到并行版BPE LOOP也完全是TLS的，所以整个并行版BPE完全不需要引入线程安全的类
 std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_par_bpe(
     const int num_merges,
     const size_t num_words,
@@ -208,11 +211,15 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_par_bpe(
 );
 
 
+// 与非并行版大致相同, 只是对每个pos代表的word执行merge时，可以并行. 由此需要一个线程安全的线性容器changes(或者是用安全的方式收集local_changes). 而local_changes的产出完全是tls的, 不涉及线程共享
+// where_to_update不需要并发安全, 不管其基于的内存池是否线性安全, 其本身不涉及线程共享
+// ---> 综上, 即使是并行版BPE LOOP, 其并行计算也完全是 tls 的, 不需要引入线程安全
 std::vector<std::pair<uint64_t, uint64_t>> par_bpe_loop_core(
     max_octanory_heap& max_heap,
     std::vector<Word>& unique_words,
     const std::vector<uint64_t>& freqs,
-    std::unordered_map<uint64_t, uint64_t>& pair_counts,
+    std::unordered_map<uint64_t, uint64_t, hasher>& pair_counts,
+    mempool& pool,
     const int num_merges
 );
 
