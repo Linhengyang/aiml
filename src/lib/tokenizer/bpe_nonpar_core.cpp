@@ -33,7 +33,7 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
     std::unordered_map<uint64_t, uint64_t>& pair_counts,
     const int num_merges
 ) {
-
+    
 }
 
 
