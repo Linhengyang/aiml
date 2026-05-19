@@ -6,18 +6,21 @@
 #include "heap.h"
 #include <unordered_set>
 #include <unordered_map>
-#include <
+#include "mempooled_hashtable.h"
+#include "mempooled_concurrent_hashtable.h"
+#include "memory_pool.h"
+
 
 // 拼合两个 u32 token 成为一个 u64 的方法
 uint64_t combine_2tokens(const uint32_t left_token, const uint32_t right_token) {
     return (static_cast<uint64_t>(left_token) << 32) | right_token;
 }
 
+
 // 分拆一个 u64 成为两个 u32 token 的方法
 std::pair<uint32_t, uint32_t> split_2tokens(const uint64_t combined_tokens) {
     return {static_cast<uint32_t>(combined_tokens >> 32), static_cast<uint32_t>(combined_tokens & 0xFFFFFFFFULL)};
 }
-
 
 
 class Word {
@@ -131,30 +134,52 @@ public:
 };
 
 
+// 定义 不可重复的集合容器(set)
+using position_set = std::unordered_set<size_t>;
+
+
+
 // 定义 优先队列的节点(node)
-struct MergeNode {
+struct merge_node {
     uint64_t token_pair;
     uint64_t p_cnts;
-    std::unordered_set<size_t> positions;
+    position_set positions;
 };
 
 
 // 定义 严格弱序优先级函数(compare)
-struct Comparator {
-    bool operator()(const MergeNode& a, const MergeNode& b) {
+struct node_comparator {
+    bool operator()(const merge_node& a, const merge_node& b) {
         return a.p_cnts > b.p_cnts;
     }
 };
 
-// 定义 优先队列(8-ary max_heap)
-using max_octanory_heap = octanary_heap<MergeNode, Comparator>;
 
+// 定义 优先队列(8-ary max_heap)
+using max_octanory_heap = octanary_heap<merge_node, node_comparator>;
+
+
+// 定义 哈希表的 哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+struct hasher {
+    size_t operator()(const uint64_t& key) const {
+        return static_cast<size_t>(key);
+    }
+};
+
+
+// 定义 基于内存池的哈希表(pool_hashtable & threadsafe_pool_hashtable)
+// where_to_update 用在两个地方: bpe 里用于 优先队列的初始化(随后置空), 以及 bpe_loop_core 里用于接收新产生的 token_pair-positions KV对.
+// 前者用完后即置空, 可并行(如果需要并行则需要 where_to_update 线程安全); 后者在循环中不断「插入-移动语义-空」，但没有并行的需求
+// 所以似乎在 bpe_loop_core 内部，loop开始前重新 初始化一个无需线程安全的 where_to_update(hashmap{u64: unordered_set}) 即可, 无需把循环之前的 where_to_update 传进去
+using hashmap = pooled_hashtable<uint64_t, position_set, mempool, hasher>;
+using threadsafe_hashmap = pooled_concurrent_hashtable<uint64_t, position_set, threadsafe_mempool, hasher>;
+ 
 
 extern "C" {
 
 // unique_words & freqs --window2_token遍历--> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set})
-// 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge)
-// 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, where_to_update, num_merges)
+// 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge), 销毁where_to_update
+// 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, num_merges)
 // 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 并返回
 std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
     const int num_merges,
@@ -170,7 +195,6 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
     std::vector<Word>& unique_words,
     const std::vector<uint64_t>& freqs,
     std::unordered_map<uint64_t, uint64_t>& pair_counts,
-
     const int num_merges
 );
 
