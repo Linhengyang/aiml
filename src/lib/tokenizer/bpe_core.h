@@ -79,7 +79,7 @@ public:
     */
     class pair_iterator {
     private:
-        const Word* _word;
+        const Word* _word; // 这种写法代表 word是一个指向 const Word的指针: 不能通过word来改变其指向的数据, 只能通过word来读取数据.
         size_t _index;
     public:
         pair_iterator(const Word* word, size_t index) // 这种写法代表 word是一个指向 const Word的指针: 不能通过word来改变其指向的数据, 只能通过word来读取数据.
@@ -146,19 +146,21 @@ struct merge_node {
 };
 
 
-// 定义 严格弱序优先级函数(compare)
+// 定义 严格弱序优先级函数(compare): 当 b 优先级更高时, 返回 True
+// 由于此优先队列是大顶堆(p_cnts大者靠顶), 所以 b 优先级更高 <--> a.p_cnts < b.p_cnts
 struct node_comparator {
     bool operator()(const merge_node& a, const merge_node& b) {
-        return a.p_cnts > b.p_cnts;
+        return a.p_cnts < b.p_cnts;
     }
 };
 
 
+// max_heap
 // 定义 优先队列(8-ary max_heap)
 using max_octanory_heap = octanary_heap<merge_node, node_comparator>;
 
 
-// 定义 bpe 中用到的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
+// 定义 bpe之where_to_update 中用到的哈希器. 这里 hasher 是一个函数类, 通过实例化得到哈希器 hasher myHasher;
 struct hasher {
     size_t operator()(const uint64_t& key) const {
         return static_cast<size_t>(key);
@@ -166,6 +168,7 @@ struct hasher {
 };
 
 
+// where_to_update & pair_counts
 // non-parallel 的 BPE, 不需要线程安全
 // parallel 的 BPE 过程中全部使用 无锁/TLS 设计, 也不需要线程安全
 using hashmap = pooled_hashtable<uint64_t, position_set, mempool, hasher>;
