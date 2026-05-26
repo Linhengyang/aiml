@@ -143,6 +143,13 @@ struct merge_node {
     uint64_t token_pair;
     uint64_t p_cnts;
     position_set positions;
+
+    // Rule of 5 --> Rule of 0
+    // 析构
+    // 拷贝构造
+    // 拷贝赋值
+    // 移动构造
+    // 移动赋值
 };
 
 
