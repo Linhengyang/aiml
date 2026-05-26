@@ -2,6 +2,7 @@
 
 #pragma once
 #include "bpe_core.h"
+#include <tuple>
 
 // 匿名的命名空间, 等价于声明 静态存储 & 本文件私有
 namespace {
@@ -63,8 +64,7 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
     );
 
     // 5. 转换并返回 merges(vector of ((u32, u32), u64))
-    
-   
+
 }
 
 
@@ -76,7 +76,35 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
     hashmap& where_to_update,
     const int num_merges
 ) {
-    
+    // 初始化一个要返回的收集容器 vector of pair<uint64 as tokens-pair, uint64 as p_counts> merges
+    std::vector<std::pair<uint64_t, uint64_t>> merges;
+    merges.reserve(num_merges);
+
+    // 初始化一个大容量的、收集各pos的local_changes的容器 vector of tuple<uint64 as tokens-pair, int as change_signal, size_t as position> changes
+    // 作用是 循环 num_merges 次以下操作: 对所有pos的word执行merge, 合并所有local_changes(添加pos)到容器changes, 然后扫描它以更新pair_counts&where_to_update
+    // 最后 clear() + shrink_to_fit() 即清空但保留足够空间, 以下一次循环复用
+    std::vector<std::tuple<uint64_t, int, size_t>> changes;
+    changes.reserve(unique_words.size());
+
+    size_t merge_cnts = 0;
+    while (true) {
+        if (merge_cnts >= num_merges) {
+            break;
+        }
+
+        if (max_heap.empty()) {
+            // TODO: 这里要保证merges能被返回
+            throw std::runtime_error("Pop failed: Heap is empty!");
+        }
+        merge_node top = max_heap.pop(); // pop堆顶
+        if (top.p_cnts != pair_counts.at(top.token_pair)) {
+            top.p_cnts = pair_counts.at(top.token_pair);
+            max_heap.push(std::move(top)); // push堆底
+            continue;
+        }
+
+        ++merge_cnts;
+    }
 }
 
 

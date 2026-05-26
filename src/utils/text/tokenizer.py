@@ -1748,7 +1748,7 @@ class bbpeTokenizer(baseBBPETokenizer):
 
     so that is:
     where_to_update: hashmap{u64: unordered_set} as {token-pair: positions}: hashmap nodes on memory pool, but value(positions) managed on system heap memory
-    changes: list(u64, int, size_t) as {token-pair, +-1 signal, position}: all plain basic datatype. can be managed on memory pool, but vector on system heap memory also can do
+    changes: list(u64, int, size_t) as {token-pair, +-1 signal, position}: all plain basic datatype. can be managed on memory pool, but vector on system heap memory also can do thanks to .clear()
     unique_words / freqs / pair_counts / max_heap: stay in system heap memory
     '''
 
