@@ -23,7 +23,7 @@ namespace {
 
     thread_local counter_st* counter_tls = nullptr;
 
-    static hasher pair_hasher;
+    // static hasher pair_hasher;
 
 }
 
@@ -58,7 +58,7 @@ void init_thread(size_t block_size, size_t alignment, size_t capacity) {
 
     /* 基于该内存池的 可复用计数器 */
     if (!counter_tls) {
-        counter_tls = new counter_st(pair_hasher, capacity, get_tls_pool());
+        counter_tls = new counter_st(capacity, get_tls_pool());
 
         const size_t BYTES_IN_GB = 1024ULL * 1024ULL * 1024ULL;
         std::cout << "thread-local memory pool with " << block_size/BYTES_IN_GB << "GB initialized" << std::endl;

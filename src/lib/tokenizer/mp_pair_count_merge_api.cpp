@@ -39,7 +39,7 @@ namespace {
     std::atomic<bool> g_inited{false};
 
     /* 默认构造哈希器 pair_hasher */
-    hasher pair_hasher;
+    // hasher pair_hasher;
 
 }
 
@@ -56,7 +56,7 @@ void init_process(size_t block_size, size_t alignment, size_t capacity) {
         /* 初始化 单例内存池（进程内）/ 基于单例内存池的 可复用计数器 */
         
         singleton_mempool::get(block_size, alignment);
-        local_counter = new counter_st(pair_hasher, capacity, singleton_mempool::get());
+        local_counter = new counter_st(capacity, singleton_mempool::get());
 
         // threadsafe_singleton_mempool::get(block_size, alignment);
         // g_counter_mt = new counter_mt(pair_hasher, capacity, threadsafe_singleton_mempool::get());
