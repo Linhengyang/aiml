@@ -36,6 +36,9 @@ private:
         // 提供placement new 构造支持
         
         // RULE of 5
+        // ---> RULE of 0(只要 TYPE_K 和 TYPE_V 等都实现了标准的拷贝/移动+构造/赋值, 编译器就能给组合结构体实现RULE of 5)
+        
+        // 拷贝构造/赋值的参数签名一定是 const T& other, 移动构造/赋值的参数签名一定是 T&& other. 其他参数签名的都是业务构造/赋值函数
 
     // RULE 1: 析构函数: ~ClassName(), 负责释放资源(if有资源)
         /*
@@ -52,7 +55,8 @@ private:
         // HashNodeTable 的析构函数 --> 只要 TYPE_K 和 TYPE_V 作为 资源管理类型时，实现了完善的析构, 那么 哈希表节点的析构就无需手动编写
 
     // RULE 2: 拷贝构造函数: ClassName(const ClassName& other), 负责深拷贝资源(if有资源, 分配新内存, 深拷贝资源)
-        /*
+
+        /* 业务拷贝构造函数: 1个
         k/v 类型都是 const TYPE&, 不可变动引用, 那么在用 k / v 初始化 key / value 时, 会分别触发 TYPE_K / TYPE_V 的 构造函数
         由于 k / v 都是不可变动引用, 无法移动掏空源对象, 故都会触发 TYPE_K 和 TYPE_V 的拷贝构造 --> 发生 k 和 v 的拷贝
         */
@@ -66,13 +70,16 @@ private:
         // 禁止 哈希表节点 的 拷贝赋值
         HashTableNode& operator=(const HashTableNode& other) = delete;
 
-        // &&符号在 模板函数 中代表 万能引用: 
+        // &&符号在 模板函数(的参数签名) 中代表 万能引用: 
         //      万能引用&&: 如果实参是左值/常左值, 那函数参数推导为 左值引用/常左值引用; 如果实参是右值(移动/临时), 那函数参数推导为 右值引用
         // 配合 std::forward<TYPE>(arg) 完美转发: 在函数内部保持 std::forward<TYPE>(arg) 为推导出来的类型（引用/常引用/右值引用）
 
-        // &&符号在 非模板函数 中代表 右值引用
+        // &&符号在 非模板函数(的参数签名) 中代表 右值引用: 本身不拥有数据, 绑定右值(临时对象/被std::move标记的对象)的引用
+        //  额外Tip: 在函数内部当用一个具名变量（或形参自身）"承接"右值引用后, 它本身就成了一个左值(可能是左值引用). 如果需要保持移动, 用std::move
+    
     // RULE 4: 移动构造函数: ClassName(ClassName&& other), 负责窃取资源(if有资源, 将other的资源指针复制过来, 置空other的资源指针), 避免拷贝开销
-        /*
+
+        /* 业务移动构造函数: 2个
         对于 资源管理类型(非平凡析构类型), 移动构造是刚需:
         可能1. 用临时资源作为参数去构造对象, 比如 std::string("hello") --> TYPE_K(std::string('hello'))
                当然了, 由于 C++ 允许 const& 参数去 const引用 临时资源(并延长临时资源的生命周期), 所以即使没有 移动构造函数, 临时资源还是可以作为参数触发拷贝构造
@@ -243,7 +250,7 @@ public:
     * 语义等同于 std::unordered_map.insert_or_assign: 有则更新，无则插入
     * @param key: 可能是左值/常左值, 此时 key 类型为 TYPE_K&/const TYPE_K&, 源对象不会被掏空; 也可能是右值(临时/移动), 此时 key 类型为 TYPE_K&&, 源对象会被掏空
     * @param value: 同 key
-    * key-pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
+    * key-value pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
     * ---> 模板函数
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
     * 
@@ -317,7 +324,7 @@ public:
         函数指针的左值引用 std::function<void(TYPE_V&)>& 或
         函数指针的const&引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
         这里采用最灵活的模板写法, &&万能引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
-    * @param default_val: 不同于 key, key的源对象不在乎会不会掏空 --> 计数或插入了就行. 而 default_value 完全很可能是重复使用的, 所以不应该被掏空 --> 用const&
+    * @param default_val: 不同于 key, key的源对象不在乎会不会掏空 --> 计数或插入了就行. 而 default_val 完全很可能是重复使用的, 所以不应该被掏空 --> 用const&
     * key-pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
     * ---> 模板函数
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
