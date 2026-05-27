@@ -3,6 +3,7 @@
 #pragma once
 #include "bpe_core.h"
 #include <tuple>
+#include <optional>
 
 // 匿名的命名空间, 等价于声明 静态存储 & 本文件私有
 namespace {
@@ -92,20 +93,48 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
             break;
         }
 
-        if (max_heap.empty()) {
+        std::optional<merge_node> top_opt = max_heap.pop(); // 尝试pop堆顶
+        if (!top_opt.has_value()) {
             // TODO: 这里要保证merges能被返回
             throw std::runtime_error("Pop failed: Heap is empty!");
         }
-
-        merge_node top = max_heap.pop(); // pop堆顶
+        
+        merge_node top = top_opt.value();
         if (top.p_cnts != pair_counts.at(top.token_pair)) {
             top.p_cnts = pair_counts.at(top.token_pair);
             max_heap.push(std::move(top)); // push堆底(传入移动右值, 函数内部始终用移动 保证移动语义)
             continue;
         }
 
+        if (top.p_cnts < 1) {
+            break;
+        }
+
+        uint64_t to_merge_pair = top.token_pair;
+        merges.emplace_back(to_merge_pair, top.p_cnts);
+
+        uint32_t new_token = 256 + merge_cnts;
+        
+        for (const size_t& pos : top.positions) {
+            std::vector<std::pair<uint64_t, int>> local_changes = unique_words[pos].merge(to_merge_pair, new_token);
+            for (const auto& [token_pair, signal]: local_changes) {
+                changes.emplace_back(token_pair, signal, pos);
+            }
+        }
+
+        for (const auto& [token_pair, signal, pos]: changes) {
+            pair_counts[token_pair] += signal*freqs[pos];
+            if (signal > 0) {
+                where_to_update.atomic_upsert(token_pair, [pos](position_set& positions) { positions.insert(pos); }, position_set{});
+            }
+        }
+
+        //TODO: 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --push--> max_heap
+
         ++merge_cnts;
     }
+
+    return merges;
 }
 
 

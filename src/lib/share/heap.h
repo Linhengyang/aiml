@@ -144,7 +144,8 @@ public:
     
     // 综上: 若希望零拷贝, 返回类型写成 按值返回 即可, 重点是函数内部要用 移动语义等 尽量实现零拷贝, 返回这里编译器几乎能处理一切.
 
-    // pop出堆顶. 如果堆为空, 则raise error
+    // pop出堆顶. 如果堆为空, 则raise error. 这个方法没有返回 std::optional<TYPE_NODE> 好.
+    /*
     TYPE_NODE pop()
     {
         if (_container.empty()) {
@@ -156,6 +157,7 @@ public:
         _container.pop_back(); // 安全析构并删除最后一个valid but unspecified末尾node
         return top_node; // 触发NRVO
     }
+    */
 
     // 堆顶被pop 且存入到 node 里. 如果成功返回 true, 失败则返回 false
     bool pop(TYPE_NODE& node)
