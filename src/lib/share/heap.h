@@ -85,9 +85,68 @@
 template<typename TYPE_NODE, typename NODE_COMPARE>
 class octanary_heap {
 
+private:
+
+    std::vector<TYPE_NODE> _container;
     /*
     TODO
     */
+
+public:
+
+
+    // 初始化一个空堆, 等待 push 入 node
+    explicit octanary_heap()
+    {
+        //TODO
+    }
+
+    // 按值传参: 实参可以是右值, 那么形参会以移动构造的方式在函数边界生成, 然后在函数初始化列表及内部继续以std::move(形参)的方式移动(此后形参不再可用); 实参可以是左值, 那么形参会以拷贝构造的方式在函数边界生成
+    // 右值引用传参: 实参必须是右值, 形参并不存在(不会在函数边界真实生成对象, 只作为一个引用), 在函数初始化列表以及内部以 std::move(形参) 的方式移动(因为一旦具名, 它就成了左值)
+    // 模板+完美转发: 本质是按值传参的极致优化版(形参被直接优化掉了, 不生成对象, 只是引用), 在函数体内部以 std::forward<U>(形参) 的方式保持实参的属性，透传给底层. 实参即能是左值，也可以是右值
+    // 左值引用: 实参必须是左值, 需要修改实参
+    // 常引用: 实参可以是左值(此时形参是左值的常引用, 零拷贝只读观察, 不修改不拿走), 也可以是右值(此时形参是临时值的常引用, 延长临时值的生命周期至本full-expression结束). 并且由于拷贝构造/赋值函数的签名一律为常引用, 所以常引用类型的形参在函数内部经常会引发对象的拷贝构造/赋值方法, 从而拷贝储存了实参(无论是左值还是右值)
+    
+    // 强调明确只接受右值, 强制消耗掉传入的vector容器（sink语义）, 执行O(N)heapify堆化. 具备极致性能
+    explicit octanary_heap(std::vector<TYPE_NODE>&& data):
+        _container(std::move(data)) // 这里触发 _data(vector) 的移动构造, 窃取外部实参的所有资源
+    {
+        // TODO
+    }
+
+    bool empty() const
+    {
+        return _container.empty();
+    }
+
+    // 将一个 new node 推入 堆底, 然后上浮至合适位置
+    void push(TYPE_NODE new_node)
+    {
+        _container.emplace_back(std::move(new_node));
+        // TODO
+    }
+
+    // 函数返回, 站在避免拷贝的角度, 移动+按值返回已经能满足100%场景
+    // 返回右值引用 / 返回指针: 都是基本不考虑的选项, 前者只有在一些底层库还有丁点黑魔法用处, 后者基本用于可空返回/多态/兼容C等小众地方
+    // 返回左值引用: 是返回一个长生命周期(不随函数调用而结束)的对象并允许修改
+    // 返回常左值引用: 为了提供一个零拷贝的只读长效变量对象(比如成员变量)的途径
+    // 按值返回: 返回类型 T, 是最核心的返回范式, 且C++11之后的编译器能通过 二级优化方式完全实现 零拷贝
+    //   编译器首先尝试的是一级优化: NRVO & RVO
+    //   RVO: 对于纯右值结果返回, 直接构造在外部承接对象的内存地址上
+    //   NRVO: 对具名变量结果返回, 编译器会直接把外部承接变量 和 要返回的具名变量 直接别名处理(重定向), 使得具名变量在被构建时(无论是拷贝还是移动), 就直接构造在了外部承接变量的地址上, 从而直接免去了return开销
+    //         NRVO的触发条件非常严格, 即直接写变量名 return XXX; 这样, 不能有什么std::move修饰， 抑或是过于复杂的条件判断使得编译器无法判断. 出现这些情况后, 编译器就会放弃NRVO, 走二级优化隐式移动
+    //   编译器如果NRVO/RVO失败, 则会使用二级优化: 隐式移动返回右值, 从而触发外部承接对象的移动构造
+    
+    // 综上: 若希望零拷贝, 返回类型写成 按值返回 即可, 重点是函数内部要用 移动语义等 尽量实现零拷贝, 返回这里编译器几乎能处理一切.
+
+    // pop出堆顶
+    TYPE_NODE pop()
+    {
+        // TODO, swap first & last
+        TYPE_NODE top_node = std::move(_container.back()); // vecotor.back() 返回最后一个元素的引用, 移动语义窃取并掏空它到 top_node, 最后一个元素有效但unspecified
+        _container.pop_back(); // 安全析构并删除最后一个valid but unspecified末尾node
+        return top_node; // 触发NRVO
+    }
 
 }; // end of octanary_heap definition
 

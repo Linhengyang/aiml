@@ -86,7 +86,7 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
     std::vector<std::tuple<uint64_t, int, size_t>> changes;
     changes.reserve(unique_words.size());
 
-    size_t merge_cnts = 0;
+    size_t merge_cnts = 0; // 需要用 merge_cnts 来计算 new_token
     while (true) {
         if (merge_cnts >= num_merges) {
             break;
@@ -96,10 +96,11 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
             // TODO: 这里要保证merges能被返回
             throw std::runtime_error("Pop failed: Heap is empty!");
         }
+
         merge_node top = max_heap.pop(); // pop堆顶
         if (top.p_cnts != pair_counts.at(top.token_pair)) {
             top.p_cnts = pair_counts.at(top.token_pair);
-            max_heap.push(std::move(top)); // push堆底
+            max_heap.push(std::move(top)); // push堆底(传入移动右值, 函数内部始终用移动 保证移动语义)
             continue;
         }
 
