@@ -269,7 +269,7 @@ public:
     * ---> 模板函数
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
     * 
-    * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
+    * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点key 插入默认值作为value, 然后再更新value. 插入后检查是否需要扩容
     */
    template <typename K, typename V>
     bool insert(K&& key, V&& value) {
@@ -336,6 +336,9 @@ public:
 
                 new_node = new(raw_mem) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
             }
+            
+            // 更新插入后的默认值value
+            std::forward<FUNC>(updater)(new_node->value);
 
             _table[index] = new_node;
 

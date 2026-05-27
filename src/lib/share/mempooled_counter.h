@@ -80,12 +80,12 @@ public:
     */
     void increment(const TYPE_K& key) {
         // 这里 编译器可以从实参自动推导 Func 类型（隐式实例化），所以不需要手动模板化 atomic_upsert<...>
-        _hash_table.atomic_upsert(key, [](uint64_t& value) { value += 1;}, 1);
+        _hash_table.atomic_upsert(key, [](uint64_t& value) { value += 1;}, 0);
     }
 
     void increment(TYPE_K&& key) {
         // 移动右值引用 key, 保证触发 atomic_upsert 的移动语义版本
-        _hash_table.atomic_upsert(std::move(key), [](uint64_t& value) { value += 1;}, 1);
+        _hash_table.atomic_upsert(std::move(key), [](uint64_t& value) { value += 1;}, 0);
     }
 
     // 暴露哈希表的clear方法. 析构哈希表, 但不release/reset哈希表所占的内存池空间, 同时表结构也不会变化
