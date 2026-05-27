@@ -82,6 +82,11 @@
 #ifndef HEAP_H
 #define HEAP_H
 
+
+#include <optional>
+
+
+
 template<typename TYPE_NODE, typename NODE_COMPARE>
 class octanary_heap {
 
@@ -139,13 +144,44 @@ public:
     
     // 综上: 若希望零拷贝, 返回类型写成 按值返回 即可, 重点是函数内部要用 移动语义等 尽量实现零拷贝, 返回这里编译器几乎能处理一切.
 
-    // pop出堆顶
+    // pop出堆顶. 如果堆为空, 则raise error
     TYPE_NODE pop()
     {
+        if (_container.empty()) {
+            raise std::runtime_error("Empty Heap");
+        }
+
         // TODO, swap first & last
         TYPE_NODE top_node = std::move(_container.back()); // vecotor.back() 返回最后一个元素的引用, 移动语义窃取并掏空它到 top_node, 最后一个元素有效但unspecified
         _container.pop_back(); // 安全析构并删除最后一个valid but unspecified末尾node
         return top_node; // 触发NRVO
+    }
+
+    // 堆顶被pop 且存入到 node 里. 如果成功返回 true, 失败则返回 false
+    bool pop(TYPE_NODE& node)
+    {
+        if (_container.empty()) {
+            return false;
+        }
+
+        // TODO, swap first & last
+        node = std::move(_container.back());
+        _container.pop_back();
+        return true;
+    }
+
+    // pop出堆顶. 结果可空. optional容器不影响 按值返回的 NRVO/RVO/隐式移动 优化
+    std::optional<TYPE_NODE> pop()
+    {
+        // 检查是否空堆. 如果是, 返回 nullopt
+        if (_container.empty()) {
+            return std::nullopt;
+        }
+
+        // TODO, swap first & last
+        TYPE_NODE top_node = std::move(_container.back());
+        _container.pop_back();
+        return top_node;
     }
 
 }; // end of octanary_heap definition
