@@ -99,7 +99,6 @@ private:
 
 public:
 
-
     // 初始化一个空堆, 等待 push 入 node
     explicit octanary_heap()
     {
@@ -114,7 +113,7 @@ public:
     
     // 强调明确只接受右值, 强制消耗掉传入的vector容器（sink语义）, 执行O(N)heapify堆化. 具备极致性能
     explicit octanary_heap(std::vector<TYPE_NODE>&& data):
-        _container(std::move(data)) // 这里触发 _data(vector) 的移动构造, 窃取外部实参的所有资源
+        _container(std::move(data)) // 这里触发 _data(vector) 的移动构造, 窃取外部实参的所有资源. 这种窃取是O(1)的, 效率极高, 不随data大小和长度改变
     {
         // TODO
     }
@@ -124,7 +123,7 @@ public:
         return _container.empty();
     }
 
-    // 将一个 new node 推入 堆底, 然后上浮至合适位置
+    // 将一个 new node 推入 堆底, 然后上浮至合适位置. 推入 移动右值的 node 会更高效
     void push(TYPE_NODE new_node)
     {
         _container.emplace_back(std::move(new_node));
@@ -151,7 +150,6 @@ public:
         if (_container.empty()) {
             raise std::runtime_error("Empty Heap");
         }
-
         // TODO, swap first & last
         TYPE_NODE top_node = std::move(_container.back()); // vecotor.back() 返回最后一个元素的引用, 移动语义窃取并掏空它到 top_node, 最后一个元素有效但unspecified
         _container.pop_back(); // 安全析构并删除最后一个valid but unspecified末尾node
