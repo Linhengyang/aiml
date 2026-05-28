@@ -57,12 +57,12 @@
 
 // 考虑原始数据 std::vector<T> init_data = {...};
 
-// 构造方式一: 迭代器传入构造, 即:
+// 构造方式一: 迭代器范围(拷贝)构造, 即:
 // std::priority_queue<T, T_Compare> pq(init_data.begin(), init_data.end(), cmp);
 // 复杂度: O(N) for heapify + O(N) for copy, 副作用: init_data原数据被保留 --> 本质是迭代原容器所有元素 拷贝 到堆的底层容器, 再执行 O(N) 的heapify算法
 
 // 构造方式二: 原容器移动传入构造, 即:
-// std::priority_queue<T, T_Compare> pq(cmp, std::move(init_data));
+// std::priority_queue<T, T_Compare> pq(std::move(init_data), cmp);
 // 复杂度: O(N) for heapify + O(1) for move, 副作用: init_data被移动掏空 --> 本质是pq底层容器 O(1) 接管init_data, 再执行 O(N) 的heapify算法
 
 // 以上两种就是最典型的 already-data --heapify--> priority_queue 的方式
@@ -84,10 +84,10 @@
 
 
 #include <optional>
+#include <queue>
 
 
-
-template<typename TYPE_NODE, typename NODE_COMPARE>
+template<typename TYPE_NODE, typename NODE_COMPARATOR>
 class octanary_heap {
 
 private:
@@ -100,7 +100,14 @@ private:
 public:
 
     // 初始化一个空堆, 等待 push 入 node
-    explicit octanary_heap()
+    explicit octanary_heap(const NODE_COMPARATOR& compare)
+    {
+        //TODO
+    }
+
+    // 迭代器范围构造, 拷贝解引用结果 到堆的底层容器, 再执行 O(N) 的heapify算法
+    template <typename InputIterator>
+    octanary_heap(InputIterator first, InputIterator last, const NODE_COMPARATOR& compare)
     {
         //TODO
     }
@@ -112,18 +119,32 @@ public:
     // 常引用: 实参可以是左值(此时形参是左值的常引用, 零拷贝只读观察, 不修改不拿走), 也可以是右值(此时形参是临时值的常引用, 延长临时值的生命周期至本full-expression结束). 并且由于拷贝构造/赋值函数的签名一律为常引用, 所以常引用类型的形参在函数内部经常会引发对象的拷贝构造/赋值方法, 从而拷贝储存了实参(无论是左值还是右值)
     
     // 强调明确只接受右值, 强制消耗掉传入的vector容器（sink语义）, 执行O(N)heapify堆化. 具备极致性能
-    explicit octanary_heap(std::vector<TYPE_NODE>&& data):
-        _container(std::move(data)) // 这里触发 _data(vector) 的移动构造, 窃取外部实参的所有资源. 这种窃取是O(1)的, 效率极高, 不随data大小和长度改变
+    explicit octanary_heap(std::vector<TYPE_NODE>&& data, const NODE_COMPARATOR& compare):
+        _container(std::move(data)), // 这里触发 _data(vector) 的移动构造, 窃取外部实参的所有资源. 这种窃取是O(1)的, 效率极高, 不随data大小和长度改变
     {
         // TODO
     }
 
-    bool empty() const
+    size_t size() const 
+    {
+        return _container.size();
+    }
+
+    bool empty() const noexcept
     {
         return _container.empty();
     }
 
-    // 将一个 new node 推入 堆底, 然后上浮至合适位置. 推入 移动右值的 node 会更高效
+    // top方法不检查空, 在外部先用 .empty方法检测是否为空, 再使用top方法窥探堆顶
+    const TYPE_NODE& top() const
+    {
+        // 可以加一些防止空的报错选项或assert断言
+        assert(!_container.empty() && "top() called on empty heap");
+
+        return _container.front();
+    }
+
+    // 将一个 new node 推入 堆底, 然后上浮至合适位置. 实参可以是左值, 也可以是右值. 左值实参会拷贝构造形参new_node, 移动右值的实参会移动构造形参new_node, 更高效
     void push(TYPE_NODE new_node)
     {
         _container.emplace_back(std::move(new_node));
