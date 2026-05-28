@@ -625,7 +625,8 @@ public:
         }
 
         // 对迭代器的解引用 *it --> 返回 k-v pair. 注意在外面不能引用接收, 即 pair& p = *it 是非法的
-        // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用
+        // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用(结构化绑定)
+        // 这样设计下来, 返回类型是个代理类型: 即本质是个值, 但试图是引用. 所以在外部只能用值作为承接变量
         std::pair<const TYPE_K&, TYPE_V&> operator*() const {
             return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
         }
