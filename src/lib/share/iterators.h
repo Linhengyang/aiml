@@ -2,6 +2,8 @@
 // 为各种数据结构提供的各种性质的遍历器. 以友元的方式 插入 各数据结构 使用
 
 // drain_iterator: 移动语义下的 哈希表 迭代器, 把所有 节点node 的 key-value 都用移动的方式转移出去
+// 即 auto&& [k, v] = *it; // 外部 k 和 v 移动承接 迭代器解引用返回的key-value资源
+
 std::pair<K, V> operator*() {
     return {std::move(k), std::move(v)};
     或
@@ -15,6 +17,6 @@ std::pair<K, V> operator*() {
 
 // 设计2: InputIterator, 尽管也是只能迭代一次, 但是要把迭代器暴露出来, *和++解耦m 迭代中允许解引用多次(幂等) ---> 用一个缓存, 承接*的结果
 // for (auto it = map.drain_begin(); it != map.drain_end(); ++it) {
-//     auto [k, v] = *it;
+//     auto&& [k, v] = *it;
 //     code using std::move(k) & std::move(v) to keep them in move 
 // }
