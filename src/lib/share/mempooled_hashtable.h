@@ -444,7 +444,8 @@ public:
         }
         
         // 如果执行到这里, 说明从 head 遍历到 nullptr 都没能查找到 key. 那么这个是不应该的: key-hash在此index
-        throw std::runtime_error("Error in hashtable pop");
+        // throw std::runtime_error("Error in hashtable pop");
+        return false;
     }
 
     /*
