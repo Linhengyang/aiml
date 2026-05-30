@@ -132,3 +132,112 @@ void pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::
         _bucket_index++;
     }
 }
+
+
+
+
+/*
+* 迭代器: iterator类 本质是对 "迭代产出对象" it 的引用, it 是 iterator 缩写. value可修改
+* 
+* 用法: for(auto it = iterator.begin(); it != iterator.end(); ++it)
+
+一个迭代器类经过 begin 构造为迭代器对象 it 之后, it 就一直是该迭代器的引用, 迭代器内部不同的状态引向不同it结果
+哈希表迭代器, 输出 k-v. 对 it 解引用 *it 即得到想要的输出. 迭代器的构造, 应该满足能准确表达构造 begin 状态, 和 end 状态. 中间线性迁移交给 ++ 操作
+*/
+
+
+/*
+* @param hash_table: 本哈希表指针
+* @param bucket_index: for begin: 0; for end: 本哈希表的_capacity
+* @param node: for begin: nullptr; for end: nullptr
+* 
+* 上述三个属性决定了本迭代器的状态, 然后决定了不同的迭代产出
+* 行为: begin(this哈希表指针, 0, nullptr)初始化下, 成功自定位到first valid bucket状态
+*       end(this哈希表指针, _capacity, nullptr)下成功定位到 ++ 操作符的临界退出点
+*/
+// for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
+// for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
+    :_hash_table(hash_table),
+    _bucket_index(bucket_index),
+    _node(node)
+{
+    _null_node_advance_to_next_valid_bucket();
+}
+
+
+// 对迭代器的解引用 *it --> 返回 k-v pair. 注意这里返回的是代理类型, 在外面不能引用接收, 即 pair& p = *it 是非法的
+// 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用(结构化绑定)
+// 这样设计下来, 返回类型是个代理类型: 即本质是个值, 但试图是引用. 所以在外部只能用值作为承接变量
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+std::pair<const TYPE_K&, TYPE_V&> pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operator*() const
+{
+    // 返回 pair(key, value)临时对象
+    return {_node->key, _node->value};
+}
+
+
+// C++/C 风格: 前置自增: 返回改变后的对象自身(引用)；后置自增：对象改变后，返回原值副本
+
+// 对迭代器的前置自增（自增自身, 返回自增后新值引用） ++it --> 下一个状态的迭代器
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operator++()
+    -> iterator&
+{
+    if (_node) {
+        _node = _node->next; // 如果当前 _node 仍然在某链表里, move to next
+    }
+    // 如果 _node 为空, 不论是next为空, 还是本来就空, 说明当前桶已经遍历完了
+    if (!_node) {
+        _bucket_index++;
+        _null_node_advance_to_next_valid_bucket();
+    }
+    return *this;
+}
+
+
+// 对迭代器的后置自增（自增自身, 返回自增前原值副本） it++ --> 下一个状态的迭代器
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operator++(int)
+    -> iterator
+{
+    iterator tmp = *this;
+    ++(*this);
+    // 返回原值副本
+    return tmp;
+}
+
+
+// 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operator==(const iterator& other) const {
+    return _node == other._node && _hash_table == other._hash_table;
+}
+
+
+// 给出两个迭代器状态是否不相等的判决方法, 必须是 operator == 操作的反面
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operator!=(const iterator& other) const {
+    return !(*this == other);
+}
+
+
+// 当 _node 沿着 _bucket 链表移动到 nullptr, 亦或是初始化为 nullptr, 需要"跳步"到next valid bucket链表头
+
+// 此跳步操作, 只在 _node 为空时才会执行
+// 执行结果1: _node 跳转到 next valid bucket head, _bucket_index 正确为该 valid bucket
+// 执行结果2: _node 仍然为空, _bucket_index = hashtable capacity
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+void pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::_null_node_advance_to_next_valid_bucket() {
+    // 当前 _node 为 nullptr, 且当前 _bucket_index 尚未穷尽
+    while (!_node && _bucket_index < _hash_table->_capacity) {
+        // 哈希表取出_table内部属性, 再取出当前 bucket 链表头作为 potential next node
+        _node = (_hash_table->_table)[_bucket_index];
+
+        if (_node) break; // 如果 _node 不为 nullptr, 说明跳步 bucket 成功了, break
+
+        // 如果 _node 仍然是 null, 说明 _bucket_index 对应桶是空的. 尝试下一个桶
+        _bucket_index++;
+    }
+}
