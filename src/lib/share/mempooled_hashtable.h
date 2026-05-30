@@ -512,78 +512,22 @@ public:
 
     /*
     * 只读迭代器
-    * 
-    * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
     */
     class const_iterator {
-
     public:
-
-        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table),
-            _bucket_index(bucket_index),
-            _node(node)
-        {
-            _null_node_advance_to_next_valid_bucket();
-        }
-
-        // *it 迭代器对象解引用 --> 只读返回
-        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
-        }
-        
-
-        const_iterator& operator++() {
-            if (_node) {
-                _node = _node->next;
-            }
-            if (!_node) {
-                _bucket_index++;
-                _null_node_advance_to_next_valid_bucket(); // 
-            }
-            return *this;
-        }
-
-
-        const_iterator operator++(int) {
-            const_iterator tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-
-        bool operator==(const const_iterator& other) const {
-            return _node == other._node && _hash_table == other._hash_table;
-        }
-
-
-        bool operator!=(const const_iterator& other) const {
-            return !(*this == other);
-        }
-
+        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {}
+        const_iterator& operator++() {}
+        const_iterator operator++(int) {}
+        bool operator==(const const_iterator& other) const {}
+        bool operator!=(const const_iterator& other) const {}
     private:
-
         const pooled_hashtable* _hash_table;
-
         size_t _bucket_index;
-
         HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {}
+    };
 
-        void _null_node_advance_to_next_valid_bucket() {
-
-            while (!_node && _bucket_index < _hash_table->_capacity) {
-
-                _node = (_hash_table->_table)[_bucket_index];
-
-                if (_node) break;
-
-                _bucket_index++;
-            }
-        }
-
-    }; // end of const_iterator definition
-
-    
     const_iterator cbegin() const {
         return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
     }
@@ -711,5 +655,7 @@ public:
 
 
 
+// include separated nested iterator classes for mempooled_hashtable 
+#include "mempooled_hashtable_iterators.inl"
 
 #endif
