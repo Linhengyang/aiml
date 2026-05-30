@@ -306,20 +306,6 @@ class baseBBPETokenizer(Tokenizer):
                   f'[{self._vocab[new_token]}] had {occurence} occurences')
 
 
-
-    def __init_tokens(self, corpora:t.List[str]|str, *args, **kwargs) -> t.Generator:
-        if isinstance(corpora, str):
-            corpora = [corpora]
-        
-        corpus = ENDOFTEXT.join( corpora )
-        chunks_str: t.List[str] = re.findall(self.pat_str, corpus) # pre-split to list of string
-
-        with ThreadPoolExecutor(max_workers=8) as e:
-             yield_tokens = e.map(encode_to_ints, chunks_str) # a generator
-        
-        return yield_tokens
-
-
     def _clear(self):
         self._merge_ranks: dict[tuple[int, int], int] = {} # 初始化 _merge_ranks
         self._vocab: dict[int, bytes] = {i:bytes([i]) for i in range(256)} # 初始化 _vocab
@@ -338,7 +324,7 @@ class baseBBPETokenizer(Tokenizer):
             stored_tokens.append( tokens )
         
         if not agg_p_counts:
-            self.save(self._buffer_dir) # 在raise error前先保存已经train好的tokenizer防止前功尽弃
+            self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok')) # 在raise error前先保存已经train好的tokenizer防止前功尽弃
             raise_run_out_corpus_error(rank, len(self._special_marks))
         
         occur_most_pair: tuple[int, int] = max(agg_p_counts, key=agg_p_counts.get)
@@ -353,16 +339,18 @@ class baseBBPETokenizer(Tokenizer):
             yield merge_pair(tokens, occur_most_pair, new_token)
     
 
-    def train_bpe(self, corpora:t.List[str]|str, num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
+    def train_bpe(self, corpora:str, num_merges:int|None = None, verbose:bool=False, *args, **kwargs):
         # baseTokenizer 因为没有中间结果可以缓存, 故续训（load merge_ranks 之后再输入corpus train），是没办法校对的
         # 所以 baseTokenizer 只能从头开始 train
         self._clear()
         self._prepare_train(num_merges)
-        yield_tokens:t.Generator = self.__init_tokens(corpora)
+
+        chunks_str: t.List[str] = re.findall(self.pat_str, corpora) # pre-split to list of string
+        with ThreadPoolExecutor(max_workers=8) as e:
+             yield_tokens = e.map(encode_to_ints, chunks_str) # a generator
         
         # <merge循环有前后依赖，所以不能并行>
-        # <从init_merge_ranks_size续训num_train_epochs轮次, rank从init_merge_ranks_size到total_size-1>
-        for i in range(self._num_train_epochs):
+        for i in range(self._num_merges): # _num_merges == _num_train_epochs, i 从 0 到 num_merges-1
             # rank := i + init_merge_ranks_size = i + 0 = i: 0, ..., _num_mergs-1
             yield_output = self.bpe_single_merge(i, yield_tokens, verbose)
             occur_most_pair, occurence, new_token = next(yield_output) # first yield
@@ -888,8 +876,6 @@ def text_to_byte_pa_table(pre_split_pat, text, tokens_schema):
     :param text: 文本
     :param tokens_schema: pa.Table的schema
     '''
-    if not text.endswith(ENDOFTEXT):
-        text = text + ENDOFTEXT
     chunks_str = re.findall(pre_split_pat, text) # list of tokens(string)
     
     # list of list of integers(every list of integers as tokens)
@@ -900,14 +886,15 @@ def text_to_byte_pa_table(pre_split_pat, text, tokens_schema):
     return batch_table
 
 
-def text_corpora_preprocess(
+def text_corpora_to_init_tokens_pqfiles(
         corpora: t.List[str]|str,
         column: t.List[str]|str|None,
+        pre_split_pat,
         save_dir,
         tokens_schema,
         batch_size) -> t.List[str]:
     '''
-    corpora_preprocess: 输入语料 corpora, 全部作 预切分+byte映射 之后, 存储 parquet 文件到 save_dir. 返回 byte-value parquet 目录列表
+    text_corpora_to_init_tokens_pqfiles: 输入语料 corpora, 全部作 预切分+byte映射 之后, 存储 parquet 文件到 save_dir. 返回 byte-value parquet 目录列表
     
     :param corpora: 语料. 可以是 1. parquet文件列表  2. 语料文本
     :param column: parquet列名. 与corpora对应. 若column is None, 说明corpora是语料文本而不是路径
@@ -924,7 +911,7 @@ def text_corpora_preprocess(
         else:
             import uuid
             init_tokens_path = os.path.join(save_dir, str(uuid.uuid3(uuid.NAMESPACE_DNS, corpora)))
-            tokens_table = text_to_byte_pa_table(GPT4_TOKENIZER_REGEX, corpora, tokens_schema)
+            tokens_table = text_to_byte_pa_table(pre_split_pat, corpora, tokens_schema)
             pq.write_table(tokens_table, init_tokens_path)
             return [init_tokens_path]
     
@@ -936,19 +923,19 @@ def text_corpora_preprocess(
         assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora]), \
             f'file-error with input copora {corpora}'
         
-        init_corpora = []
+        init_tokens_pq_files = []
         for (corpus, text_col) in zip(corpora, column):
             # 在 buffer_dir/内生成 对应的 byte-value tokens parquet file
             init_tokens_path = os.path.join(save_dir, os.path.basename(corpus))
             with pq.ParquetWriter(init_tokens_path, tokens_schema) as writer:
                 for batch in pq.ParquetFile(corpus).iter_batches(batch_size, columns=[text_col]):
-                    text = ENDOFTEXT.join( batch[text_col].to_pylist() )
-                    tokens_table = text_to_byte_pa_table(GPT4_TOKENIZER_REGEX, text, tokens_schema)
+                    text = '\n'.join( batch[text_col].to_pylist() )
+                    tokens_table = text_to_byte_pa_table(pre_split_pat, text, tokens_schema)
                     writer.write_table(tokens_table, batch_size)
 
-            init_corpora.append(init_tokens_path)
+            init_tokens_pq_files.append(init_tokens_path)
         
-        return init_corpora
+        return init_tokens_pq_files
 
 
 
@@ -959,6 +946,7 @@ from multiprocessing.util import Finalize
 
 import ext.bpeboost as bpeboost
 import pyarrow.dataset as ds
+from ..parquet.sharding import shard_pq_to_ds
 from ext.bpeboost import process_count_u16pair_batch, process_merge_u16pair_batch
 
 
@@ -1086,33 +1074,12 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
 
     # 从多个 init_tokens(parquet格式), 切分成 batches 到 fragments of init dataset: tokens/0
     def _init_tokens_dataset(self, init_tokens_pq_files: t.List[str]):
-        # 0. 检查 总的batch数量不能超过 10000
-        num_total_rows = sum( [pq.read_metadata(init_tokens_pq).num_rows for init_tokens_pq in init_tokens_pq_files] )
-        assert num_total_rows // self._batch_size < 10000, \
-            f'batch_size {self._batch_size} too small for parquet files {init_tokens_pq_files}, which leads more than 10000 fragments in dataset.'
-        
-        print(f'initalizing tokens dataset at merge 0: {num_total_rows//self._batch_size} fragments with batch_size {self._batch_size}')
-
-        # 1. 创建并清空 init_tokens_ds
-        init_tokens_ds = os.path.join(self._buffer_tokens_dir, '0')
-        os.makedirs(init_tokens_ds, exist_ok=True)
-
-        # 清空但保留 init_tokens_ds 文件夹
-        clean_folder(init_tokens_ds, method='all', keep=True)
-
-        # 2. 写入 common_metadata
-        pq.write_metadata(self.tokens_schema, os.path.join(init_tokens_ds, "_common_metadata"))
-
-        # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
-        # TODO: 改造成多线程/多进程 以加速
-        for init_tokens_pq in init_tokens_pq_files:
-            pq_file = pq.ParquetFile(init_tokens_pq)
-            for i, batch in enumerate( pq_file.iter_batches(self._batch_size, columns=[self.tokens_schema[0].name]) ):
-                b_table = pa.Table.from_batches([batch], self.tokens_schema)
-                b_path = os.path.join(init_tokens_ds, f'{os.path.basename(init_tokens_pq)}-part-{i:04d}.parquet')
-                pq.write_table(b_table, b_path)
-        
-        # 4. 写入完整 metadata --> 省略
+        shard_pq_to_ds(
+            pq_files = init_tokens_pq_files,
+            save_dir = os.path.join(self._buffer_tokens_dir, '0'),
+            shard_row_size = self._batch_size,
+            write_metadat = False
+        )
 
 
     def _start_tokens_ds(self, num_merges, executor):
@@ -1231,17 +1198,17 @@ class mpbufferBBPE_u16Tokenizer(baseBBPETokenizer):
         
         assert keep_window >= 0
 
-        # 当 corpora is not None --> 作为语料从头train. 预处理语料 并 生成第一个tokens dataset: tokens/0
+        # 当 corpora is not None --> 作为语料从头train. 预处理语料(预切分/utf-8编码) 并 sharding生成第一个tokens dataset: tokens/0
         if corpora is not None:
             self._set_config(language, batch_size_level, memory_utilization) # 直接由输入参数确定 batch_size/num_workers/pool_batch_size_coef
             self._clear()
-            if format == 'text':
-                corpora = text_corpora_preprocess(corpora, column, self._buffer_dir, self.tokens_schema, self._batch_size)
-            else:
+            if format == 'text': # 如果输入 corpora 类型是 text, 要经过 预切分 -> utf-8编码成byte-value -> 重新写入为 tokens_schema 的 parquet文件
+                corpora = text_corpora_to_init_tokens_pqfiles(corpora, column, self.pat_str, self._buffer_dir, self.tokens_schema, self._batch_size)
+            else: # corpora类型若为 byte, 则默认上述预切分/utf-8编码已经执行完成. 检查parquet即可
                 assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora])
-            
+            # shard 语料, 方便并行处理
             self._init_tokens_dataset(corpora)
-        # 当 corpora is None --> 续train
+        # 当 corpora is None --> 续train. 直接从 buffer_tokens_dir 中取最新的 dataset
         else:
             # 从tokens/latest 推断 batch_size_level
             latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
@@ -1424,33 +1391,12 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
 
     # 从多个 init_tokens(parquet格式), 切分成 batches 到 fragments of init dataset: tokens/0
     def _init_tokens_dataset(self, init_tokens_pq_files: t.List[str]):
-        # 0. 检查 总的batch数量不能超过 10000
-        num_total_rows = sum( [pq.read_metadata(init_tokens_pq).num_rows for init_tokens_pq in init_tokens_pq_files] )
-        assert num_total_rows // self._batch_size < 10000, \
-            f'batch_size {self._batch_size} too small for parquet files {init_tokens_pq_files}, which leads more than 10000 fragments in dataset.'
-        
-        print(f'initalizing tokens dataset at merge 0: {num_total_rows//self._batch_size} fragments with batch_size {self._batch_size}')
-
-        # 1. 创建并清空 init_tokens_ds
-        init_tokens_ds = os.path.join(self._buffer_tokens_dir, '0')
-        os.makedirs(init_tokens_ds, exist_ok=True)
-
-        # 清空但保留 init_tokens_ds 文件夹
-        clean_folder(init_tokens_ds, method='all', keep=True)
-
-        # 2. 写入 common_metadata
-        pq.write_metadata(self.tokens_schema, os.path.join(init_tokens_ds, "_common_metadata"))
-
-        # 3. 以 batch_size 为 批大小, 遍历 init_tokens_pq, 并将 batch data 作为 fragment 写入 init_tokens_ds
-        # TODO: 改造成多线程/多进程 以加速
-        for init_tokens_pq in init_tokens_pq_files:
-            pq_file = pq.ParquetFile(init_tokens_pq)
-            for i, batch in enumerate( pq_file.iter_batches(self._batch_size, columns=[self.tokens_schema[0].name]) ):
-                b_table = pa.Table.from_batches([batch], self.tokens_schema)
-                b_path = os.path.join(init_tokens_ds, f'{os.path.basename(init_tokens_pq)}-part-{i:04d}.parquet')
-                pq.write_table(b_table, b_path)
-        
-        # 4. 写入完整 metadata --> 省略
+        shard_pq_to_ds(
+            pq_files = init_tokens_pq_files,
+            save_dir = os.path.join(self._buffer_tokens_dir, '0'),
+            shard_row_size = self._batch_size,
+            write_metadat = False
+        )
 
 
     def _start_tokens_ds(self, num_merges, executor):
@@ -1569,17 +1515,17 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
         
         assert keep_window >= 0
 
-        # 当 corpora is not None --> 作为语料从头train. 预处理语料 并 生成第一个tokens dataset: tokens/0
+        # 当 corpora is not None --> 作为语料从头train. 预处理语料(预切分/utf-8编码) 并 sharding生成第一个tokens dataset: tokens/0
         if corpora is not None:
             self._set_config(language, batch_size_level, memory_utilization) # 直接由输入参数确定 batch_size/num_workers/pool_batch_size_coef
             self._clear()
-            if format == 'text':
-                corpora = text_corpora_preprocess(corpora, column, self._buffer_dir, self.tokens_schema, self._batch_size)
-            else:
+            if format == 'text': # 如果输入 corpora 类型是 text, 要经过 预切分 -> utf-8编码成byte-value -> 重新写入为 tokens_schema 的 parquet文件
+                corpora = text_corpora_to_init_tokens_pqfiles(corpora, column, self.pat_str, self._buffer_dir, self.tokens_schema, self._batch_size)
+            else: # corpora类型若为 byte, 则默认上述预切分/utf-8编码已经执行完成. 检查parquet即可
                 assert all([os.path.isfile(corpus) and os.path.exists(corpus) and corpus.endswith('.parquet') for corpus in corpora])
-            
+            # shard 语料, 方便并行处理
             self._init_tokens_dataset(corpora)
-        # 当 corpora is None --> 续train
+        # 当 corpora is None --> 续train. 直接从 buffer_tokens_dir 中取最新的 dataset
         else:
             # 从tokens/latest 推断 batch_size_level
             latest = max([int(f) for f in os.listdir(self._buffer_tokens_dir)])
@@ -1634,3 +1580,234 @@ class mtbufferBBPE_u32Tokenizer(baseBBPETokenizer):
         # set down others
         self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
         self._register_special_tokens()
+
+
+
+
+import heapq
+import typing as t
+from collections import defaultdict, Counter
+
+class Word:
+    def __init__(self, tokens: t.List[int] = []):
+        self._tokens = tokens
+
+    # word ----merge_(left, right)-->new_token----> changes[(emerged_tokens_pair, +1) / (vanished_tokens_pair, -1)] 
+    def merge(self, left_token, right_token, merged_token, *args, **kwargs) -> t.List[tuple]:
+        changes = []
+        i = 0
+        while True:
+            if i >= len(self._tokens)-1:
+                break
+            if self._tokens[i] == left_token and self._tokens[i+1] == right_token:
+                if i > 0:
+                    changes.append( ((self._tokens[i-1], left_token),  -1) )
+                    changes.append( ((self._tokens[i-1], merged_token), 1) )
+                if i+1 < len(self._tokens)-1:
+                    changes.append( ((right_token, self._tokens[i+2]),  -1) )
+                    changes.append( ((merged_token, self._tokens[i+2]), 1) )
+                self._tokens[i] = merged_token
+                self._tokens.pop(i+1)
+            i += 1
+        
+        return changes
+    
+    def window_pair(self):
+        for l, r in zip(self._tokens[:-1], self._tokens[1:]):
+            yield (l, r)
+
+    @property
+    def tokens(self) -> t.List[int]:
+        return self._tokens
+    
+    def __len__(self):
+        return len(self._tokens)
+    
+    def __eq__(self, value: t.List[int]):
+        return self._tokens == value
+
+
+
+class BBPETokenizer(baseBBPETokenizer):
+
+    def train_bpe(self, corpora, num_merges = None, verbose = True, min_freq: int = 0, *args, **kwargs):
+        self._clear() # BBPETokenizer 和 baseBBPETokenizer 一样, 只可以从头开始BPE train, 不支持中途续train
+        self._prepare_train(num_merges)
+
+        if isinstance(corpora, str):
+            corpora = [corpora]
+        corpus = '\n'.join( corpora )
+
+        # 1. 计算 word_counts, 即 词袋 bag-of-word
+        chunks_str: t.List[str] = re.findall(self.pat_str, corpus)
+        BoW = Counter(chunks_str)
+
+        # 2. 初步 tokenize, 将 string 切分成 tokens
+        # unique_words 和 freqs 成为 BPE 的全部基础. 根据 freqs 是否大于等于一个阈值, 可以有效控制 BoW 的总size, 将整个过程控制在单机运行
+        unique_words = []
+        freqs = []
+
+        for k, v in BoW.items():
+            if v >= min_freq: # 如果BoW确实存在超长尾以至于要用min_freq来缩减, 那么min_freq典型取2, 即过滤掉只出现一次的超长尾unique_word. 这些words占用大量空间但对BPE的影响权重较小.
+                unique_words.append( Word(list(k.encode('utf-8'))) )
+                freqs.append( v )
+
+        # 3. 计算 pair_counts & where_to_update & max_heap. 可并行
+        pair_counts = defaultdict(int) # 记录 token-pair 的实时(正确)计数
+        where_to_update = defaultdict(set) # 记录 token-pair 的倒排索引. 倒排索引集合要保证不可重复, 所以用集合set
+        for pos, word in enumerate(unique_words):
+            for tok_pair in word.window_pair():
+                pair_counts[tok_pair] += freqs[pos]
+                where_to_update[tok_pair].add(pos)
+        
+        max_heap = []
+        for tok_pair, positions in where_to_update.items():
+            to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
+            heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node)) # 最大堆(优先序列)保证 最大频数token-pair与其在words中出现的位置索引集合 处于堆顶
+        where_to_update.clear()
+
+        # pair_counts是实时更新、保持正确的, 而where_to_update中的p_cnts是懒更新、positions是不更新的.
+        # 前者懒更新是指从heap pop出来时, 去和pair_counts对比, 如果不正确才更新并重新推入堆中(堆自平衡重新调整), 如果正确就拿来使用; 后者不更新是因为空扫描几个位置代价很小
+
+        # 4. 执行 merge: 不断从 max_heap 中得到 max-occured-pair, 对 unique_words 作 inplace-merge, 产出相应 changes 来 update pair_counts & max_heap
+        merge_cnts = 0 # BBPETokenizer 和 baseBBPETokenizer 一样, 只可以从头开始BPE train, 不支持中途续train
+        while merge_cnts < self._num_merges: # _num_merges == _num_train_epochs
+            try:
+                _, (tok_pair, p_counts, positions) = heapq.heappop(max_heap)
+            except IndexError:
+                self.save(os.path.join(self._buffer_dir, f'cache_{self.name}.tok'))
+                raise_run_out_corpus_error(merge_cnts, len(self._special_marks))
+
+            # 最大堆 p_cnts 懒更新, positions不更新
+            if p_counts != pair_counts[tok_pair]:
+                to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
+                heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
+                continue
+            
+            if p_counts < 1:
+                break
+
+            new_tok = 256 + merge_cnts
+            l_tok, r_tok = tok_pair
+            self._update_tokenizer((l_tok, r_tok), new_tok, p_counts if verbose else None)
+
+            changes = []
+            # 这里 positions 是 不会重复的 set, 所以可并行
+            for pos in positions:
+                word = unique_words[pos]
+                _changes = word.merge(l_tok, r_tok, new_tok) # list of (pair, signal)
+                changes.extend([ (change, pos) for change in _changes])
+
+            for (pair, signal), pos in changes:
+                pair_counts[pair] += signal*freqs[pos]
+                if signal > 0:
+                    where_to_update[pair].add(pos)
+
+            # flush where_to_update 到 maxHeap
+            for tok_pair, positions in where_to_update.items():
+                if pair_counts[tok_pair] > 0:
+                    to_merge_node = (tok_pair, pair_counts[tok_pair], positions)
+                    heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node))
+            where_to_update.clear()
+            merge_cnts += 1
+            
+        self.explicit_n_vocab = 256 + len(self._merge_ranks) + len(self._special_marks)
+        self._register_special_tokens()
+
+
+
+
+
+from .bag_of_word import get_BoW
+
+class bbpeTokenizer(baseBBPETokenizer):
+    '''
+    data structures:
+    token: u32
+    Word: class with vector of tokens, and method merge(in-place change vector of tokens, return changes(vector of token-pair + signal)), and method window_pair(const iterator of token-pair)
+    pos/iw/word_index: size_t, index of unique_words
+
+    object:
+    BoW: hashmap{string: u64} as {word_str: freq}, useless once unique_words & freqs established ---> save on disk
+    unique_words:
+        BoW.keys().encode('utf-8')---Word构造--->: vector of Word, in-place change, valid-live during the BPE
+    freqs:
+        BoW.values() --->: vector of word_counts(u64), const, valid-live during the BPE
+
+    pair_counts: hashmap{u64: u64} as {token_pair: p_cnts}, insert/update v, valid-live during the BPE
+    positions: unordered_set of pos corresponding to every specific token-pair, const once created, valid-live during untill the token-pair merged
+    
+    where_to_update: hashmap{u64: unordered_set} as {token-pair: positions}---> drain ---> empty ---> update from changes ---> a lot of insert/remove
+    max_heap: max priority_queue with node{token-pair, p_cnts, positions} via p_cnts(max_order)---> push/pop ---> valid-live during the BPE
+
+    design-mode:
+    for objects who are valid-live untill termination, no need for rapid re-use/re-construction ---> stay in system heap memory, std::move when transfer
+    ---> unique_words, freqs, pair_counts, positions, max_heap
+    for objects who are with a lot of insert/remove operations, need for rapid re-use/re-construction --> built on memory pool, except vector(.clear supports memory reuse)
+    ---> where_to_update, changes(vector)
+
+    so that is:
+    where_to_update: hashmap{u64: unordered_set} as {token-pair: positions}: hashmap nodes on memory pool, but value(positions) managed on system heap memory
+    changes: list(u64, int, size_t) as {token-pair, +-1 signal, position}: all plain basic datatype. can be managed on memory pool, but vector on system heap memory also can do thanks to .clear()
+    unique_words / freqs / pair_counts / max_heap: stay in system heap memory
+    '''
+
+    def train_bpe(self,
+                  corpora:t.List[str]|str,          # schema相同的parquet文件 或 语料文本自身
+                  column:str|None,                  # 如果corpora是parquet文件, column应该是列名
+                  num_merges: int|None = None,      # 执行BPE合并的总次数. 本tokenzier没有续train的概念，所以它就是bpe-train的循环总次数
+                  verbose = True,
+                  bow_min_freq: int = 0,            # 词袋BoW的最小频率. 低于此频率的word被剔除以保证内存容量
+                  *args, **kwargs):
+        # 0.py load BoW.parquet for unique_words(largelist of u32list, 用u32list代表word/tokens, 即用u32代表token), freqs(list of u64)
+        # 1.cy->cpp cython层api调用 unique_words & freqs --address--> cython --> C++ Word构造 --> unique_words(vector of Word), freqs(vector of const u64)
+        #   cpp  unique_words & freqs --window2_token遍历--> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set}). 该步骤可以并行(需要pair_counts&where_to_update线程安全)
+        #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge)
+        # loop.cpp 初始化一个记录合并的 merges(vector of (u64, u64), 第一个u64代表两个u32合并, 第二个u64是该pair的计数), 循环merge_cnts从0到num_merges
+        #   2. 从max_heap取顶端Merge. 如果取顶失败, 说明pair已经全部merge完毕, throw一个runoutError.
+        #      拿到max Merge{pair, p_cnts, positions}. 如果 p_cnts 与 pair_counts[pair] 对不上, 更新该 Merge.p_cnts, push该Merge回max_heap, continue循环以重新取顶
+        #      取到max Merge{pair, p_cnts, positions}而且p_cnts相符. 如果p_cnts<1, 退出循环. 拿到待合并pair和p_cnts, 记录其在 merges 中, 算出new_token.
+        #   3. 初始化一个线性容器changes, 遍历(可并行,但需要容器changes共享线程安全)positions中的pos, 即执行:
+        #      取出unique_words[pos]位置的word, 执行merge方法(待合并pair, new_token), 产出该pos局部线程的 local_changes(list(u64,int)). 把所有local_changes安全聚合到changes, 并给每个元素标记其pos
+        #   4. 线性扫描changes, 取出每个元素(pair, change, pos): 用change和freqs[pos]更新pair_counts[pair]; 为change>0的pair, 插入或更新where_to_update[pair]添加pos
+        #   5. 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --push--> max_heap
+        # 6.cpp->cy loop结束或跳出. 返回 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)) 到cython层; 如果是throw runoutError, 该如何返回 merges 到cython层?
+        # 7.cy->py 在cython层执行把 merges(vector of ((u32, u32), u64)) 转换为 list of (u32-pair, p_cnts) 作为 bpe_core_loop 的返回. 在python层依据其一次性全部更新入tokenizer
+
+        # 执行 BoW
+        BoW_pq_path = os.path.join(self._buffer_dir, 'bow.parquet')
+        get_BoW(corpora, column, self.pat_str, 'u32list', bow_save_path = BoW_pq_path, bow_save_colnames = ('word', 'freq'))
+
+        # 读取 BoW parquet 文件, 零拷贝获取pyarrow内存地址. 将这些内存地址上的数据作为副本, 在cpp构建 unique_words(vector of Word), 使得 unique_words 具备独立的生命周期
+        # 零拷贝的流程是: read_table -> combine_chunks -> buffers -> address
+        BoW = pq.read_table(BoW_pq_path, filters = ('freq', '>=', bow_min_freq))
+        
+        word_arr = BoW.column('word').combine_chunks() # 关键：返回 arr 保持引用，防止在 Cython 调用期间被 GC
+        word_buf = word_arr.buffers() # 底层buffers large_list类型返回: [validity, offsets, values(tokens)]
+        offsets_ptr = word_buf[1].address  # int64类型地址. large_list 的 offsets类型是 int64/long long, 长度是 num_words+1
+        tokens_ptr = word_buf[2].address   # uint32类型地址. large_list of u32list. flattened tokens 类型是 uint32
+        num_words = len(word_arr) # int -> size_t
+        
+        freq_arr = BoW.column('freq').combine_chunks()
+        freq_buf = freq_arr.buffers() # 底层buffers u64类型返回: [validity, values(freqs)]
+        freqs_ptr = freq_buf[1].address # uint64类型地址
+        # num_freqs 应该等于 num_words
+
+        # 传给 cython:
+        # 留在cython层即可(保持alive避免gc): word_arr & freq_arr
+        #   传给 cpp:
+        #       num_merges(bpe循环的最大次数)
+        #       num_words(word个数 = freqs长度 = offsets长度 - 1)
+        #       tokens_ptr(初始 u32 tokens的起始地址)
+        #       offsets_ptr(区分tokens的int64偏移值的起始地址)
+        #       freqs_ptr(word对应频率uint64 freqs的起始地址)
+
+
+        #   cpp 传出:
+        #       merges(vector of(u32 token-pair: (u32, u32), token-pair counts: u64))
+        # cython 传出
+        # merges(vector/list of (u32 token-pair, p_cnts)
+        for i, (l_tok, r_tok), p_counts in enumerate(merges):
+            new_tok = i + 256
+            self._update_tokenizer((l_tok, r_tok), new_tok, p_counts if verbose else None)
+

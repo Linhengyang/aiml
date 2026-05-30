@@ -140,7 +140,7 @@ u16token_pair_counts_ptrs local_dict_count_u16pair_core(
 
 // 给单一进程用的 count uint16_t token-pair batch data 的函数
 u16token_pair_counts_ptrs c_local_count_u16pair_batch(
-    const uint16_t* L_tokens,
+    const uint16_t* L_tokens, // 这是一种合理的传参模式: L_tokens是指向 const uint16_t 类型的指针 ---> 指向的数据不能变, 指针本身可变
     const uint16_t* R_tokens,
     const size_t len
 );

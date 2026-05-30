@@ -32,10 +32,73 @@ private:
         TYPE_K key; // 键
         TYPE_V value; // 值
         HashTableNode* next; // bucket链表，用于解决哈希冲突
-        // 废弃 gc_next gc链表
         HashTableNode* free_next = nullptr; // free空闲链表，用于将 poped nodes 链接之后再析构, 供给insert/upsert等方法复用地址
         // 提供placement new 构造支持
+        
+        // RULE of 5
+        // ---> RULE of 0(只要 TYPE_K 和 TYPE_V 等都实现了标准的拷贝/移动+构造/赋值, 编译器就能给组合结构体实现RULE of 5)
+        
+        // 拷贝构造/赋值的参数签名一定是 const T& other, 移动构造/赋值的参数签名一定是 T&& other. 其他参数签名的都是业务构造/赋值函数
+
+    // RULE 1: 析构函数: ~ClassName(), 负责释放资源(if有资源)
+        /*
+        HashTableNode 管理对象 TYPE_K key, TYPE_V value, 以及指针 next 和 free_next
+        对于一个 HashTableNode 对象实例(节点)而言, 
+             1. 它不应该应该去管理 next & free_next 的资源: 它们的用途仅仅是链表寻址而已. 所以 next & free_next 无需析构
+             2. 节点存储有 key & value. 
+        如果key/value是内存型(值类型/sso/memcpy可复制), 那么key/value将进入sizeof统计，并全部存放在内存池上
+             --> 对于这类, 无需析构函数
+        如果key/value是资源管理型(句柄/非平凡析构), 那么key/value将仅有控制块(指向资源的内部指针)进入sizeof统计,
+        所以只有key/value对象本身(控制块)存放在内存池上, 其真正的数据存放在控制块内部指针指向的系统堆内存上
+             --> 对于这类, 在HashTableNode析构时, key 和 value 的析构函数 会被依次调用
+        */
+        // HashNodeTable 的析构函数 --> 只要 TYPE_K 和 TYPE_V 作为 资源管理类型时，实现了完善的析构, 那么 哈希表节点的析构就无需手动编写
+
+    // RULE 2: 拷贝构造函数: ClassName(const ClassName& other), 负责深拷贝资源(if有资源, 分配新内存, 深拷贝资源)
+
+        /* 业务拷贝构造函数: 1个
+        k/v 类型都是 const TYPE&, 不可变动引用, 那么在用 k / v 初始化 key / value 时, 会分别触发 TYPE_K / TYPE_V 的 构造函数
+        由于 k / v 都是不可变动引用, 无法移动掏空源对象, 故都会触发 TYPE_K 和 TYPE_V 的拷贝构造 --> 发生 k 和 v 的拷贝
+        */
+        // HashNodeTable 的拷贝构造函数 --> 只要 TYPE_K 和 TYPE_V 实现了完善的拷贝构造函数, 那么哈希表节点的拷贝构造就是用 const& 类型去触发成员构造即可
         HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+
+    // RULE 3: 拷贝赋值运算符: ClassName& operator=(const ClassName& other), 负责自赋值(if有资源, 释放旧资源, 深拷贝新资源)
+        /*
+        HashTableNode 应该满足 unique 性质: 不应该允许拷贝赋值 搞出两个一模一样的 节点，这没有意义
+        */
+        // 禁止 哈希表节点 的 拷贝赋值
+        HashTableNode& operator=(const HashTableNode& other) = delete;
+
+        // &&符号在 模板函数(的参数签名) 中代表 万能引用: 
+        //      万能引用&&: 如果实参是左值/常左值, 那函数参数推导为 左值引用/常左值引用; 如果实参是右值(移动/临时), 那函数参数推导为 右值引用
+        // 配合 std::forward<TYPE>(arg) 完美转发: 在函数内部保持 std::forward<TYPE>(arg) 为推导出来的类型（引用/常引用/右值引用）
+
+        // &&符号在 非模板函数(的参数签名) 中代表 右值引用: 本身不拥有数据, 绑定右值(临时对象/被std::move标记的对象)的引用
+        //  额外Tip: 在函数内部当用一个具名变量（或形参自身）"承接"右值引用后, 它本身就成了一个左值(可能是左值引用). 如果需要保持移动, 用std::move
+    
+    // RULE 4: 移动构造函数: ClassName(ClassName&& other), 负责窃取资源(if有资源, 将other的资源指针复制过来, 置空other的资源指针), 避免拷贝开销
+
+        /* 业务移动构造函数: 2个
+        对于 资源管理类型(非平凡析构类型), 移动构造是刚需:
+        可能1. 用临时资源作为参数去构造对象, 比如 std::string("hello") --> TYPE_K(std::string('hello'))
+               当然了, 由于 C++ 允许 const& 参数去 const引用 临时资源(并延长临时资源的生命周期), 所以即使没有 移动构造函数, 临时资源还是可以作为参数触发拷贝构造
+        可能2. 用非常巨大的源对象去构造新对象，且不在乎构造后的源对象，比如 std::string s = "超长文本" --> TYPE_K(s);
+        HashTableNode在构造时，成员中 key / value 确实都有可能是 巨大复杂对象or临时资源, 所以对于key/value, 支持移动构造是有必要的；对于 节点指针, 浅拷贝即可
+        */
+        // HashNodeTable 的移动构造函数 --> 只要 TYPE_K 和 TYPE_V 实现了完善的移动构造函数, 那么哈希表节点的移动构造就是 保持右值类型 std::move 去触发成员构造即可
+        HashTableNode(TYPE_K&& k, TYPE_V&& v, HashTableNode* ptr): key(std::move(k)), value(std::move(v)), next(ptr) {}
+        // 既然 k 已经是 右值引用 类型 TYPE_K&&, 为什么要用 std::move(k) 保持右值？
+        // 答: 旧版本 C++ 在函数内部会把带名字的变量(具名变量)视为左值. 新版本引入移动语义后, std::move保持兼容性
+
+        // 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形需要重载: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
+        HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
+
+    // RULE 5: 移动赋值运算符: ClassName& operator=(ClassName&& other), 负责窃取置换资源(if有资源, 释放旧资源, 窃取新资源)
+        /*
+        HashTableNode Node 与 Node 之间, 除了索引没有交互的必要, 故禁止 移动赋值. 这没有意义
+        */
+        HashTableNode& operator=(HashTableNode&& other) = delete;
     };
 
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构
@@ -75,12 +138,8 @@ private:
         _table = nullptr;
     }
 
-    // 废弃 gc 链表: 链起所有node
-
     // 空闲 free 链表: 链起所有 析构后的 poped nodes
     HashTableNode* _free_nodes_head = nullptr;
-
-    // 废弃 占用桶 vector: std::vector<size_t> _occupied_indices: 引入 vector 得不偿失. 高性能版本的不需要这个
 
     // 指针传入内存池（模板方式传入。用纯虚类接口的方式传入过不了编译器）
     TYPE_MEMPOOL* _pool; // void* allocate(size_t size)
@@ -88,7 +147,7 @@ private:
     // 成员遍历哈希器, 定义了 operator() 即可供函数式调用 _hasher(key)
     HASH_FUNC _hasher;
 
-    // 使用哈希器, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值类型必须是 size_t 与 _capacity 对齐
+    // 使用哈希器, 对 TYPE_K 类型的输入 key, 作hash算法, 返回值类型必须是 size_t 与 _capacity 对齐；入参签名必须是 const TYPE_K&，这样无论实参是左右值都可以接收
     size_t hash(const TYPE_K& key) const {
         return _hasher(key);
     }
@@ -106,13 +165,6 @@ private:
         HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
         if (!_new_table) throw std::bad_alloc();
 
-        // // 新的非空桶列表 --> 废弃
-        // std::vector<size_t> _new_occupied_indices;
-        // _new_occupied_indices.reserve(_occupied_indices.size());
-
-        // 新的gc链表 --> 废弃
-        // HashTableNode* _new_all_nodes_head = nullptr;
-
         // 重新计算 _size, 为缩容式 rehash 留下余地. 不过缩容式rehash必要性不大: 避免频繁rehash
         size_t actual_node_count = 0;
 
@@ -124,18 +176,9 @@ private:
                 HashTableNode* next = curr->next; // 先取出next node
                 size_t new_index = hash(curr->key) % new_capacity; // 计算得出新bucket
 
-                // const bool was_empty = (_new_table[new_index] == nullptr); --> 废弃
-
                 // 头插到新bucket
                 curr->next = _new_table[new_index]; // 当前node挂载到新bucket链表头
                 _new_table[new_index] = curr; // 更新确认新bucket的链表头
-
-                // // 若空桶->非空, 记录 --> 废弃
-                // if (was_empty) _new_occupied_indices.push_back(new_index);
-
-                // 头插到gc链表 --> 废弃
-                // curr->gc_next = _new_all_nodes_head;
-                // _new_all_nodes_head = curr;
 
                 // _free_nodes_head 不需要变动
 
@@ -151,8 +194,6 @@ private:
         _table = _new_table;
         _capacity = new_capacity;
         _size = actual_node_count;
-        // _occupied_indices.swap(_new_occupied_indices); // 占用桶记录 --> 废弃
-        // _all_nodes_head = _new_all_nodes_head; // gc链表 --> 废弃
         // _free_nodes_head 不需要变动
     }
 
@@ -183,8 +224,8 @@ public:
 
     /*
     * 根据键获取值
-    * @param key: 不可变引用
-    * @param value: 可变引用, 存取查询到的值
+    * @param key: 不可变引用即可. 查询不应该改变源. 即使源是右值(移动或临时资源等), const& 也能有效接收
+    * @param value: 可变引用, 存储查询到的值
     * @return 如果查询成功, 返回true; 如果查询失败返回false
     * 
     * 行为: 若 key 存在, 则获取对应的 value 到可变引用, 返回 true; 否则返回 false
@@ -206,30 +247,32 @@ public:
     }
 
     /*
-    * 插入或更新键值对
-    * @param key
-    * @param value
+    * 语义等同于 std::unordered_map.insert_or_assign: 有则更新，无则插入
+    * @param key: 可能是左值/常左值, 此时 key 类型为 TYPE_K&/const TYPE_K&, 源对象不会被掏空; 也可能是右值(临时/移动), 此时 key 类型为 TYPE_K&&, 源对象会被掏空
+    * @param value: 同 key
+    * key-value pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
+    * ---> 模板函数
     * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
     * 
     * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点插入. 插入后检查是否需要扩容
     */
-    bool insert(const TYPE_K& key, const TYPE_V& value) {
+    template <typename K, typename V>
+    bool insert(K&& key, V&& value) {
         if (_capacity == 0 || !_table) return false;
 
-        // 计算 bucket index
+        // 计算 bucket index. hash 的函数签名是 const TYPE_K&, 兼容key的左值/右值引用情况 且保证 源key 不会被改变
         size_t index = hash(key) % _capacity;
 
         // 首先查找 key 是否已经存在. 若 key 存在, 修改原 value 到 新value
         for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
-            if (cur->key == key) {
-                cur->value = value;
+            if (cur->key == key) { // 在函数体内部, key 是具名变量, 所以不管其函数参数签名是 左/右值引用, 具名变量都被视为左值. ==操作符应该接受const&不改变操作数.key安全
+                // 如果用value(具名变量作为左值), 会触发TYPE_V的拷贝赋值. 但语义上若value在参数签名处为 右值引用时, 调用本意应该是移动构造
+                cur->value = std::forward<V>(value); // 用std::forward完美转发, 保持 value 的右值语义(如果最开始是右值), 得以触发TYPE_V的移动赋值(如果有)
                 return true;
             }
         }
 
         // 如果执行到这里, 说明要么 _table[index] 是 nullptr, 要么 _table[index] 链表里没有 key
-
-        // const bool was_empty = (_table[index] == nullptr); 记录 _table[index]是否为空. _occupied_indices已经废弃
 
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
         HashTableNode* new_node;
@@ -241,12 +284,13 @@ public:
             // 更新 _free_nodes_head
             // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
             _free_nodes_head = std::launder(new_node)->free_next;
-            //new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
+            // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
             // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
 
-            // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
             // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-            new(new_node) HashTableNode{key, value, _table[index]};
+            new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+            // 完美转发以保持key和value的 左/右 值引用性质, 才能触发对应的 HashTableNode 构造函数(左(常)值引用-->拷贝, 右值引用-->移动)
+            // 如果传入的是右值引用，那么源对象会被掏空. 这样调用的本意就是转移资源，所以不介意源被掏空.
 
         }
         else { // 如果没有 _free_nodes_head 可复用地址
@@ -256,14 +300,12 @@ public:
             if (!raw_mem) return false; // 如果内存分配失败
 
             // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
-            new_node = new(raw_mem) HashTableNode{key, value, _table[index]};
+            new_node = new(raw_mem) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+            // 完美转发以保持key和value的 左/右 值引用性质, 才能触发对应的 HashTableNode 构造函数(左(常)值引用-->拷贝, 右值引用-->移动)
         }
 
         _table[index] = new_node;
-        
-        // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可 --> gc链表已经废弃
-        // if (was_empty) _occupied_indices.push_back(index); --> _occupied_indices已经废弃
-
+    
         // node数量自加1. 原子线程安全
         ++_size;
 
@@ -275,12 +317,22 @@ public:
         return true;
     }
 
-    // updater 应该是一个函数指针, 比如 函数指针 std::function<void(TYPE_V&)> 或
-    // 函数指针的左值引用 std::function<void(TYPE_V&)>& 或
-    // 函数指针的const &引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
-    // 这里采用最灵活的模板写法, 用 && 保证右值引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
-    template <typename FUNC> // 类额外的模板参数
-    bool atomic_upsert(const TYPE_K& key, FUNC&& updater, const TYPE_V& default_val) {
+    /*
+    * @param key: 可能是左值/常左值, 此时 key 类型为 TYPE_K&/const TYPE_K&, 源对象不会被掏空; 也可能是右值(临时/移动), 此时 key 类型为 TYPE_K&&, 源对象会被掏空
+    * @param updater: 
+        updater 应该是一个函数指针, 比如 函数指针 std::function<void(TYPE_V&)> 或
+        函数指针的左值引用 std::function<void(TYPE_V&)>& 或
+        函数指针的const&引用 const std::function<void(TYPE_V&)>& 这样可以const引用右值(lambda函数)
+        这里采用最灵活的模板写法, &&万能引用，然后在内部用 std::forward<Func>(updater) 替代 updater 来实现完美转发
+    * @param default_val: 不同于 key, key的源对象不在乎会不会掏空 --> 计数或插入了就行. 而 default_val 完全很可能是重复使用的, 所以不应该被掏空 --> 用const&
+    * key-pair 组成的 HashTableNode 在创建时, 如果 key / value 是右值引用, 那么可以调用 节点的移动构造 来节省拷贝成本
+    * ---> 模板函数
+    * @return 如果插入或更新成功, 返回true; 如果内存分配失败返回false
+    * 
+    * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点key 插入默认值作为value, 然后再更新value. 插入后检查是否需要扩容
+    */
+    template <typename K, typename FUNC> // 类额外的模板参数
+    bool atomic_upsert(K&& key, FUNC&& updater, const TYPE_V& default_val) {
         if (_capacity == 0 || !_table) return false;
 
         // 基本照搬 insert 逻辑, 除了修改节点value/插入新节点时, 分别使用updater/default_val来更新/插入
@@ -289,7 +341,7 @@ public:
         // 在该bucket中遍历寻找, 以尝试执行 update 逻辑
         for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
             if (cur->key == key) {
-                std::forward<FUNC>(updater)(cur->value); // 用forward 完美转发 updater
+                std::forward<FUNC>(updater)(cur->value); // 用forward 完美转发 updater(作为临时资源的updater) 成函数类型
                 return true;
             }
         }
@@ -308,9 +360,8 @@ public:
             //new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
             // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
 
-            // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
             // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-            new(new_node) HashTableNode{key, default_val, _table[index]};
+            new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
 
         }
         else { // 如果没有 _free_nodes_head 可复用地址
@@ -320,14 +371,14 @@ public:
             if (!raw_mem) return false; // 如果内存分配失败
 
             // placement new 构造, 头插法 直接在构造时把 bucket 插入 new_node->next
-            new_node = new(raw_mem) HashTableNode{key, default_val, _table[index]};
+            new_node = new(raw_mem) HashTableNode{std::forward<K>(key), default_val, _table[index]};
         }
+        
+        // 更新插入后的默认值value
+        std::forward<FUNC>(updater)(new_node->value);
 
         _table[index] = new_node;
         
-        // 新的 node 要线程安全地插入gc链. 单线程下直接头插gc链即可 --> gc链表已经废弃
-        // if (was_empty) _occupied_indices.push_back(index); --> _occupied_indices已经废弃
-
         // node数量自加1. 原子线程安全
         _size++;
 
@@ -340,7 +391,7 @@ public:
 
     /*
     * 从哈希表获取值, 并移除键值对
-    * @param key: 不可变引用
+    * @param key: 不可变引用. pop不会涉及 new hashtable node的构造，故在key-value资源移动/拷贝之间的优化空间非常少.
     * @param value: 可变引用, 存取查询到的值
     * @return 如果查询到, 则将值拷贝进入value, 从哈希表移除键值对, 返回true; 如果未查询到则返回false
     * 
@@ -393,7 +444,8 @@ public:
         }
         
         // 如果执行到这里, 说明从 head 遍历到 nullptr 都没能查找到 key. 那么这个是不应该的: key-hash在此index
-        throw std::runtime_error("Error in hashtable pop");
+        // throw std::runtime_error("Error in hashtable pop");
+        return false;
     }
 
     /*
@@ -421,12 +473,6 @@ public:
             _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
 
-        // // gc 链表置空 --> 废弃
-        // _all_nodes_head = nullptr;
-
-        // // 非空桶置空 --> 废弃
-        // _occupied_indices.clear();
-
         _free_nodes_head = nullptr; // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
         _size = 0;
 
@@ -449,11 +495,6 @@ public:
                 }
             } // 若 node 不需要非平凡析构：就跳过析构环节
         }
-
-        // // gc 链表置空 --> 废弃
-        // _all_nodes_head = nullptr;
-        // // 非空桶置空 --> 废弃
-        // _occupied_indices.clear();
 
         // 释放 节点指针(桶)数组, 置空 _table. 所有桶/节点不再可访问. 但内存尚未释放, 等待内存池操作
         free_table_ptrs();
@@ -585,7 +626,8 @@ public:
         }
 
         // 对迭代器的解引用 *it --> 返回 k-v pair. 注意在外面不能引用接收, 即 pair& p = *it 是非法的
-        // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用
+        // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用(结构化绑定)
+        // 这样设计下来, 返回类型是个代理类型: 即本质是个值, 但试图是引用. 所以在外部只能用值作为承接变量
         std::pair<const TYPE_K&, TYPE_V&> operator*() const {
             return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
         }

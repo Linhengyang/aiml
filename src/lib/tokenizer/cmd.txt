@@ -5,7 +5,7 @@ cd ../tokenizer
 
 
 
-# step2
+# step2: build_ext 是setup.py在打包时的关键参数. 它可以被继承并修改一些内部的关键参数(比如build目标目录)
 # 如果 setup.py 内部没有重新定义 build_ext, 那么采用以下命令。 *.so文件将在 tokenizer/ 目录下生成
 python setup.py build_ext --inplace
 
@@ -15,7 +15,7 @@ python setup.py build_ext --inplace
 
 
 
-# 如果 setup.py 内部有重新定义 build_ext, 那么采用以下命令。 *.so文件将在重新定义的 build_ext 指定的 build_lib 下生成
+# 如果 setup.py 内部涉及重新定义 build_ext, 那么采用以下命令。 *.so文件将在重新定义的 build_ext 指定的 build_lib 下生成
 python setup.py build_ext
 
 # build_lib 同样应该在 PYTHONPATH / sys.path 等环境变量内

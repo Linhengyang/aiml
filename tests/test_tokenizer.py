@@ -2,7 +2,7 @@ import pytest
 import os
 import shutil
 from src.utils.file_utils.remove import clean_folder
-from src.utils.text.tokenizer import baseBBPETokenizer, mpbufferBBPE_u16Tokenizer, mtbufferBBPE_u32Tokenizer
+from src.utils.text.tokenizer import baseBBPETokenizer, mpbufferBBPE_u16Tokenizer, mtbufferBBPE_u32Tokenizer, BBPETokenizer
 
 # -----------------------------------------------------------------------------
 # common test data
@@ -64,7 +64,7 @@ clean_folder(buffer, method='all')
 
 
 # test encode/decode identity for a few different strings
-@pytest.mark.parametrize("tokenizer_factory", [mtbufferBBPE_u32Tokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer,])
 @pytest.mark.parametrize("text", test_strings)
 def test_encode_decode_identity(tokenizer_factory, text):
     text = unpack(text)
@@ -77,7 +77,7 @@ def test_encode_decode_identity(tokenizer_factory, text):
 
 
 # test bpe basic logic
-@pytest.mark.parametrize("tokenizer_factory", [mtbufferBBPE_u32Tokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer,])
 def test_wikipedia_example(tokenizer_factory):
     """
     Quick unit test, following along the Wikipedia example:
@@ -101,7 +101,7 @@ def test_wikipedia_example(tokenizer_factory):
     """
     tokenizer = tokenizer_factory(name='test', buffer_dir=buffer, explicit_n_vocab=256+3+5)
     corpus = "aaabdaaabac"
-    tokenizer.train_bpe(3, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
+    tokenizer.train_bpe(num_merges=3, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
     tokens = tokenizer.encode(corpus)
     assert tokens == [258, 100, 258, 97, 99], f'tokens as {tokens}'
     assert tokenizer.decode(tokens) == corpus
@@ -109,7 +109,7 @@ def test_wikipedia_example(tokenizer_factory):
 
 
 # test save/load/view
-@pytest.mark.parametrize("tokenizer_factory", [mtbufferBBPE_u32Tokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer,])
 @pytest.mark.parametrize("special_marks", [ [], list(special_tokens.keys()) ])
 def test_save_load(tokenizer_factory, special_marks):
     num_specials = len(special_marks)
@@ -137,7 +137,7 @@ def test_save_load(tokenizer_factory, special_marks):
 
 
 # test save/load
-@pytest.mark.parametrize("tokenizer_factory", [mtbufferBBPE_u32Tokenizer,])
+@pytest.mark.parametrize("tokenizer_factory", [BBPETokenizer,])
 @pytest.mark.parametrize("text", [llama_text, ])
 @pytest.mark.parametrize("special_marks", [  list(special_tokens.keys()) ])
 def test_complicated_text(tokenizer_factory, text, special_marks):
@@ -146,7 +146,7 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     # test on llama_text & timemachine.txt, with 495 merges
     corpus = unpack(text)
     num_merges = 295
-    tokenizer.train_bpe(num_merges, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
+    tokenizer.train_bpe(num_merges=num_merges, corpora=corpus, column=None, format='text', language='en', batch_size_level='min')
     # verify the vocab_size
     assert tokenizer.vocab_size == num_merges+num_specials+256
     # verify that save/load work as expected
@@ -155,8 +155,9 @@ def test_complicated_text(tokenizer_factory, text, special_marks):
     # re-load the tokenizer
     tokenizer = tokenizer_factory(name='reload', buffer_dir=buffer)
     tokenizer.load("temp/test_llama.tok")
-    # verify that reload is good as well
-    tokenizer.train_bpe(495, corpora=None, column=None, format='byte', language='en', batch_size_level='min')
+    # verify that reload is good as well:
+    # continue to bpe-train:(not for baseTOkenizer & BBPETokenizer)
+    tokenizer.train_bpe(num_merges=495, corpora=corpus, column=None, format='byte', language='en', batch_size_level='min')
     tokens = tokenizer.encode(text, 'all')
     assert tokenizer.decode(tokens) == text
     assert tokenizer.decode(tokenizer.encode(text, 'all')) == text
