@@ -661,170 +661,62 @@ public:
 
 
 
+    // 迭代相关
+
+    struct MutableProxy {
+        const TYPE_K& key;
+        TYPE_V& value;
+    }
+
+    struct ConstProxy {
+        const TYPE_K& key;
+        const TYPE_V& value;
+    }
+
+
     /*
-    * const只读迭代器
-    * 
-    * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
+    * 不加锁、线程不安全的 只读迭代器
     */
-    class const_iterator {
-
+    class unsafe_const_iterator {
     public:
-
-        const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table),
-            _bucket_index(bucket_index),
-            _node(node)
-        {
-            _null_node_advance_to_next_valid_bucket();
-        }
-
-        // *it 迭代器对象解引用 --> 只读返回
-        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
-        }
-
-        // 迭代器对象前置++
-        const_iterator& operator++() {
-            if (_node) {
-                _node = _node->next;
-            }
-
-            if (!_node) {
-                _bucket_index++;
-                _null_node_advance_to_next_valid_bucket();
-            }
-            return *this;
-        }
-
-        // 迭代器对象后置++
-        const_iterator operator++(int) {
-            const_iterator tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        // 迭代器对象 == 运算
-        bool operator==(const const_iterator& other) const {
-            return _node == other._node && _hash_table == other._hash_table;
-        }
-
-        // 迭代器对象 != 运算
-        bool operator!=(const const_iterator& other) const {
-            return !(*this == other);
-        }
-
+        unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        ConstProxy operator*() const {}
+        unsafe_const_iterator& operator++() {}
+        unsafe_const_iterator operator++(int) {}
+        bool operator==(const unsafe_const_iterator& other) const {}
+        bool operator!=(const unsafe_const_iterator& other) const {}
     private:
-
         const pooled_concurrent_hashtable* _hash_table;
-
         size_t _bucket_index;
-
         HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {}
+    };
 
-        // 迭代器内部不加锁逻辑。锁在迭代器外部调用
-        void _null_node_advance_to_next_valid_bucket() {
-            while (!_node && _bucket_index < _hash_table->_capacity) {
-
-                _node = (_hash_table->_table)[_bucket_index];
-
-                if (_node) break;
-
-                _bucket_index++;
-            }
-        }
-
-    }; // end of const_iterator definition
-
-    const_iterator cbegin() const {
-        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
-    }
-
-    const_iterator cend() const {
-        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    }
 
     /*
-    * 非const迭代器
-    * 
-    * 用法: for(auto it = hash_table.begin(); it != hash_table.end(); ++it) {auto& [k, v] = *it; //code//}
+    * 不加锁、线程不安全的 可变迭代器
     */
-    class iterator {
-
+    class unsafe_iterator {
     public:
-
-        // 迭代器的构造函数
-        iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table),
-            _bucket_index(bucket_index),
-            _node(node)
-        {
-            _null_node_advance_to_next_valid_bucket();
-        }
-
-        // *it 迭代器对象解引用 --> v可变返回
-        std::pair<const TYPE_K&, TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
-        }
-
-        // 迭代器对象前置++
-        iterator& operator++() {
-            if (_node) {
-                _node = _node->next;
-            }
-
-            if (!_node) {
-                _bucket_index++;
-                _null_node_advance_to_next_valid_bucket(); // 
-            }
-            return *this;
-        }
-
-        // 迭代器对象后置++
-        iterator operator++(int) {
-            iterator tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        // 迭代器对象 == 运算
-        bool operator==(const iterator& other) const {
-            return _node == other._node && _hash_table == other._hash_table;
-        }
-
-        // 迭代器对象 != 运算
-        bool operator!=(const iterator& other) const {
-            return !(*this == other);
-        }
-
+        unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        MutableProxy operator*() const {}
+        unsafe_iterator& operator++() {}
+        unsafe_iterator operator++(int) {}
+        bool operator==(const unsafe_iterator& other) const {}
+        bool operator!=(const unsafe_iterator& other) const {}
     private:
-
-        pooled_concurrent_hashtable* _hash_table;
-
-        size_t _bucket_index;
-
-        HashTableNode* _node;
-
-        void _null_node_advance_to_next_valid_bucket() {
-            while (!_node && _bucket_index < _hash_table->_capacity) {
-                _node = (_hash_table->_table)[_bucket_index];
-                if (_node) break;
-                _bucket_index++;
-            }
-        }
-
-    }; // end of iterator definition
-    
-    iterator begin() const {
-        return iterator(this, 0, nullptr);
-    }
-
-    iterator end() const {
-        return iterator(this, _capacity, nullptr);
-    }
+        pooled_concurrent_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
+        size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
+        HashTableNode* _node; // 遍历所有桶的所有node
+        void _null_node_advance_to_next_valid_bucket() {}
+    };
 
 }; // end of pooled_concurrent_hashtable definition
 
 
 
+
+// include separated nested iterator classes for mempooled_concurrent_hashtable 
+#include "mempooled_concurrent_hashtable_iterators.inl"
 
 #endif
