@@ -1,5 +1,5 @@
-// iterators.h
-// 为各种数据结构提供的各种性质的遍历器. 以友元的方式 插入 各数据结构 使用
+// mempooled_hashtable_iterators.inl
+// 为 mempooled_hashtable 提供各种性质的遍历器
 
 #pragma once
 // ================= 嵌套类实现区 =================
