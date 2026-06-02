@@ -245,7 +245,7 @@ public:
     * 行为: 若 key 存在, 则获取对应的 value 到可变引用, 返回 true; 否则返回 false
     */
     bool get(const TYPE_K& key, TYPE_V& value) {
-        // 并发锁: 此操作(get)不独占表锁
+        // 表读锁: 此操作(get) 要排除 rehash & clear 等需要独占(写锁)表锁的行为
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
         if (_capacity == 0 || !_table) return false;
@@ -664,7 +664,7 @@ public:
 
 
 
-    // 迭代相关
+    // 迭代相关. 详见 mempooled_concurrent_hashtable_iterators.inl
 
     struct MutableProxy {
         const TYPE_K& key;
@@ -681,38 +681,146 @@ public:
     * 不加锁、线程不安全的 只读迭代器
     */
     class unsafe_const_iterator {
+        // pooled_concurrent_hashtable 为 friend, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        // ---> 嵌套类自动是母类的 friend, 而母类访问嵌套类的 private 需要 申明母类是friend
+        friend class pooled_concurrent_hashtable;
     public:
-        unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         ConstProxy operator*() const {}
         unsafe_const_iterator& operator++() {}
         unsafe_const_iterator operator++(int) {}
         bool operator==(const unsafe_const_iterator& other) const {}
         bool operator!=(const unsafe_const_iterator& other) const {}
     private:
+        unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         const pooled_concurrent_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
         void _null_node_advance_to_next_valid_bucket() {}
     };
 
+    // 暴露 unsafe_const_iterator 迭代器接口. 仅供 write_lock_const_view 内部或明确知道风险的外部使用
+    unsafe_const_iterator unsafe_const_begin() const { return unsafe_const_iterator(this, 0, nullptr); }
+    unsafe_const_iterator unsafe_const_end() const { return unsafe_const_iterator(this, _capacity, nullptr); }
+
+    /*
+    * 用 RAII视图(view) 提供安全的 给全表上 写锁的 接口. 目的是把 全表上锁 的操作交给业务层, 从而可以在业务层实现强一致性(阻塞写入表)的迭代遍历
+    * 此 view 返回的是 const迭代
+    * 用法(强一致性场景/阻塞表级写入):
+    * for (auto&& [k, v] : hashtable.const_iter_on_table_locked_view()) {
+    *       ..code using k(const K&), v(const V&)...
+    *   }
+    */
+    class write_lock_const_view {
+        // pooled_concurrent_hashtable 为友元, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        friend class pooled_concurrent_hashtable;
+    private:
+        const pooled_concurrent_hashtable& _map;
+        std::unique_lock<std::shared_mutex> _map_write_lock;
+        explicit write_lock_const_view(pooled_concurrent_hashtable& hashtable):
+            _map(hashtable),
+            _map_write_lock(hashtable._table_mutex)
+        {
+            // 在此 write_lock_const_view 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
+            // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
+        }
+    public:
+
+        // 禁用拷贝, 防止锁被意外释放或多次释放
+        write_lock_const_view(const write_lock_const_view&) = delete; // 禁用拷贝构造
+        write_lock_const_view& operator=(const write_lock_const_view&) = delete; // 禁用拷贝赋值
+        write_lock_const_view(write_lock_const_view&&) = default; // 显式确认 default 移动构造
+        write_lock_const_view& operator=(write_lock_const_view&&) = default; // 显式确认 default 移动赋值
+
+        // 在 view 中封装 hashtable 的 unsafe_const_begin & unsafe_const_end 方法(无论是否私密, 作为嵌套类的view类 自动是 hashtable的friend, 可以访问)
+        // 包装成 begin 和 end 提供给 for循环. 在 for循环中 ++it会自动调用 返回类型(即 unsafe_const_iterator) 的++操作符
+        unsafe_const_iterator begin() { return _map.unsafe_const_begin(); }
+        unsafe_const_iterator end() { return _map.unsafe_const_end(); }
+    };
+
+    // 提供获取view的接口
+    write_lock_const_view const_iter_on_table_locked_view() const {
+        return write_lock_const_view(*this);
+    }
+
+
 
     /*
     * 不加锁、线程不安全的 可变迭代器
     */
     class unsafe_iterator {
+        // pooled_concurrent_hashtable 为 friend, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        // ---> 嵌套类自动是母类的 friend, 而母类访问嵌套类的 private 需要 申明母类是friend
+        friend class pooled_concurrent_hashtable;
     public:
-        unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         MutableProxy operator*() const {}
         unsafe_iterator& operator++() {}
         unsafe_iterator operator++(int) {}
         bool operator==(const unsafe_iterator& other) const {}
         bool operator!=(const unsafe_iterator& other) const {}
     private:
+        unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         pooled_concurrent_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
         size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
         HashTableNode* _node; // 遍历所有桶的所有node
         void _null_node_advance_to_next_valid_bucket() {}
     };
+
+    // 暴露 unsafe_iterator 迭代器接口. 仅供 write_lock_view 内部或明确知道风险的外部使用
+    unsafe_iterator unsafe_begin() { return unsafe_iterator(this, 0, nullptr); }
+    unsafe_iterator unsafe_end() { return unsafe_iterator(this, _capacity, nullptr); }
+
+    /*
+    * 用 RAII视图(view) 提供安全的 给全表上 写锁的 接口. 目的是把 全表上锁 的操作交给业务层, 从而可以在业务层实现强一致性(阻塞写入表)的迭代遍历
+    * 此 view 返回的是 可变迭代
+    * 用法(强一致性场景/阻塞表级写入):
+    * for (auto&& [k, v] : hashtable.const_iter_on_table_locked_view()) {
+    *       v(V&) = some code using k(const K&)
+    *   }
+    */
+    class write_lock_view {
+        // pooled_concurrent_hashtable 为友元, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        friend class pooled_concurrent_hashtable;
+    private:
+        pooled_concurrent_hashtable& _map;
+        std::unique_lock<std::shared_mutex> _map_write_lock;
+        explicit write_lock_view(pooled_concurrent_hashtable& hashtable):
+            _map(hashtable),
+            _map_write_lock(hashtable._table_mutex)
+        {
+            // 在此 write_lock_view 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
+            // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
+        }
+    public:
+        // 禁用拷贝, 防止锁被意外释放或多次释放
+        write_lock_view(const write_lock_view&) = delete; // 禁用拷贝构造
+        write_lock_view& operator=(const write_lock_view&) = delete; // 禁用拷贝赋值
+        write_lock_view(write_lock_view&&) = default; // 显式确认 default 移动构造
+        write_lock_view& operator=(write_lock_view&&) = default; // 显式确认 default 移动赋值
+
+        // 在 view 中封装 hashtable 的 unsafe_begin & unsafe_end 方法(无论是否私密, 作为嵌套类的view类 自动是 hashtable的friend, 可以访问)
+        // 包装成 begin 和 end 提供给 for循环. 在 for循环中 ++it会自动调用 返回类型(即unsafe_itgerator) 的++操作符
+        unsafe_iterator begin() { return _map.unsafe_begin(); }
+        unsafe_iterator end() { return _map.unsafe_end(); }
+    };
+
+    // 提供获取view的接口
+    write_lock_view iter_on_table_locked_view() {
+        return write_lock_view(*this);
+    }
+
+    /*
+    * 提供 key只读快照, 供 弱一致性(不阻塞写，故而不保证前后一致,允许漏看多看)的迭代遍历, 配合 get(只读) / insert(改变value) / atomic_upsert(改变value) 调用, 完成相应迭代目的
+    * 用法:
+    * auto keys_snaptshot = hashtable.get_readonly_kesy();
+    * for (const auto& key: keys_snaptshot) {
+    *     V value;
+    *     hashtable.get(key, value); // 只读遍历
+    *     hashtable.insert(key, value); // 改value遍历
+    *     hashtable.atomic_upsert(key, som_func, some_default_value); // 改value遍历-回调
+    * }
+    */
+    std::vector<TYPE_K> get_readonly_keys() const {}
+
 
 }; // end of pooled_concurrent_hashtable definition
 
