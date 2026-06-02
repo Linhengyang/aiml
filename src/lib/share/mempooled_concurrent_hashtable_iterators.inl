@@ -23,7 +23,7 @@
 *   1. 非const迭代器, 应该在迭代时上独占表锁, 其他任何线程不能对表有任何操作(读写都不行). 迭代器可change value
 *      : 不依靠数据结构解决业务层的问题
 *      --> 如果需要强一致性的全局遍历(可修改value), 应该是业务层对整个容器加锁 + unsafe遍历(*返回MutableProxy)
-*      --> 如果需要弱一致性(即程序运行时不出问题但不保证前后一致,允许漏看多看)的全局遍历(可修改value), key只读快照遍历 + insert/atomic_upser调用
+*      --> 如果需要弱一致性(即程序运行时不出问题但不保证前后一致,允许漏看多看)的全局遍历(可修改value), key只读快照遍历 + insert/atomic_upsert调用
 
 *   2. const迭代器, 允许并发迭代, 应该共享表锁(禁止了需要独占表锁的rehash/clear), 共享桶锁(禁止了需要独占桶锁的insert/atomic_upsert/pop)
 *      迭代器是只读的. 哈希表不可被任何change, 即线程A迭代bucket_i时, 不该允许线程B在bucket_i作insert和remove

@@ -185,10 +185,10 @@ auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operat
     -> iterator&
 {
     if (_node) {
-        _node = _node->next; // 如果当前 _node 仍然在某链表里, move to next
+        // 如果当前 _node 仍然在某链表里, move to next
+        _node = _node->next;
     }
-    // 如果 _node 为空, 不论是next为空, 还是本来就空, 说明当前桶已经遍历完了
-    if (!_node) {
+    if (!_node) { // 如果 _node 为空, 不论是next为空, 还是本来就空, 说明当前桶已经遍历完了
         _bucket_index++;
         _null_node_advance_to_next_valid_bucket();
     }
@@ -233,9 +233,8 @@ void pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::_null_
     while (!_node && _bucket_index < _hash_table->_capacity) {
         // 哈希表取出_table内部属性, 再取出当前 bucket 链表头作为 potential next node
         _node = (_hash_table->_table)[_bucket_index];
-
-        if (_node) break; // 如果 _node 不为 nullptr, 说明跳步 bucket 成功了, break
-
+        // 如果 _node 不为 nullptr, 说明跳步 bucket 成功了, break
+        if (_node) break;
         // 如果 _node 仍然是 null, 说明 _bucket_index 对应桶是空的. 尝试下一个桶
         _bucket_index++;
     }
