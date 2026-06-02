@@ -142,9 +142,12 @@ private:
         return _hasher(key);
     }
 
-    std::shared_mutex _table_mutex; // 读写锁: 读锁可并发, 写锁必排他
+    // mutable 关键字: 被修饰的成员变量, 即使在const成员函数中也可以修改. 此豁免多用于 锁: const函数不改变用户视角的数据, 却对_mutex变量有加锁操作
+    // 本质是告诉编译器: 虽然加锁操作在物理上修改了mutex的状态, 但逻辑上该成员函数并未改变数据内容, 所以允许在const方法中加锁
 
-    std::vector<padded_mutex> _stripes;
+    mutable std::shared_mutex _table_mutex; // 读写锁: 读锁可并发, 写锁必排他
+
+    mutable std::vector<padded_mutex> _stripes;
     size_t _stripe_mask;  // 从 桶编号 bucket_index 映射到 条带编号 stripe
 
     inline std::shared_mutex& bucket_lock(size_t bucket_index) noexcept {
