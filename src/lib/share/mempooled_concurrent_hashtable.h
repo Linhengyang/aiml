@@ -697,7 +697,7 @@ public:
         bool operator==(const unsafe_const_iterator& other) const {}
         bool operator!=(const unsafe_const_iterator& other) const {}
     private:
-        unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         const pooled_concurrent_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
@@ -763,7 +763,7 @@ public:
         bool operator==(const unsafe_iterator& other) const {}
         bool operator!=(const unsafe_iterator& other) const {}
     private:
-        unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         pooled_concurrent_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
         size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
         HashTableNode* _node; // 遍历所有桶的所有node
@@ -832,7 +832,27 @@ public:
     * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
     */
     class unsafe_drain_iterator {
-        //TODO
+        // drain_iterator的构造方法为private为防止误用. 只能在 write_lock_drain_range 内部调用
+        friend class write_lock_drain_range;
+    private:
+        // 显式构造
+        explicit unsafe_drain_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        pooled_concurrent_hashtable* _hash_table;
+        size_t _bucket_index;
+        HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {}
+    public:
+        // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
+        unsafe_drain_iterator(const unsafe_drain_iterator&) = delete;
+        unsafe_drain_iterator& operator=(const unsafe_drain_iterator&) = delete;
+        // 移动构造
+        unsafe_drain_iterator(unsafe_drain_iterator&&) noexcept {}
+        unsafe_drain_iterator& operator=(unsafe_drain_iterator&&) = default;
+        DrainProxy operator*() {}
+        unsafe_drain_iterator& operator++() {}
+        unsafe_drain_iterator operator++(int) {}
+        bool operator==(const unsafe_drain_iterator& other) const {}
+        bool operator!=(const unsafe_drain_iterator& other) const {}
     };
 
     
@@ -840,11 +860,43 @@ public:
 
     // drain range
     class write_lock_drain_range {
+        // pooled_concurrent_hashtable 为友元, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        friend class pooled_concurrent_hashtable;
+    private:
+        pooled_concurrent_hashtable* _map;
+        std::unique_lock<std::shared_mutex> _map_write_lock;
+        explicit write_lock_drain_range(pooled_concurrent_hashtable* hashtable):
+            _map(hashtable),
+            _map_write_lock(hashtable->_table_mutex)
+        {
+            // 在此 write_lock_drain_range 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
+            // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
+        }
+    
+    public:
+        // 禁用拷贝, 防止锁被意外释放或多次释放
+        write_lock_drain_range(const write_lock_drain_range&) = delete; // 禁用拷贝构造
+        write_lock_drain_range& operator=(const write_lock_drain_range&) = delete; // 禁用拷贝赋值
+        write_lock_drain_range(write_lock_drain_range&&) = default; // 显式确认 default 移动构造
+        write_lock_drain_range& operator=(write_lock_drain_range&&) = default; // 显式确认 default 移动赋值
 
+        // drain write_lock_drain_range 的析构: 在退出(无论是正常还是非正常)for循环时, write_lock_drain_range 被析构, 此时要清空已经被drain破坏掉的哈希表为 空表状态
+        ~write_lock_drain_range() {
+            if (!_map) return;
+            // TODO: 析构所有未被转移的资源. free_list置空, _table置空
+        }
+
+        // 作为 friend, write_lock_drain_range 封装 unsafe_drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
+        unsafe_drain_iterator begin() {
+            // TODO
+        }
+        unsafe_drain_iterator end() {
+            // TODO
+        }
     };
 
     write_lock_drain_range drain_map_locked_view() {
-        //TODO
+        return write_lock_drain_range{this};
     }
 
 

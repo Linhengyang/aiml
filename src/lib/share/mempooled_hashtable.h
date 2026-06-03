@@ -528,6 +528,12 @@ public:
         // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
         TYPE_K key;
         TYPE_V value;
+
+        // 允许隐式转换为 std::pair, 方便外部容器接受
+        // TODO
+
+        // 支持结构化绑定
+        // TODO
     }
 
 
@@ -544,7 +550,7 @@ public:
         bool operator==(const const_iterator& other) const {}
         bool operator!=(const const_iterator& other) const {}
     private:
-        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         const pooled_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
@@ -584,7 +590,7 @@ public:
         bool operator==(const iterator& other) const {}
         bool operator!=(const iterator& other) const {}
     private:
-        iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         pooled_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
         size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
         HashTableNode* _node; // 遍历所有桶的所有node
@@ -616,19 +622,54 @@ public:
     * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
     */
     class drain_iterator {
-
+        // drain_iterator的构造方法为private为防止误用. 只能在 drain_range 内部调用
+        friend struct drain_range;
+    private:
+        // 显式构造
+        explicit drain_iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        pooled_hashtable* _hash_table;
+        size_t _bucket_index;
+        HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {}
+    public:
+        // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
+        drain_iterator(const drain_iterator&) = delete;
+        drain_iterator& operator=(const drain_iterator&) = delete;
+        // 移动构造
+        drain_iterator(drain_iterator&&) noexcept {}
+        drain_iterator& operator=(drain_iterator&&) = default;
+        DrainProxy operator*() {}
+        drain_iterator& operator++() {}
+        drain_iterator operator++(int) {}
+        bool operator==(const drain_iterator& other) const {}
+        bool operator!=(const drain_iterator& other) const {}
     };
 
     
     // 不暴露 drain_iterator 的 任何构造接口, 只允许在 drain() 接口中构造 drain_range 使用
 
-    // drain range
-    class drain_range {
+    // drain range. 利用 RAII 在迭代结束/退出时, 清理哈希表状态(若drain迭代非正常break, 哈希表已经被破坏, 应该彻底清空)
+    struct drain_range {
+        pooled_hashtable* _map;
 
+        // 作为 friend, drain_range 封装 drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
+        drain_iterator begin() {
+            // TODO
+        }
+
+        drain_iterator end() {
+            // TODO
+        }
+        
+        // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要清空已经被drain破坏掉的哈希表为 空表状态
+        ~drain_range() {
+            if (!_map) return;
+            // TODO: 析构所有未被转移的资源. free_list置空, _table置空
+        }
     };
 
     drain_range drain() {
-        //TODO
+        return drain_range{this};
     }
 
 
