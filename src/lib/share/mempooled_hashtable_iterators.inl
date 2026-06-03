@@ -39,7 +39,7 @@
 //    ---> drain_iterator析构时要执行 cleaup_remaining
 //    设计2: 支持部分node移动转移, 也就是说哈希表剩下的部分仍然保持一个有效完整的哈希表状态. 这样在drain过程中需要细心维护哈希表的所有内部状态, 好处是可以支持条件性node移动
 //    但不管怎么样, 都要求 哈希表在 drain遍历之后, 处于 "空但有效, 允许重新insert节点" 的状态
-// 3. 把 drainIterator / drainProxy / drainRange 设计成 哈希表 的嵌套类, 但是拆分实现. 给哈希表添加 drain() 成员方法封装使用 drain_iterator
+// 3. 把 drainIterator / drainProxy / drainRange 设计成 哈希表 的嵌套类, 但是拆分实现. 给哈希表添加 drain_range() 成员方法封装使用
 // 4. drain后这些node的内存池地址, 是该进入free_list等待复用, 还是直接free_list也置空, 整个表全部重新置初始态? 
 //    --> ARENA内存池支持reset, 全表置初始态是更好的选择. 避免free_list膨胀, 新插入的node排列也更紧凑
 
