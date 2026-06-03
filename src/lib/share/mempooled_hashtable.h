@@ -524,6 +524,12 @@ public:
         const TYPE_V& value;
     }
 
+    struct DrainProxy {
+        // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
+        TYPE_K key;
+        TYPE_V value;
+    }
+
 
     /*
     * 只读迭代器
@@ -602,6 +608,29 @@ public:
     range iter_range() {
         return range{*this};
     }
+
+
+
+
+    /*
+    * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
+    */
+    class drain_iterator {
+
+    };
+
+    
+    // 不暴露 drain_iterator 的 任何构造接口, 只允许在 drain() 接口中构造 drain_range 使用
+
+    // drain range
+    class drain_range {
+
+    };
+
+    drain_range drain() {
+        //TODO
+    }
+
 
 }; // end of pooled_hashtable definition
 
