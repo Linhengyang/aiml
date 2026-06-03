@@ -26,8 +26,7 @@ u32token_pair_counts_ptrs tls_dict_count_u32pair_core(
     uint64_t* counts = static_cast<uint64_t*>(pool.allocate(size*sizeof(uint64_t)));
 
     size_t index = 0;
-    for(auto it = counter->cbegin(); it != counter->cend(); ++it, ++index) {
-        auto [k, v] = *it;
+    for(auto&& [k, v]: counter->iterate()) {
         L_uniq[index] = static_cast<uint32_t>(k >> 32);
         R_uniq[index] = static_cast<uint32_t>(k & 0xFFFFFFFF);
         counts[index] = v;
