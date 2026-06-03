@@ -212,8 +212,8 @@ template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH
 std::vector<TYPE_K> pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::get_readonly_keys() const
 {
     std::vector<TYPE_K> keys_snapshot;
-    // 上 表读锁: 要排除 rehash & clear 等需要独占(写锁)表锁的行为
     {
+        // 上 表读锁: 要排除 rehash & clear 等需要独占(写锁)表锁的行为
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
         keys_snapshot.reserve( size() ); // 预设大小
 
