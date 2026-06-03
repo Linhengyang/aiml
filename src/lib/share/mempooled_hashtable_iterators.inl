@@ -69,10 +69,11 @@ pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::const
 
 // *it 迭代器对象解引用 --> 只读返回
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-std::pair<const TYPE_K&, const TYPE_V&> pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::operator*() const
+auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::operator*() const
+    -> ConstProxy
 {
     // 返回 pair(key, value)临时对象
-    return {_node->key, _node->value};
+    return ConstProxy{_node->key, _node->value};
 }
 
 
@@ -170,10 +171,11 @@ pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::iterator(po
 // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用(结构化绑定)
 // 这样设计下来, 返回类型是个代理类型: 即本质是个值, 但试图是引用. 所以在外部只能用值作为承接变量
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-std::pair<const TYPE_K&, TYPE_V&> pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operator*() const
+auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::iterator::operator*() const
+    -> MutableProxy
 {
     // 返回 pair(key, value)临时对象
-    return {_node->key, _node->value};
+    return MutableProxy{_node->key, _node->value};
 }
 
 

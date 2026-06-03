@@ -510,61 +510,97 @@ public:
         return _size; // 原子读取
     }
 
+
+
+    // 迭代相关. 详见 mempooled_hashtable_iterators.inl
+
+    struct MutableProxy {
+        const TYPE_K& key;
+        TYPE_V& value;
+    }
+
+    struct ConstProxy {
+        const TYPE_K& key;
+        const TYPE_V& value;
+    }
+
+
     /*
     * 只读迭代器
     */
     class const_iterator {
+        // const_iterator的构造函数private防止误用. hashtable需要申明friend才能调用
+        friend class pooled_hashtable;
     public:
-        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
-        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {}
+        ConstProxy operator*() const {}
         const_iterator& operator++() {}
         const_iterator operator++(int) {}
         bool operator==(const const_iterator& other) const {}
         bool operator!=(const const_iterator& other) const {}
     private:
+        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         const pooled_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
         void _null_node_advance_to_next_valid_bucket() {}
     };
 
-    const_iterator cbegin() const {
-        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    // 暴露 const_iterator 迭代器接口. 推荐在 const range 接口中使用, 如果在外部使用要慎重
+    const_iterator cbegin() const { return const_iterator(this, 0, nullptr); } // 首迭代器: 自动定位到第一个有效节点
+    const_iterator cend() const { return const_iterator(this, _capacity, nullptr); } // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+
+    // const range
+    struct const_range {
+        const pooled_hashtable& _map;
+
+        // 在 range 中封装 hashtable 的 cbegin & cend 成员函数, 
+        const_iterator begin() { return _map.cbegin(); }
+        const_iterator end() { return _map.cend(); }
+    };
+
+    // 提供获取const range的接口
+    const_range const_iter_range() const {
+        return const_range{*this};
     }
 
-    const_iterator cend() const {
-        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    }
+
 
     /*
-    * value可修改迭代器
+    * value可变迭代器
     */
     class iterator {
+        // iterator的构造函数private防止误用. hashtable需要申明friend才能调用
+        friend class pooled_hashtable;
     public:
-        iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
-        std::pair<const TYPE_K&, TYPE_V&> operator*() const {}
+        MutableProxy operator*() const {}
         iterator& operator++() {}
         iterator operator++(int) {}
         bool operator==(const iterator& other) const {}
         bool operator!=(const iterator& other) const {}
     private:
+        iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         pooled_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
         size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
         HashTableNode* _node; // 遍历所有桶的所有node
         void _null_node_advance_to_next_valid_bucket() {}
     };
 
-    // pooled_hashtable 类对象 hashtable 调用 begin 方法, 返回一个迭代器
-    // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
-    // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
-    iterator begin() {
-        return iterator(this, 0, nullptr);
-    }
+    // 暴露 iterator 迭代器接口. 推荐在 range 接口中使用, 如果在外部使用要慎重
+    iterator begin() { return iterator(this, 0, nullptr); }
+    iterator end() { return iterator(this, _capacity, nullptr); }
 
-    // pooled_hashtable 类对象 hashtable 调用 end 方法, 返回一个迭代器
-    // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    iterator end() {
-        return iterator(this, _capacity, nullptr);
+    // range
+    struct range {
+        pooled_hashtable& _map;
+
+        // 在 range 中封装 hashtable 的 begin & end 成员函数. range作为嵌套类可以直接使用外围类的所有成员
+        iterator begin() { return _map.begin(); }
+        iterator end() { return _map.end(); }
+    };
+
+    // 提供获取range的接口
+    range iter_range() {
+        return range{*this};
     }
 
 }; // end of pooled_hashtable definition

@@ -706,7 +706,7 @@ public:
     * 用 RAII视图(view) 提供安全的 给全表上 写锁的 接口. 目的是把 全表上锁 的操作交给业务层, 从而可以在业务层实现强一致性(阻塞写入表)的迭代遍历
     * 此 view 返回的是 const迭代
     * 用法(强一致性场景/阻塞表级写入): for循环持续期内, 表都上了写锁
-    * for (auto&& [k, v] : hashtable.const_iter_on_map_locked_view()) {
+    * for (auto&& [k, v] : hashtable.const_iter_map_locked_view()) {
     *       ..code using k(const K&类型), v(const V&类型)...
     *   }
     */
@@ -737,7 +737,7 @@ public:
     };
 
     // 提供获取view的接口
-    write_lock_const_view const_iter_on_map_locked_view() const {
+    write_lock_const_view const_iter_map_locked_view() const {
         return write_lock_const_view(*this);
     }
 
@@ -772,7 +772,7 @@ public:
     * 用 RAII视图(view) 提供安全的 给全表上 写锁的 接口. 目的是把 全表上锁 的操作交给业务层, 从而可以在业务层实现强一致性(阻塞写入表)的迭代遍历
     * 此 view 返回的是 可变迭代
     * 用法(强一致性场景/阻塞表级写入): for循环持续期内, 表都上了写锁
-    * for (auto&& [k, v] : hashtable.iter_on_map_locked_view()) {
+    * for (auto&& [k, v] : hashtable.iter_map_locked_view()) {
     *       v(V&类型) = some code using k(const K&类型)
     *   }
     */
@@ -803,7 +803,7 @@ public:
     };
 
     // 提供获取view的接口
-    write_lock_view iter_on_map_locked_view() {
+    write_lock_view iter_map_locked_view() {
         return write_lock_view(*this);
     }
 
