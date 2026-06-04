@@ -544,6 +544,8 @@ public:
         // const_iterator的构造函数private防止误用. hashtable需要申明friend才能调用
         friend class pooled_hashtable;
     public:
+        // 标准的 Iterator Traits: 标记为 forwardIterator
+        using iterator_category = std::forward_iterator_tag;
         ConstProxy operator*() const {}
         const_iterator& operator++() {}
         const_iterator operator++(int) {}
@@ -584,6 +586,8 @@ public:
         // iterator的构造函数private防止误用. hashtable需要申明friend才能调用
         friend class pooled_hashtable;
     public:
+        // 标准的 Iterator Traits: 标记为 forwardIterator
+        using iterator_category = std::forward_iterator_tag;
         MutableProxy operator*() const {}
         iterator& operator++() {}
         iterator operator++(int) {}
@@ -632,6 +636,8 @@ public:
         HashTableNode* _node;
         void _null_node_advance_to_next_valid_bucket() {}
     public:
+        // 标准的 Iterator Traits: 标记为 inputIterator
+        using iterator_category = std::input_iterator_tag
         // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
         drain_iterator(const drain_iterator&) = delete;
         drain_iterator& operator=(const drain_iterator&) = delete;
