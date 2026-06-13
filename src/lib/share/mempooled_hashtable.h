@@ -563,7 +563,13 @@ public:
     const_iterator cbegin() const { return const_iterator(this, 0, nullptr); } // 首迭代器: 自动定位到第一个有效节点
     const_iterator cend() const { return const_iterator(this, _capacity, nullptr); } // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
 
-    // const range
+
+    /*
+    * 此 const range 返回的是只读迭代
+    * for (auto&& [k, v] : hashtable.const_iter_range()) {
+    *       ..code using k(const K&类型), v(const V&类型)...
+    *   }
+    */
     struct const_range {
         const pooled_hashtable& _map;
 
@@ -605,7 +611,12 @@ public:
     iterator begin() { return iterator(this, 0, nullptr); }
     iterator end() { return iterator(this, _capacity, nullptr); }
 
-    // range
+    /*
+    * 此 range 返回的是 可变迭代
+    * for (auto&& [k, v] : hashtable.iter_range()) {
+    *       v(V&类型) = some code using k(const K&类型)
+    *   }
+    */
     struct range {
         pooled_hashtable& _map;
 
