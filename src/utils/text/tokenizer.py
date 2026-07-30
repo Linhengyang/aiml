@@ -1757,7 +1757,7 @@ class bbpeTokenizer(baseBBPETokenizer):
                   column:str|None,                  # 如果corpora是parquet文件, column应该是列名
                   num_merges: int|None = None,      # 执行BPE合并的总次数. 本tokenzier没有续train的概念，所以它就是bpe-train的循环总次数
                   verbose = True,
-                  bow_min_freq: int = 0,            # 词袋BoW的最小频率. 低于此频率的word被剔除以保证内存容量
+                  bow_min_freq: int = 1,            # 词袋BoW的最小频率. 低于此频率的word被剔除以保证内存容量
                   *args, **kwargs):
         # 0.py load BoW.parquet for unique_words(largelist of u32list, 用u32list代表word/tokens, 即用u32代表token), freqs(list of u64)
         # 1.cy->cpp cython层api调用 unique_words & freqs --address--> cython --> C++ Word构造 --> unique_words(vector of Word), freqs(vector of const u64)
