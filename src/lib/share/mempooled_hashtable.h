@@ -35,10 +35,11 @@ private:
         HashTableNode* free_next = nullptr; // free空闲链表，用于将 poped nodes 链接之后再析构, 供给insert/upsert等方法复用地址
         // 提供placement new 构造支持
         
-        // RULE of 5
+        // RULE of 5: 本类对象之间的拷贝和移动, 关注的是“对象本身的状态转移”. 
+        // 与之相对的是 业务构造(转换构造)函数, 关注“从无到有创建对象”
+        // 拷贝构造/赋值的参数签名一定是 T(const T& other), 移动构造/赋值的参数签名一定是 T(T&& other). 其他参数签名的都是业务构造/赋值函数
+
         // ---> RULE of 0(只要 TYPE_K 和 TYPE_V 等都实现了标准的拷贝/移动+构造/赋值, 编译器就能给组合结构体实现RULE of 5)
-        
-        // 拷贝构造/赋值的参数签名一定是 const T& other, 移动构造/赋值的参数签名一定是 T&& other. 其他参数签名的都是业务构造/赋值函数
 
     // RULE 1: 析构函数: ~ClassName(), 负责释放资源(if有资源)
         /*
@@ -55,50 +56,57 @@ private:
         // HashNodeTable 的析构函数 --> 只要 TYPE_K 和 TYPE_V 作为 资源管理类型时，实现了完善的析构, 那么 哈希表节点的析构就无需手动编写
 
     // RULE 2: 拷贝构造函数: ClassName(const ClassName& other), 负责深拷贝资源(if有资源, 分配新内存, 深拷贝资源)
-
-        /* 业务拷贝构造函数: 1个
-        k/v 类型都是 const TYPE&, 不可变动引用, 那么在用 k / v 初始化 key / value 时, 会分别触发 TYPE_K / TYPE_V 的 构造函数
-        由于 k / v 都是不可变动引用, 无法移动掏空源对象, 故都会触发 TYPE_K 和 TYPE_V 的拷贝构造 --> 发生 k 和 v 的拷贝
-        */
-        // HashNodeTable 的拷贝构造函数 --> 只要 TYPE_K 和 TYPE_V 实现了完善的拷贝构造函数, 那么哈希表节点的拷贝构造就是用 const& 类型去触发成员构造即可
-        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
-
     // RULE 3: 拷贝赋值运算符: ClassName& operator=(const ClassName& other), 负责自赋值(if有资源, 释放旧资源, 深拷贝新资源)
         /*
         HashTableNode 应该满足 unique 性质: 不应该允许拷贝赋值 搞出两个一模一样的 节点，这没有意义
         */
-        // 禁止 哈希表节点 的 拷贝赋值
+        // 禁止 哈希表节点 的 拷贝构造 & 拷贝赋值
+        HashTableNode(const HashTableNode& other) = delete;
         HashTableNode& operator=(const HashTableNode& other) = delete;
 
-        // &&符号在 模板函数(的参数签名) 中代表 万能引用: 
-        //      万能引用&&: 如果实参是左值/常左值, 那函数参数推导为 左值引用/常左值引用; 如果实参是右值(移动/临时), 那函数参数推导为 右值引用
-        // 配合 std::forward<TYPE>(arg) 完美转发: 在函数内部保持 std::forward<TYPE>(arg) 为推导出来的类型（引用/常引用/右值引用）
 
-        // &&符号在 非模板函数(的参数签名) 中代表 右值引用: 本身不拥有数据, 绑定右值(临时对象/被std::move标记的对象)的引用
-        //  额外Tip: 在函数内部当用一个具名变量（或形参自身）"承接"右值引用后, 它本身就成了一个左值(可能是左值引用). 如果需要保持移动, 用std::move
-    
+    // &&符号在 模板函数(的参数签名) 中代表 万能引用: 
+    //      万能引用&&: 如果实参是左值/常左值, 那函数参数推导为 左值引用/常左值引用; 如果实参是右值(移动/临时), 那函数参数推导为 右值引用
+    // 配合 std::forward<TYPE>(arg) 完美转发: 在函数内部保持 std::forward<TYPE>(arg) 为推导出来的类型（引用/常引用/右值引用）
+
+    // &&符号在 非模板函数(的参数签名) 中代表 右值引用: 本身不拥有数据, 绑定右值(临时对象/被std::move标记的对象)的引用
+    //  额外Tip: 在函数内部当用一个具名变量（或形参自身）"承接"右值引用后, 它本身就成了一个左值(可能是左值引用). 如果需要保持移动, 用std::move
+
+
     // RULE 4: 移动构造函数: ClassName(ClassName&& other), 负责窃取资源(if有资源, 将other的资源指针复制过来, 置空other的资源指针), 避免拷贝开销
+    // RULE 5: 移动赋值运算符: ClassName& operator=(ClassName&& other), 负责窃取置换资源(if有资源, 释放旧资源, 窃取新资源)
+        /*
+        HashTableNode Node 与 Node 之间, 除了next寻址没有交互的必要, 故禁止 移动赋值. 这没有意义
+        */
+        HashTableNode(HashTableNode&& other) = delete;
+        HashTableNode& operator=(HashTableNode&& other) = delete;
 
-        /* 业务移动构造函数: 2个
-        对于 资源管理类型(非平凡析构类型), 移动构造是刚需:
+    
+    // 业务构造(普通构造)函数: 
+        /* 业务构造函数情景1: 哈希节点的插入(主要是key&value的构造)纯粹是key和value作为记录的副作用,不希望key和value的来源受影响.
+        那么应该触发 TYPE_K 和 TYPE_V 的深拷贝, 以隔绝 表内kv 和 kv源 之间的生命周期关系.
+        ---> k/v 类型都是 const TYPE&, 不可变动引用, 那么在用 k / v 初始化 key / value 时, 会分别触发 TYPE_K / TYPE_V 的 构造函数
+        由于 k / v 都是不可变动引用, 无法移动掏空源对象, 故都会触发 TYPE_K 和 TYPE_V 的拷贝构造 --> 发生 k 和 v 的拷贝
+        */
+        // HashNodeTable 的业务构造函数1 --> 只要 TYPE_K 和 TYPE_V 实现了完善的拷贝构造函数, 此节点构造就是用 const& 类型去触发成员的拷贝构造
+        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+
+        /* 业务构造函数情景2: 哈希节点的插入是一种key和value的资源转移, 多用于哈希表与其他数据结构(比如堆树图等)之间的数据交互.此时希望key和value的来源被移动.
+        此时, 若 TYPE_K 和 TYPE_V 是资源管理类型(非平凡析构类型), 那么移动构造是刚需(减少数据拷贝负担):
         可能1. 用临时资源作为参数去构造对象, 比如 std::string("hello") --> TYPE_K(std::string('hello'))
-               当然了, 由于 C++ 允许 const& 参数去 const引用 临时资源(并延长临时资源的生命周期), 所以即使没有 移动构造函数, 临时资源还是可以作为参数触发拷贝构造
+               当然了, 由于 C++ 允许 const& 参数去 const引用 临时资源(并延长临时资源的生命周期), 所以即使没有参数移动, 临时资源还是可以作为参数触发拷贝构造
         可能2. 用非常巨大的源对象去构造新对象，且不在乎构造后的源对象，比如 std::string s = "超长文本" --> TYPE_K(s);
         HashTableNode在构造时，成员中 key / value 确实都有可能是 巨大复杂对象or临时资源, 所以对于key/value, 支持移动构造是有必要的；对于 节点指针, 浅拷贝即可
         */
-        // HashNodeTable 的移动构造函数 --> 只要 TYPE_K 和 TYPE_V 实现了完善的移动构造函数, 那么哈希表节点的移动构造就是 保持右值类型 std::move 去触发成员构造即可
+        // HashNodeTable 的业务构造函数2 --> 只要 TYPE_K 和 TYPE_V 实现了完善的移动构造函数, 此节点构造就是用 保持右值类型 std::move 去触发成员的移动构造
         HashTableNode(TYPE_K&& k, TYPE_V&& v, HashTableNode* ptr): key(std::move(k)), value(std::move(v)), next(ptr) {}
-        // 既然 k 已经是 右值引用 类型 TYPE_K&&, 为什么要用 std::move(k) 保持右值？
+        // 问: 既然 k 已经是 右值引用 类型 TYPE_K&&, 为什么要用 std::move(k) 保持右值？
         // 答: 旧版本 C++ 在函数内部会把带名字的变量(具名变量)视为左值. 新版本引入移动语义后, std::move保持兼容性
 
-        // 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形需要重载: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
-        HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
-
-    // RULE 5: 移动赋值运算符: ClassName& operator=(ClassName&& other), 负责窃取置换资源(if有资源, 释放旧资源, 窃取新资源)
-        /*
-        HashTableNode Node 与 Node 之间, 除了索引没有交互的必要, 故禁止 移动赋值. 这没有意义
+        /* 业务构造函数情景3: 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
         */
-        HashTableNode& operator=(HashTableNode&& other) = delete;
+        // HashNodeTable 的业务构造函数3 --> TYPE_K 实现了完善的移动构造, TYPE_V 实现了完善的拷贝构造, 此节点构造就是用 保持右值类型std::move 触发key成员的移动构造, 用常引用触发 value成员的拷贝构造
+        HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
     };
 
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构

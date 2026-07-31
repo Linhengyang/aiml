@@ -15,11 +15,11 @@ from cpython.long cimport PyLong_FromLongLong
 def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
     """
     text_bytes: 已经 utf-8 编码的整个 batch 文本 (b'\n'.join(...))
-    compiled_regex: 正则表达式字符串编译后缓存
+    compiled_regex: 正则表达式字符串编译后缓存, 即 re.compile 返回的对象. 具备 .finditer 方法
     返回：dict of {bytes: int}
     """
     
-    # 1. 获取底层 C 指针，避免 Python 切片开销
+    # 1. 获取底层 C 常指针，避免 Python 切片开销
     cdef const char* buffer = PyBytes_AsString(text_bytes)
     cdef Py_ssize_t total_len = PyBytes_GET_SIZE(text_bytes)
     
@@ -32,9 +32,10 @@ def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
     cdef Py_ssize_t end
     cdef match
     
-    # 3. 迭代匹配 (finditer 不会像 findall 那样一次性生成列表)
+    # 3. 迭代匹配的结果 (finditer 不会像 findall 那样一次性生成列表. finditer提供了两种重载, 参数string可以是str, 也可以是ReadableBuffer. 这里是后一种)
     # 注意：这里仍然会创建 Match py对象，但避免了创建子串 bytes 对象
     for match in compiled_regex.finditer(text_bytes):
+        # 只获取 匹配到的跨度
         start = <Py_ssize_t>match.start()
         end = <Py_ssize_t>match.end()
         
@@ -43,7 +44,7 @@ def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
             continue
             
         # 4. 直接从 buffer 构造 std::string，无 Python 对象分配
-        # string(const char* s, size_t n) 构造函数
+        # 这里使用了 string(const char* s, size_t n) 拷贝构造函数
         token_str = string(buffer + start, end - start)
         
         local_map[token_str] += 1
