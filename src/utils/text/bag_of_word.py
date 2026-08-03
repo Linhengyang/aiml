@@ -5,7 +5,7 @@ import regex as re
 import pyarrow as pa
 import pyarrow.parquet as pq
 from concurrent.futures import ProcessPoolExecutor
-from ext.bpeboost import bow_chunk_count_bytes
+from ext.bpeboost import bytes_chunk_count
 from ..parquet.sharding import shard_pq_to_ds
 from ...common.stream_control import stream_parallel_process_with_pending
 
@@ -47,7 +47,7 @@ def bow_worker(pq_fpath, text_colname: str, split_pattern: str):
         text_bytes = '\n'.join(batch_text).encode('utf-8')
         # accelerate by Cython/C++: 
         # input py-obj: text bytes + compiled_pattern
-        batch_counts = bow_chunk_count_bytes(text_bytes, compiled_regex) # 编码->切分+计数-> dict of {bytes: uint64} 
+        batch_counts = bytes_chunk_count(text_bytes, compiled_regex) # 编码->切分+计数-> dict of {bytes: uint64} 
         # output py-obj: dict of {bytes: uint64}
 
         local_counter.update(batch_counts)
