@@ -12,7 +12,7 @@ from cpython.long cimport PyLong_FromLongLong
 
 
 
-def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
+def bytes_chunk_count(bytes text_bytes, object compiled_regex):
     """
     text_bytes: 已经 utf-8 编码的整个 batch 文本 (b'\n'.join(...))
     compiled_regex: 正则表达式字符串编译后缓存, 即 re.compile 返回的对象. 具备 .finditer 方法
@@ -43,10 +43,9 @@ def bow_chunk_count_bytes(bytes text_bytes, object compiled_regex):
         if start < 0 or end > total_len or start >= end:
             continue
             
-        # 4. 直接从 buffer 构造 std::string，无 Python 对象分配
-        # 这里使用了 string(const char* s, size_t n) 拷贝构造函数
+        # 4. 直接从 buffer 构造 std::string，无 Python 对象分配. 但是应该尽量减少 buffer bytes的拷贝, 最好只发生一次: buffer -> map's key
+        # 这里使用了 string(const char* s, size_t n) 构造函数: 
         token_str = string(buffer + start, end - start)
-        
         local_map[token_str] += 1
         
     # 5. 将 C++ map 转换回 Python dict (仅在最后发生一次)
