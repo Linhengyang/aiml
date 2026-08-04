@@ -1794,7 +1794,7 @@ class bbpeTokenizer(baseBBPETokenizer):
         # num_freqs 应该等于 num_words
 
         # 传给 cython:
-        # 留在cython层即可(保持alive避免gc): word_arr & freq_arr
+        # 留在cython层即可(只要传进入cython函数，就可以保证其在cython函数return前保持alive避免gc): word_arr & freq_arr
         #   传给 cpp:
         #       num_merges(bpe循环的最大次数)
         #       num_words(word个数 = freqs长度 = offsets长度 - 1)
