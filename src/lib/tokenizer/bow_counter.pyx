@@ -44,8 +44,7 @@ def _bytes_chunk_count(bytes text_bytes, object compiled_regex):
     cdef unordered_map[string, unsigned long long] local_map
     cdef string token_str
 
-    cdef Py_ssize_t start
-    cdef Py_ssize_t end
+    cdef Py_ssize_t start, end
     # 虽然 match 是 Py对象, 但是这样提前声明，有助于 Cython编译器生成清晰的 C 代码（Cython3将默认 PyObject* 走 fast locals数组而不是Python字典）
     cdef object match
     
@@ -77,11 +76,14 @@ def _bytes_chunk_count(bytes text_bytes, object compiled_regex):
     while it != local_map.end():
         key = deref(it).first
         val = deref(it).second
+
         # 构造 Python bytes 对象 (这是必须的，因为要返回给 Python). Cython会调用内置的 std::string 到 Python bytes 的自动转换
         py_key = bytes(key)
         # 其实也可以使用 PyBytes_FromStringAndSize(const char*, size_t). 不过这样要取 it->first 的 data() 和 size() 两个string成员方法的返回结果
+        # 无论是使用 bytes转换, 还是 PyBytes_FromStringAndSize, 都将实打实完成 1次malloc(分配数据缓冲区) + 1次memcpy(逐字节拷贝)
+        # 拷贝是跨越 C++ | Python 边界, 实现生命周期解耦的必需代价
 
-        # Cython自动完成 C类型 到 Py对象的转换
+        # Cython自动完成 C类型unsigned long long 到 Py对象 int 的转换
         result[py_key] = val
         inc(it) # 迭代器前置自增
         
@@ -134,10 +136,25 @@ def bytes_chunk_count(bytes text_bytes, object compiled_regex):
         # 使用 CPython C API 直接从 const char* 和 length 构造 Python bytes 对象（string_view必须如此, 因为cython没有从string_view到python bytes对象的自动转换）
         # 所以必须要使用 利用 PyBytes_FromStringAndSize 这个 CPython C API 构造 Python bytes
         # string_view类有类似string类的两个成员方法, 其中 .data() 返回 const char*, size() 返回 size_t
-        py_key = PyBytes_FromStringAndSize(it->first.data(), it->first.size())
         
-        # Cython自动完成 C类型 到 Py对象的转换
+        # 这里 PyBytes_FromStringAndSize 底层动作
+        # 1. 分配 Python 对象头：在 Python 的堆内存中分配一个 PyBytesObject 结构体
+        # 2. 分配数据缓冲区 (malloc)：根据 it.first.size() 的大小，为该对象分配一块连续的内存缓冲区
+        # 3. 数据拷贝 (memcpy)：将 it.first.data()（即原始 bufferbytes 中的某段内存）逐字节拷贝到新分配的缓冲区中
+
+        py_key = PyBytes_FromStringAndSize(it->first.data(), it->first.size())
+
+        # 在 Python 中，所有的容器（list, dict, set等）存储的都是 对象的引用（指针），而不是对象本身的深拷贝. 所以 dict插入 kv 这个操作不涉及数据拷贝
+
+        # 这里执行 result[py_key] = py_val 时，底层调用的是 CPython C API PyDict_SetItem(result, py_key, py_val), 底层动作
+        # 1. 计算 py_key 的 hash 值，在 dict 的哈希表中找到空位
+        # 2. 将 py_key 的引用计数 +1 (Py_INCREF), 将 py_key 的内存地址（指针）存入 dict 的 entry 中
+        # 2. 将 py_val 的引用计数 +1 (Py_INCREF), 将 py_val 的内存地址（指针）存入 dict 的 entry 中
+
+        # 这里对于 dict的 value, Cython自动完成 C类型 到 Py对象的转换: 一次整数构造 unsigned long long -> PyLongObject(int对象), 执行一次数值拷贝
         result[py_key] = it->second
-        inc(it) # 迭代器前置自增
+
+        # 迭代器前置自增
+        inc(it)
         
     return result
