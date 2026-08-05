@@ -1666,7 +1666,7 @@ class BBPETokenizer(baseBBPETokenizer):
             heapq.heappush(max_heap, (-to_merge_node[1], to_merge_node)) # 最大堆(优先序列)保证 最大频数token-pair与其在words中出现的位置索引集合 处于堆顶
         where_to_update.clear()
 
-        # pair_counts是实时更新、保持正确的, 而where_to_update中的p_cnts是懒更新、positions是不更新的.
+        # pair_counts是实时更新、保持正确的, 而max_heap中的p_cnts是懒更新, positions是不更新的.
         # 前者懒更新是指从heap pop出来时, 去和pair_counts对比, 如果不正确才更新并重新推入堆中(堆自平衡重新调整), 如果正确就拿来使用; 后者不更新是因为空扫描几个位置代价很小
 
         # 4. 执行 merge: 不断从 max_heap 中得到 max-occured-pair, 对 unique_words 作 inplace-merge, 产出相应 changes 来 update pair_counts & max_heap
@@ -1696,7 +1696,7 @@ class BBPETokenizer(baseBBPETokenizer):
             for pos in positions:
                 word = unique_words[pos]
                 _changes = word.merge(l_tok, r_tok, new_tok) # list of (pair, signal)
-                changes.extend([ (change, pos) for change in _changes])
+                changes.extend([ (change, pos) for change in _changes]) # extended elements ((pair, signal), pos)
 
             for (pair, signal), pos in changes:
                 pair_counts[pair] += signal*freqs[pos]
@@ -1738,7 +1738,7 @@ class bbpeTokenizer(baseBBPETokenizer):
     positions: unordered_set of pos corresponding to every specific token-pair, const once created, valid-live during untill the token-pair merged
     
     where_to_update: hashmap{u64: unordered_set} as {token-pair: positions}---> drain ---> empty ---> update from changes ---> a lot of insert/remove
-    max_heap: max priority_queue with node{token-pair, p_cnts, positions} via p_cnts(max_order)---> push/pop ---> valid-live during the BPE
+    max_heap: max priority_queue with Merge{token-pair, p_cnts, positions} order by p_cnts(max_order)---> push/pop ---> valid-live during the BPE
 
     design-mode:
     for objects who are valid-live untill termination, no need for rapid re-use/re-construction ---> stay in system heap memory, std::move when transfer
@@ -1760,9 +1760,9 @@ class bbpeTokenizer(baseBBPETokenizer):
                   bow_min_freq: int = 1,            # 词袋BoW的最小频率. 低于此频率的word被剔除以保证内存容量
                   *args, **kwargs):
         # 0.py load BoW.parquet for unique_words(largelist of u32list, 用u32list代表word/tokens, 即用u32代表token), freqs(list of u64)
-        # 1.cy->cpp cython层api调用 unique_words & freqs --address--> cython --> C++ Word构造 --> unique_words(vector of Word), freqs(vector of const u64)
+        # 1.cy->cpp cython层api调用 unique_words & freqs --address--> cython --> C++ Word构造(拷贝) --> unique_words(vector of Word), freqs(vector of const u64)
         #   cpp  unique_words & freqs --window2_token遍历--> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set}). 该步骤可以并行(需要pair_counts&where_to_update线程安全)
-        #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge)
+        #   cpp  移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造(移动) --heapify--> max_heap(8-ary heap of Merge)
         # loop.cpp 初始化一个记录合并的 merges(vector of (u64, u64), 第一个u64代表两个u32合并, 第二个u64是该pair的计数), 循环merge_cnts从0到num_merges
         #   2. 从max_heap取顶端Merge. 如果取顶失败, 说明pair已经全部merge完毕, throw一个runoutError.
         #      拿到max Merge{pair, p_cnts, positions}. 如果 p_cnts 与 pair_counts[pair] 对不上, 更新该 Merge.p_cnts, push该Merge回max_heap, continue循环以重新取顶
@@ -1778,8 +1778,10 @@ class bbpeTokenizer(baseBBPETokenizer):
         BoW_pq_path = os.path.join(self._buffer_dir, 'bow.parquet')
         get_BoW(corpora, column, self.pat_str, 'u32list', bow_save_path = BoW_pq_path, bow_save_colnames = ('word', 'freq'))
 
-        # 读取 BoW parquet 文件, 零拷贝获取pyarrow内存地址. 将这些内存地址上的数据作为副本, 在cpp构建 unique_words(vector of Word), 使得 unique_words 具备独立的生命周期
-        # 零拷贝的流程是: read_table -> combine_chunks -> buffers -> address
+        # 读取 BoW parquet 文件, 零拷贝获取pyarrow内存地址. 将这些内存地址上的数据作为副本, 拷贝构建至 cpp的 unique_words(vector of Word), 使得 unique_words 具备独立的生命周期
+        # unique_words 具备与 buffer解耦的 独立的 生命周期, 这非常重要, 因为 unique_words 要执行 in-place 数据变动(merge替换并减少token)
+
+        # 零拷贝获取底层数据地址: 读取read_table -> 合并分块combine_chunks -> 获取buffers -> addresses
         BoW = pq.read_table(BoW_pq_path, filters = ('freq', '>=', bow_min_freq))
         
         word_arr = BoW.column('word').combine_chunks() # 关键：返回 arr 保持引用，防止在 Cython 调用期间被 GC
@@ -1791,9 +1793,9 @@ class bbpeTokenizer(baseBBPETokenizer):
         freq_arr = BoW.column('freq').combine_chunks()
         freq_buf = freq_arr.buffers() # 底层buffers u64类型返回: [validity, values(freqs)]
         freqs_ptr = freq_buf[1].address # uint64类型地址
-        # num_freqs 应该等于 num_words
+        # num_freqs 应该等于 num_words, 无需再取
 
-        # 传给 cython:
+        # 传给 cython: tokens_ptr & offsets_ptr & freqs_ptr & num_words & num_merges & word_arr & freq_arr
         # 留在cython层即可(只要传进入cython函数，就可以保证其在cython函数return前保持alive避免gc): word_arr & freq_arr
         #   传给 cpp:
         #       num_merges(bpe循环的最大次数)
@@ -1805,8 +1807,7 @@ class bbpeTokenizer(baseBBPETokenizer):
 
         #   cpp 传出:
         #       merges(vector of(u32 token-pair: (u32, u32), token-pair counts: u64))
-        # cython 传出
-        # merges(vector/list of (u32 token-pair, p_cnts)
+        # cython 传出: merges(tuple/list of (u32 token-pair, p_cnts)
         for i, (l_tok, r_tok), p_counts in enumerate(merges):
             new_tok = i + 256
             self._update_tokenizer((l_tok, r_tok), new_tok, p_counts if verbose else None)
