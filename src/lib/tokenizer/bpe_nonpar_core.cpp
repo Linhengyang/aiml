@@ -25,6 +25,8 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
 ) {
 
     // 1. 从 unique_words 的 buffer 地址(tokens_ptr / offsets_ptr), 循环 num_words 构建这么多个 word 为vector
+    // .reserve(size) + .emplace_back(constructor args) --> 这是一个高效、由STL管理生命周期的“就地构造” 方法, 相当于是由 STL管理、placement new在vector末位
+    // 相比 push_back(element_obj), 其是现在 栈或者堆上 构造一个临时 element_obj, 然后 移动或拷贝 进vector的末尾, 明显相比低效
     std::vector<Word> unique_words;
     unique_words.reserve(num_words);
     // 范围地址(拷贝)构造
