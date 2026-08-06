@@ -16,12 +16,12 @@
 
 // 关于 优先级比较器 Compare: 必须是一个类型参数, 必须是一个 类型(必须是函数对象Functor而不是函数指针).
 // C++里定义的普通函数只是一个函数指针, 函数指针无法内联, 每次使用都要切实在内存里跳转(即函数调用开销)
-// 而函数对象是“把一个函数逻辑包装成类型”: 它的实例可以像函数一样调用:
-
+// 而函数对象是“把一个函数逻辑包装成类型”: 它的实例可以像函数一样调用, 即:
 // T_Comparator cmp; // 创建一个可调用对象
 // bool result = cmp(a, b); // 像调用函数一样
 
-// 自定义比较器方式一: 结构体包装+重载()定义Functor, 在构造函数中输入比较器函数体实例. 如果函数体不需要状态, 那么可以省略构造参数默认构造
+// 自定义比较器方式一: 结构体包装+重载()定义Functor, 在构造函数中输入比较器函数体实例.
+//   如果函数体不需要状态, 那么可以省略构造参数默认构造
 // struct T_Comparator {
 //     bool operator()(const T& a, const T& b){
 //         return a.priority < b.priority;
@@ -29,7 +29,7 @@
 // }
 // std::priority_queue<T, std::vector<T>, T_Comparator> my_heap; // 省略构造参数默认构造
 
-
+//   如果函数体需要状态, 可以给结构体设 成员变量 作为状态值, 并在实例化后, 作为构造参数参与my_heap的构造
 // struct T_Comparator {
 //     int mode; // 0 for mode0, 1 for mode1
 //     bool operator()(const T& a, const T& b){
@@ -39,7 +39,6 @@
 // }
 // T_Comparator cmp(1); // 实例化得到函数实例
 // std::priority_queue<T, std::vector<T>, T_Comparator> my_heap(cmp); // 构造函数里输入比较器实例
-
 
 
 
@@ -105,7 +104,7 @@ public:
         //TODO
     }
 
-    // 迭代器范围构造, 拷贝解引用结果 到堆的底层容器, 再执行 O(N) 的heapify算法
+    // 迭代器范围构造, 拷贝 解引用结果 到堆的底层容器, 再执行 O(N) 的heapify算法
     template <typename InputIterator>
     octanary_heap(InputIterator first, InputIterator last, const NODE_COMPARATOR& compare)
     {
@@ -120,7 +119,7 @@ public:
     
     // 强调明确只接受右值, 强制消耗掉传入的vector容器（sink语义）, 执行O(N)heapify堆化. 具备极致性能
     explicit octanary_heap(std::vector<TYPE_NODE>&& data, const NODE_COMPARATOR& compare):
-        _container(std::move(data)), // 这里触发 _data(vector) 的移动构造, 窃取外部实参的所有资源. 这种窃取是O(1)的, 效率极高, 不随data大小和长度改变
+        _container(std::move(data)), // 这里触发 vector 的移动构造, 窃取外部实参的所有资源. 这种窃取是O(1)的, 效率极高, 不随data大小和长度改变
     {
         // TODO
     }
@@ -162,18 +161,19 @@ public:
     //   RVO: 对于纯右值结果返回, 直接构造在外部承接对象的内存地址上
     //   NRVO: 对具名变量结果返回, 编译器会直接把外部承接变量 和 要返回的具名变量 直接别名处理(重定向), 使得具名变量在被构建时(无论是拷贝还是移动), 就直接构造在了外部承接变量的地址上, 从而直接免去了return开销
     //         NRVO的触发条件非常严格, 即直接写变量名 return XXX; 这样, 不能有什么std::move修饰， 抑或是过于复杂的条件判断使得编译器无法判断. 出现这些情况后, 编译器就会放弃NRVO, 走二级优化隐式移动
-    //   隐式移动: 编译器如果NRVO/RVO失败, 则会使用二级优化 --> 隐式移动要返回右值, 从而触发外部承接对象的移动构造. 但前提是 return语句也是 return <具名变量>; 这样的, 否则也无法触发
+    //   隐式移动: 编译器如果NRVO/RVO失败, 则会使用二级优化 --> 隐式移动要返回右值, 从而触发外部承接对象的移动构造. 但前提是 return语句也得是 return <具名变量>, 否则也无法触发
     
     // 综上: 若希望零拷贝, 返回类型写成 按值返回 即可, 重点是函数内部要用 移动语义等 尽量实现零拷贝, 返回这里编译器几乎能处理一切.
     // return语句 & 返回类型 的关系:
     //   返回类型是外部承接变量的类型, 与 return语句的关系是: return结果是触发外部承接变量构造的参数
-    //   return语句决定了待返回结果如何被构造(或 具名变量被NRVO省略构造并直接构造在外部承接地址 / 临时值被RVO直接构造在外部承接地址 / 具名变量被隐式移动触发外部构造变量的移动构造)
-    //   --> 所以return语句要写成 "触发外部承接变量指定构造方法" 的形式. 如果是具名变量那编译器搞定, 如果是临时值反倒要注意写法(活用std::move来触发外部承接变量的移动构造)
+    //   return语句决定了待返回结果如何被构造(比如 具名变量被NRVO省略构造并直接构造在外部承接地址 / 临时值被RVO直接构造在外部承接地址 / 具名变量被隐式移动触发外部构造变量的移动构造)
+    //   --> 所以return语句要写成 "触发外部承接变量指定构造方法" 的形式. 如果是具名变量那编译器搞定, 如果是临时值反倒要注意写法(活用std::move来触发外部承接变量的移动构造, 下面介绍一个典型技巧:)
     // std::pari<K, V> drain() {
     //     ...
     //     return {std::move(k), std::move(v)};
-    //     目的是为了零拷贝转移出kv资源, 外部承接变量类型所以该是 std::pari<K, V>, 希望触发它的移动构造, 然而 return  {...} 的写法无法触发隐式移动/NRVO, 所以要显式使用std::move来触发外部承接变量的移动构造 
-    //     为什么不能写成 return {k, v}; ？因为首先这样无法触发NRVO / 隐式移动, 如果考虑触发的RVO, 然而在构造外部承接变量时, 由于k & v是具名左值, 所以会触发外部承接变量的拷贝构造; 如果不考虑RVO, 那么这里临时pair的构造就是拷贝构造(然后RVO直接构造在临时值的栈地址上)
+    // 目的是为了零拷贝转移出kv资源, 外部承接变量类型所以该是 std::pair<K, V>, 希望触发它的移动构造, 然而 return  {...} 的写法无法触发隐式移动/NRVO, 所以要显式使用std::move来触发外部承接变量的移动构造 
+    // 为什么不能写成 return {k, v}; ？
+    // 因为首先这样无法触发NRVO / 隐式移动, 如果考虑触发的RVO, 然而在构造外部承接变量时, 由于k & v是具名左值, 所以会触发外部承接变量的拷贝构造; 如果不考虑RVO, 那么这里临时pair的构造就是拷贝构造(然后RVO直接构造在临时值的栈地址上)
     // }
 
     // pop出堆顶. 如果堆为空, 则raise error. 这个方法没有返回 std::optional<TYPE_NODE> 好.
@@ -184,7 +184,7 @@ public:
             raise std::runtime_error("Empty Heap");
         }
         // TODO, swap first & last
-        TYPE_NODE top_node = std::move(_container.back()); // vecotor.back() 返回最后一个元素的引用, 移动语义窃取并掏空它到 top_node, 最后一个元素有效但unspecified
+        TYPE_NODE top_node = std::move(_container.back()); // vecotor.back() 返回最后一个元素的引用, 移动语义窃取并掏空它到 top_node(触发了移动赋值), 最后一个元素有效但unspecified
         _container.pop_back(); // 安全析构并删除最后一个valid but unspecified末尾node
         return top_node; // 触发NRVO
     }
