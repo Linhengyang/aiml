@@ -46,7 +46,8 @@
 
 
 
-
+// template <...> 这一行是 C++ 语法硬性规定的，无法省略. 但是通过 尾置返回类型 的写法, 规避了类作用域包袱带来的超长类型说明(编译器要先在前文知道名称所属的类作用域)
+// (比如返回 const_iterator&, 如果是 前置返回类型, 就需要写成pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator& const_iterator::operator++() 这样)
 
 /*
 * 只读迭代器
@@ -54,9 +55,8 @@
 * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; <...code...>}
 */
 
-// template <...> 这一行是 C++ 语法硬性规定的，无法省略
 
-// 构造函数. 默认模板参数（typename HASH_FUNC = std::hash<TYPE_K>）只能在模板的第一次声明中出现一次（通常是在 .h 文件的类定义处）。
+// 构造函数. 默认模板参数（typename HASH_FUNC = std::hash<TYPE_K>）只能在模板的第一次声明中出现一次（通常是在 .h 文件的类定义处）
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
 pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
         :_hash_table(hash_table),
@@ -122,7 +122,7 @@ bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::
 }
 
 
-// 迭代器的关键私有函数: 找到下一个(第一个)有效node
+// 迭代器的关键私有函数: 当遍历指针为nullptr时, 找到下一个(第一个)有效node
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
 void pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::_null_node_advance_to_next_valid_bucket()
 {

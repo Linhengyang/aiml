@@ -568,7 +568,7 @@ public:
         void _null_node_advance_to_next_valid_bucket() {} //若当前遍历指针为nullptr,移动其指向下一个有效node
     };
 
-    // 暴露 const_iterator 迭代器接口. 不推荐使用, 但如果硬要在外部使用要慎重. 推荐使用 const_iter_range 接口
+    // 暴露 const_iterator 迭代器接口. 直接在外部使用其要慎重. 推荐使用 const_range 接口
     const_iterator cbegin() const { return const_iterator(this, 0, nullptr); } // 首迭代器: 自动定位到第一个有效节点
     const_iterator cend() const { return const_iterator(this, _capacity, nullptr); } // 尾后迭代器: 返回的迭代器应该处于 end临界状态, 即 刚结束迭代的状态
 
@@ -582,7 +582,7 @@ public:
     struct const_range {
         const pooled_hashtable& _map;
 
-        // 在 range 中封装 hashtable 的 cbegin & cend 成员函数, 
+        // 在 const_range 中封装 hashtable 的 cbegin & cend 成员函数, 
         const_iterator begin() { return _map.cbegin(); }
         const_iterator end() { return _map.cend(); }
     };
