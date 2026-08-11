@@ -40,6 +40,7 @@ private:
         // 拷贝构造/赋值的参数签名一定是 T(const T& other), 移动构造/赋值的参数签名一定是 T(T&& other). 其他参数签名的都是业务构造/赋值函数
 
         // ---> RULE of 0(只要 TYPE_K 和 TYPE_V 等都实现了标准的拷贝/移动+构造/赋值, 编译器就能给组合结构体实现RULE of 5)
+        // 什么时候是触发 构造? 什么是是触发 赋值? --> 不看是否有等号, 看该句执行时, 变量已有的为赋值, 变量未有的为构造
 
     // RULE 1: 析构函数: ~ClassName(), 负责释放资源(if有资源)
         /*
@@ -522,14 +523,14 @@ public:
 
     // 迭代相关. 详见 mempooled_hashtable_iterators.inl
 
-    struct MutableProxy {
-        const TYPE_K& key;
-        TYPE_V& value;
-    }
-
     struct ConstProxy {
         const TYPE_K& key;
         const TYPE_V& value;
+    }
+
+    struct MutableProxy {
+        const TYPE_K& key; // 即使是 MutableProxy, 也不会允许改动 key, 因为这会触发 rehash
+        TYPE_V& value;
     }
 
     struct DrainProxy {
@@ -549,7 +550,7 @@ public:
     * 只读迭代器
     */
     class const_iterator {
-        // const_iterator的构造函数private防止误用. hashtable需要申明friend才能调用
+        // const_iterator的构造函数private防止误用. hashtable作为母类需要申明friend才能调用
         friend class pooled_hashtable;
     public:
         // 标准的 Iterator Traits: 标记为 forwardIterator
@@ -564,12 +565,12 @@ public:
         const pooled_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
-        void _null_node_advance_to_next_valid_bucket() {}
+        void _null_node_advance_to_next_valid_bucket() {} //若当前遍历指针为nullptr,移动其指向下一个有效node
     };
 
-    // 暴露 const_iterator 迭代器接口. 推荐在 const range 接口中使用, 如果在外部使用要慎重
+    // 暴露 const_iterator 迭代器接口. 不推荐使用, 但如果硬要在外部使用要慎重. 推荐使用 const_iter_range 接口
     const_iterator cbegin() const { return const_iterator(this, 0, nullptr); } // 首迭代器: 自动定位到第一个有效节点
-    const_iterator cend() const { return const_iterator(this, _capacity, nullptr); } // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+    const_iterator cend() const { return const_iterator(this, _capacity, nullptr); } // 尾后迭代器: 返回的迭代器应该处于 end临界状态, 即 刚结束迭代的状态
 
 
     /*
