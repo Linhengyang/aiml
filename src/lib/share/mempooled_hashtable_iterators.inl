@@ -1,5 +1,8 @@
 // mempooled_hashtable_iterators.inl
 // 为 mempooled_hashtable 提供各种性质的遍历器
+// 遍历器本意该是轻包袱的, *it返回一个对左值的引用 T&, 这样在外部可以引用接取 T& val = *it, 然后也符合stl里find/swap等标准算法. 一般不返回一个临时值, 比如 {K&, V&} 这样会造成外部无法用 左值引用类型 去接取.
+// 但一这里不需要符合stl标准, 二聚焦drain语义无论是在rust还是在c++, 都是一种破坏性遍历, 无需详细维护哈希表内部状态(事后清空即可), 三在外部使用c++17结构化绑定 auto&& 直接去接取 临时对象
+
 
 #pragma once
 // ================= 嵌套类实现区 =================
@@ -12,7 +15,7 @@
 //     return std::make_pair(std::move(k), std::move(v));
 // }
 // 在外部使用C++17结构化绑定 auto&& [k, v] = *it; // 外部 k 和 v 移动承接 迭代器解引用返回的key-value资源.
-
+// 节点移动之后，要对 moved-from节点 作显式析构
 
 // drain_iterator 必然是 InputIterator(阅后即焚类型, 只迭代一次). 不过针对要不要暴露迭代器, 有两种设计:
 
@@ -32,10 +35,10 @@
 
 
 // 额外的设计
-// 1. 返回代理类型drainProxy (本质是值, 但是尽量模拟引用, 且要把潜在的引发深拷贝的操作禁用，强制必须是移动使用这个*it返回的值
+// 1. 返回代理类型drainProxy (本质是值, 但是尽量模拟引用, 且要把潜在的引发深拷贝的操作禁用，强制必须是移动使用这个*it返回的值)
 //    此外, 代理类型使得使用可以更明确: std::pair<K, V>.first --> drainProxy.key, std::pair<K, V>.second --> drainProxy.value
 // 2. 破坏式清空clean_up兜底设计: 采用设计1之后，drainIterator就像哈希表的rehash过程一样, 是破坏性的, 如果遍历中因为某些原因break掉了, 这里也对应 上面这两种设计:
-//    设计1: 中途break之后, 哈希表剩下的部分也全部释放清空掉(但内存池reset还是交给内存池来做). 这样在drain的过程中就无需维护size / buckets数组 等哈希表的内部状态
+//    设计1: 中途break之后, 哈希表剩下的部分也全部释放清空掉(但内存池reset还是交给内存池来做). 这样在drain的过程中就无需维护size / buckets数组等 哈希表的内部状态
 //    ---> drain_iterator析构时要执行 cleaup_remaining
 //    设计2: 支持部分node移动转移, 也就是说哈希表剩下的部分仍然保持一个有效完整的哈希表状态. 这样在drain过程中需要细心维护哈希表的所有内部状态, 好处是可以支持条件性node移动
 //    但不管怎么样, 都要求 哈希表在 drain遍历之后, 处于 "空但有效, 允许重新insert节点" 的状态

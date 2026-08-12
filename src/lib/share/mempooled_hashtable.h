@@ -539,10 +539,16 @@ public:
         TYPE_V value;
 
         // 允许隐式转换为 std::pair, 方便外部容器接受
-        // TODO
+        // TODO: 添加 .first & .second 访问
 
         // 支持结构化绑定
         // TODO
+
+        // 禁止深拷贝: 这个 drain遍历返回的结果, 强制只能移动使用. 实际上尽量使用 C++17的结构化绑定 auto&& [k,v]
+        DrainProxy(const DrainProxy&) = delete;
+        DrainProxy& operator=(const DrainProxy&) = delete;
+
+        // 允许移动
     }
 
 
@@ -649,8 +655,9 @@ public:
         // drain_iterator的构造方法为private为防止误用. 只能在 drain_range 内部调用
         friend struct drain_range;
     private:
-        // 显式构造
+        // 显式构造, 但 private化构造函数, 意味着只允许 类内部以及友元 drain_range 执行该构造函数
         explicit drain_iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        // 由于 drain_iterator 的生命周期由 drain_range 绑定, 所以clean_remaining逻辑可以放在 drain_range 的析构函数里.
         pooled_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
@@ -661,7 +668,7 @@ public:
         // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
         drain_iterator(const drain_iterator&) = delete;
         drain_iterator& operator=(const drain_iterator&) = delete;
-        // 移动构造
+        // 允许移动, 原迭代器失效
         drain_iterator(drain_iterator&&) noexcept {}
         drain_iterator& operator=(drain_iterator&&) = default;
         DrainProxy operator*() {}
@@ -674,7 +681,7 @@ public:
     
     // 不暴露 drain_iterator 的 任何构造接口, 只允许在 drain() 接口中构造 drain_range 使用
 
-    // drain range. 利用 RAII 在迭代结束/退出时, 清理哈希表状态(若drain迭代非正常break, 哈希表已经被破坏, 应该彻底清空)
+    // drain range. 利用 RAII 在迭代结束/退出时, 清理哈希表状态(若drain迭代中发生非正常break, 哈希表已经被破坏, 应该彻底清空)
     struct drain_range {
         pooled_hashtable* _map;
 
