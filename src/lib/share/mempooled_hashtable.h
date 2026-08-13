@@ -548,7 +548,7 @@ public:
         DrainProxy(const DrainProxy&) = delete;
         DrainProxy& operator=(const DrainProxy&) = delete;
 
-        // 允许移动
+        // 允许移动: 省略
     }
 
 
@@ -681,23 +681,18 @@ public:
     
     // 不暴露 drain_iterator 的 任何构造接口, 只允许在 drain() 接口中构造 drain_range 使用
 
-    // drain range. 利用 RAII 在迭代结束/退出时, 清理哈希表状态(若drain迭代中发生非正常break, 哈希表已经被破坏, 应该彻底清空)
+    // drain range. 利用 RAII 在迭代结束/退出时, 清理哈希表状态(若drain迭代中发生非正常break, 哈希表已经被破坏, 应该彻底清空clear, 不是destroy)
     struct drain_range {
         pooled_hashtable* _map;
 
         // 作为 friend, drain_range 封装 drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
-        drain_iterator begin() {
-            // TODO
-        }
-
-        drain_iterator end() {
-            // TODO
-        }
+        drain_iterator begin() { return drain_iterator(this, 0, nullptr); }
+        drain_iterator end() { return drain_iterator(this, _capacity, nullptr); }
         
-        // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要清空已经被drain破坏掉的哈希表为 空表状态
+        // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要清空 clear 已经被drain破坏掉的哈希表到空表但可复用状态
         ~drain_range() {
             if (!_map) return;
-            // TODO: 析构所有未被转移的资源. free_list置空, _table置空
+            _map->clear();
         }
     };
 

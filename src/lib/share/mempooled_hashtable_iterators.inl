@@ -53,11 +53,103 @@
 // (比如返回 const_iterator&, 如果是 前置返回类型, 就需要写成pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator& const_iterator::operator++() 这样)
 
 /*
-* 只读迭代器
-* 
-* 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; <...code...>}
+* drain一次性迭代器
 */
 
+// 构造函数
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::drain_iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
+        :_hash_table(hash_table),
+        _bucket_index(bucket_index),
+        _node(node)
+{
+    _null_node_advance_to_next_valid_bucket();
+}
+
+
+// *it 迭代器对象解引用 --> 临时局部变量k & v 移动构造, _node->key 和 _node->value 处于 moved-from 状态. 析构它们后, 返回临时对象 {move(k), move(v)} 作为 DrainProxy 将其转移出去
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator*()
+    -> DrainProxy
+{
+    TYPE_K k = std::move(_node->key);
+    TYPE_V v = std::move(_node->value);
+    // 方案1: 析构 _node->key 和 _node->value
+    _node->key.~TYPE_K();
+    _node->value.~TYPE_V();
+
+    // 方案2: 析构 _node. 后续取 next 可以用 std::launder(_node)->next 取偏移
+    _node->~HashTableNode();
+
+    return DrainProxy{_node->key, _node->value};
+}
+
+
+//  ++it 迭代器对象自增后返回自身引用. 使用尾置返回类型
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator++()
+    -> drain_iterator&
+{
+    if (_node) {
+        // 方案1: _node 的 key & value 都已经析构
+        _node = _node->next;
+
+        // 方案2: _node 被析构
+        _node = std::launder(_node)->next;
+    }
+    if (!_node) {
+        _bucket_index++;
+        _null_node_advance_to_next_valid_bucket();
+    }
+    return *this;
+}
+
+
+// it++ 迭代器对象自增后, 返回自增前的自身拷贝. 使用尾置返回类型
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator++(int)
+    -> drain_iterator
+{
+    drain_iterator tmp = *this;
+    ++(*this);
+    return tmp;
+}
+
+
+// 迭代器相等状态判断
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator==(const drain_iterator& other) const
+{
+    return _node == other._node && _hash_table == other._hash_table;
+}
+
+
+// 迭代器不等状态判断
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator==(const drain_iterator& other) const
+{
+    return !(*this == other);
+}
+
+
+// 迭代器的关键私有函数: 当遍历指针为nullptr时, 找到下一个(第一个)有效node
+template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
+void pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::_null_node_advance_to_next_valid_bucket()
+{
+    while (!_node && _bucket_index < _hash_table->_capacity) {
+        _node = (_hash_table->_table)[_bucket_index];
+        if (_node) break;
+        _bucket_index++;
+    }
+}
+
+
+
+
+
+/*
+* 只读迭代器
+*/
 
 // 构造函数. 默认模板参数（typename HASH_FUNC = std::hash<TYPE_K>）只能在模板的第一次声明中出现一次（通常是在 .h 文件的类定义处）
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
@@ -142,7 +234,6 @@ void pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::const_iterator::
 /*
 * 迭代器: iterator类 本质是对 "迭代产出对象" it 的引用, it 是 iterator 缩写. value可修改
 * 
-* 用法: for(auto it = iterator.begin(); it != iterator.end(); ++it)
 
 一个迭代器类经过 begin 构造为迭代器对象 it 之后, it 就一直是该迭代器的引用, 迭代器内部不同的状态引向不同it结果
 哈希表迭代器, 输出 k-v. 对 it 解引用 *it 即得到想要的输出. 迭代器的构造, 应该满足能准确表达构造 begin 状态, 和 end 状态. 中间线性迁移交给 ++ 操作
