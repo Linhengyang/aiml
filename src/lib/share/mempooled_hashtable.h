@@ -689,7 +689,7 @@ public:
         drain_iterator begin() { return drain_iterator(this, 0, nullptr); }
         drain_iterator end() { return drain_iterator(this, _capacity, nullptr); }
         
-        // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要清空 clear 已经被drain破坏掉的哈希表到空表但可复用状态
+        // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要clear已经被drain破坏掉的哈希表 至 空表但可复用状态
         ~drain_range() {
             if (!_map) return;
             _map->clear();
