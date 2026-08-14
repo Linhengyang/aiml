@@ -74,14 +74,11 @@ auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::
 {
     TYPE_K k = std::move(_node->key);
     TYPE_V v = std::move(_node->value);
-    // 方案1: 析构 _node->key 和 _node->value
-    _node->key.~TYPE_K();
-    _node->value.~TYPE_V();
+    // 析构 _node->key 和 _node->value
+    if constexpr(!std::is_trivially_destructible<TYPE_K>::value) _node->key.~TYPE_K();
+    if constexpr(!std::is_trivially_destructible<TYPE_V>::value) _node->value.~TYPE_V();
 
-    // 方案2: 析构 _node. 后续取 next 可以用 std::launder(_node)->next 取偏移
-    _node->~HashTableNode();
-
-    return DrainProxy{_node->key, _node->value};
+    return DrainProxy{std::move(k), std::move(v)};
 }
 
 
@@ -91,11 +88,8 @@ auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::
     -> drain_iterator&
 {
     if (_node) {
-        // 方案1: _node 的 key & value 都已经析构
+        // _node 的 key & value 都已经析构
         _node = _node->next;
-
-        // 方案2: _node 被析构
-        _node = std::launder(_node)->next;
     }
     if (!_node) {
         _bucket_index++;
