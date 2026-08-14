@@ -286,18 +286,27 @@ public:
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
         HashTableNode* new_node;
 
-        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址, 如果存在
-            // 直接复用 _free_nodes_head 地址: 
-            new_node = _free_nodes_head; // 这里 new_node 指向的地址已经被析构
+        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址(如果存在). _free_nodes_head的唯一非nullptr途径就是通过 pop 方法更新
+            / 取待复用地址: 直接复用 _free_nodes_head
+            new_node = _free_nodes_head; // 废弃方案中这里new_node指向的地址已经被析构, 新方案中这里new_node指向的Node只是成员变量key和value被析构, Node作为空壳仍然valid
 
-            // 更新 _free_nodes_head
-            // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
-            _free_nodes_head = std::launder(new_node)->free_next;
-            // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
-            // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
+            // 更新 _free_nodes_head, 然后 re-placement new
+            // 废弃方案:
+            // // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
+            // _free_nodes_head = std::launder(new_node)->free_next;
+            // // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移". 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
+            // // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+            // new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
 
-            // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-            new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+            // 新方案:
+            // new_node指向的node作为空壳仍然valid, 内部key&value已经析构, next已经置空, free_next指向下一个待复用地址(如果有)
+            _free_nodes_head = new_node->free_next;
+            // 在空壳 new_node 内部成员变量key&value(已析构)上placement new构造, 并用头插法将该index代表的bucekt插入new_node->next, 置空free_next表示从free_list中脱离
+            new_node->next = _table[index];
+            new_node->free_next = nullptr;
+            new(&new_node->key) TYPE_K(std::forward<K>(key));
+            new(&new_node->value) TYPE_V(std::forward<V>(value));
+
             // 完美转发以保持key和value的 左/右 值引用性质, 才能触发对应的 HashTableNode 构造函数(左(常)值引用-->拷贝, 右值引用-->移动)
             // 如果传入的是右值引用，那么源对象会被掏空. 这样调用的本意就是转移资源，所以不介意源被掏空.
 
@@ -359,19 +368,26 @@ public:
         // 执行 insert 逻辑. 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
         HashTableNode* new_node;
 
-        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址, 如果存在
-            // 直接复用 _free_nodes_head 地址: 
-            new_node = _free_nodes_head; // 这里 new_node 指向的地址已经被析构
+        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址(如果存在). _free_nodes_head的唯一非nullptr途径就是通过 pop 方法更新
+            // 取待复用地址: 直接复用 _free_nodes_head
+            new_node = _free_nodes_head; // 废弃方案中这里new_node指向的地址已经被析构, 新方案中这里new_node指向的Node只是成员变量key和value被析构, Node作为空壳仍然valid
+            
+            // 更新 _free_nodes_head, 然后 re-placement new
+            // 废弃方案:
+            // // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
+            // _free_nodes_head = std::launder(new_node)->free_next;
+            // // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移". 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
+            // // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+            // new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
 
-            // 更新 _free_nodes_head
-            // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
-            _free_nodes_head = std::launder(new_node)->free_next;
-            //new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
-            // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
-
-            // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-            new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
-
+            // 新方案:
+            // new_node指向的node作为空壳仍然valid, 内部key&value已经析构, next已经置空, free_next指向下一个待复用地址(如果有)
+            _free_nodes_head = new_node->free_next;
+            // 在空壳 new_node 内部成员变量key&value(已析构)上placement new构造, 并用头插法将该index代表的bucekt插入new_node->next, 置空free_next表示从free_list中脱离
+            new_node->next = _table[index];
+            new_node->free_next = nullptr;
+            new(&new_node->key) TYPE_K(std::forward<K>(key));
+            new(&new_node->value) TYPE_V(default_val);
         }
         else { // 如果没有 _free_nodes_head 可复用地址
             // 在 内存池 上分配新内存给新节点, raw_mem 内存
@@ -423,6 +439,7 @@ public:
 
         while (head) {
             if (head->key == key) {
+                // 已定位
                 // 获取 value
                 value = head->value;
 
@@ -434,6 +451,7 @@ public:
                     parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
                 }
 
+                // 已摘除
                 // 防御性编程 置空 head 的 next以防止非法访问
                 head->next = nullptr;
 
@@ -444,7 +462,13 @@ public:
                 head->free_next = _free_nodes_head;
                 // _free_nodes_head 是 Node* 类链表头, 其自身以及其->free_next 指向的是析构后的nodes的地址们.
                 _free_nodes_head = head;
-                destroy_node(head); // _free_nodes_head 指向的地址被析构了
+                
+                // 废弃方案: 析构整个被摘除的 node
+                // destroy_node(head);
+                
+                // 新方案: 只析构数据成员变量 key 和 value, head指向的 HashTableNode 作为空壳仍然valid等待复用
+                if constexpr(!std::is_trivially_destructible<TYPE_K>::value) head->key.~TYPE_K();
+                if constexpr(!std::is_trivially_destructible<TYPE_V>::value) head->value.~TYPE_V();
 
                 return true;
             }
