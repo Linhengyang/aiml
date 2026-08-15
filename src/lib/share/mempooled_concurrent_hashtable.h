@@ -78,16 +78,17 @@ private:
         TYPE_V value;
         HashTableNode* next;
         HashTableNode* free_next = nullptr;
-        // 拷贝构造
-        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
-        // 拷贝赋值
+        // 禁止赋值(拷贝or移动)
         HashTableNode& operator=(const HashTableNode& other) = delete;
-        // 移动构造
+        HashTableNode& operator=(HashTableNode&& other) = delete;
+
+        // 业务(普通)构造函数
+        // 拷贝 key & value 资源 构造node
+        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+        // 移动 key & value 资源 构造node
         HashTableNode(TYPE_K&& k, TYPE_V&& v, HashTableNode* ptr): key(std::move(k)), value(std::move(v)), next(ptr) {}
         // 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形需要重载: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
         HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
-        // 移动赋值
-        HashTableNode& operator=(HashTableNode&& other) = delete;
     };
     
     void destroy_node(HashTableNode* node) {
@@ -565,6 +566,8 @@ public:
                     head->free_next = _free_nodes_head; // 更新 head
                     _free_nodes_head = head; // _free_nodes_head 改成 head
                     */
+                    // _free_nodes_head作为被输入到多个线程的指针, 它是共享变量. 它的取值&更新, 在线程之间存在竞争问题
+
                     // 并发安全 CAS 版本
                     // 竞争的线程AB各自读到了 _free_nodes_head 并执行了 head_A 更新 和 head_B 更新 --> do 部分
                     // while 部分 <-- 线程A更快, 首先执行 compare_exchage: _free_nodes_head 对比 old_head. 此时一致
@@ -589,7 +592,12 @@ public:
                     // std::memory_order_release: 生产者(写操作)内存序, 代表CPU保证 --> 共享变量在执行该内存序操作前的所有指令, 必须不能重排到该内存序后面
                     // 代表一种生产者逻辑: 东西全部生产完毕了才能release. 这里 pop 函数对 全局变量_free_nodes_head而言就是生产者: 它生产空闲地址发布到_free_nodes_head上
 
-                    destroy_node(head); // _free_nodes_head 指向的地址被析构了
+                    // 废弃方案: 析构整个被摘除的 node
+                    // destroy_node(head);
+
+                    // 新方案: 只析构数据成员变量 key 和 value, head指向的 HashTableNode 作为空壳仍然valid等待复用
+                    if constexpr(!std::is_trivially_destructible<TYPE_K>::value) head->key.~TYPE_K();
+                    if constexpr(!std::is_trivially_destructible<TYPE_V>::value) head->value.~TYPE_V();
 
                     return true;
                 }
