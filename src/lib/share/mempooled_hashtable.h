@@ -287,7 +287,7 @@ public:
         HashTableNode* new_node;
 
         if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址(如果存在). _free_nodes_head的唯一非nullptr途径就是通过 pop 方法更新
-            / 取待复用地址: 直接复用 _free_nodes_head
+            // 取待复用地址: 直接复用 _free_nodes_head
             new_node = _free_nodes_head; // 废弃方案中这里new_node指向的地址已经被析构, 新方案中这里new_node指向的Node只是成员变量key和value被析构, Node作为空壳仍然valid
 
             // 更新 _free_nodes_head, 然后 re-placement new
@@ -435,16 +435,16 @@ public:
         if (!head) return false;
 
         // 若 key-hash 存在, 遍历该链表以查询 key
-        HashTableNode* parent = head; // 为了"删除"节点, 需要跟随保留父节点指针
+        HashTableNode* parent = nullptr; // 为了"删除"节点, 需要跟随保留父节点指针
 
         while (head) {
             if (head->key == key) {
-                // 已定位
+                // 已定位到待摘除的node
                 // 获取 value
                 value = head->value;
 
                 // 摘除 node
-                if (!parent) { // parent为空, 说明头节点head就是待删除节点
+                if (!parent) { // parent为空, 说明其未曾更新, 说明头节点head就是待删除节点
                     _table[index] = nullptr; // 直接置空指针摘除head
                 }
                 else { // 如果 parent 不为空, 说明待删节点head不是头节点
@@ -508,7 +508,6 @@ public:
 
         _free_nodes_head = nullptr; // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
         _size = 0;
-
     }
 
     // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0

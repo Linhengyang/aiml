@@ -307,12 +307,17 @@ public:
             new_node = _free_nodes_head; // 获取第一个空闲地址
             _free_nodes_head = std::launder(new_node)->free_next; // 更新空闲列表
             */
+            // 并发安全 CAS 版本:
             while (_free_nodes_head.load(std::memory_order_relaxed) != nullptr) { 
                 // 尝试从 free list 中复用: 获取 _free_nodes_head(relaxed表示无同步成本)
                 HashTableNode* curr_head = _free_nodes_head.load(std::memory_order_relaxed);
 
-                if (_free_nodes_head.compare_exchange_weak(
-                    curr_head, std::launder(curr_head)->free_next,
+                if (curr_head != nullptr && _free_nodes_head.compare_exchange_weak(
+                    curr_head,
+                    // 废弃方案
+                    // std::launder(curr_head)->free_next,
+                    // 新方案
+                    curr_head->free_next,
                     std::memory_order_acquire, std::memory_order_relaxed)
                 ) {
                     // 语义: curr_head 是 全局变量 _free_nodes_head 尝试读到的旧值. 对比这个全局变量和旧值
@@ -329,8 +334,15 @@ public:
             }
 
             if (new_node) {
+                // 废弃方案:
                 // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-                new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+                // new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+                // 新方案:
+                new_node->next = _table[index];
+                new_node->free_next = nullptr;
+                new(&new_node->key) TYPE_K(std::forward<K>(key));
+                new(&new_node->value) TYPE_V(std::forward<V>(value));
+
                 // 完美转发以保持key和value的 左/右 值引用性质, 才能触发对应的 HashTableNode 构造函数(左(常)值引用-->拷贝, 右值引用-->移动)
                 // 如果传入的是右值引用，那么源对象会被掏空. 这样调用的本意就是转移资源，所以不介意源被掏空.
             }
@@ -342,9 +354,6 @@ public:
                 new_node = new(raw_mem) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
             }
             
-            // 更新插入后的默认值value
-            std::forward<FUNC>(updater)(new_node->value);
-
             _table[index] = new_node;
 
             // // 新的 node 要线程安全地插入gc链: 独占的桶锁(条带锁)仅锁住了当前桶(条带), 但是gc链是全局的, 可能有其他桶(条带)在写入, 故这里要线程安全 --> 废弃
@@ -451,12 +460,17 @@ public:
             new_node = _free_nodes_head; // 获取第一个空闲地址
             _free_nodes_head = std::launder(new_node)->free_next; // 更新空闲列表
             */
+            // 并发安全 CAS 版本:
             while (_free_nodes_head.load(std::memory_order_relaxed) != nullptr) { 
-                // 尝试从 free list 中复用: 获取 _free_nodes_head(relaxed表示无同步成本)
+                // 尝试从 free list 中复用: 获取 _free_nodes_head (relaxed表示无同步成本) 的 tls副本
                 HashTableNode* curr_head = _free_nodes_head.load(std::memory_order_relaxed);
 
-                if (_free_nodes_head.compare_exchange_weak(
-                    curr_head, std::launder(curr_head)->free_next,
+                if (curr_head != nullptr && _free_nodes_head.compare_exchange_weak(
+                    curr_head,
+                    // 废弃方案:
+                    // std::launder(curr_head)->free_next,
+                    // 新方案:
+                    curr_head->free_next,
                     std::memory_order_acquire, std::memory_order_relaxed)
                 ) {
                     // 语义: curr_head 是 全局变量 _free_nodes_head 尝试读到的旧值. 对比这个全局变量和旧值
@@ -473,8 +487,14 @@ public:
             }
 
             if (new_node) {
+                // 废弃方案:
                 // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-                new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
+                // new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
+                // 新方案:
+                new_node->next = _table[index];
+                new_node->free_next = nullptr;
+                new(&new_node->key) TYPE_K(std::forward<K>(key));
+                new(&new_node->value) TYPE_V(default_val);
             }
             else {
                 // 空闲列表为空, 申请新内存
@@ -483,6 +503,9 @@ public:
 
                 new_node = new(raw_mem) HashTableNode{std::forward<K>(key), default_val, _table[index]};
             }
+
+            // 更新插入后的默认值value
+            std::forward<FUNC>(updater)(new_node->value);
 
             _table[index] = new_node;
 
@@ -531,7 +554,7 @@ public:
             std::unique_lock<std::shared_mutex> _lock_bucket_for_pop_(bucket_lock(index));
 
             // 遍历查询 key
-            
+
             // 若 key-hash 不存在, 直接返回 false 结束
             HashTableNode* head = _table[index];
             if (!head) return false;
@@ -541,11 +564,12 @@ public:
 
             while (head) {
                 if (head->key == key) {
+                    // 已定位到待摘除的node
                     // 获取 value. 触发 node.value 的拷贝赋值: 生命周期分离, 这里不返回引用, 保证哈希表的资源生命周期不影响外部变量对象
                     value = head->value;
 
                     // 摘除 node
-                    if (!parent) { // parent为空, 说明头节点head就是待删除节点
+                    if (!parent) { // parent为空, 说明其未曾更新, 说明头节点head就是待删除节点
                         _table[index] = nullptr; // 直接置空指针摘除head
                     }
                     else { // 如果 parent 不为空, 说明待删节点head不是头节点
@@ -566,22 +590,22 @@ public:
                     head->free_next = _free_nodes_head; // 更新 head
                     _free_nodes_head = head; // _free_nodes_head 改成 head
                     */
-                    // _free_nodes_head作为被输入到多个线程的指针, 它是共享变量. 它的取值&更新, 在线程之间存在竞争问题
+                    // _free_nodes_head作为被输入到多个线程的指针, 它是共享变量. 它的取值&更新, 在线程之间存在竞争问题; 而head已经在桶(条带)锁之下, 不会有竞争问题
 
-                    // 并发安全 CAS 版本
-                    // 竞争的线程AB各自读到了 _free_nodes_head 并执行了 head_A 更新 和 head_B 更新 --> do 部分
-                    // while 部分 <-- 线程A更快, 首先执行 compare_exchage: _free_nodes_head 对比 old_head. 此时一致
+                    // 并发安全 CAS 版本: 时间顺序详解如下
+                    // do 部分 <-- 竞争的线程AB各自读到了 _free_nodes_head 并执行了 head_A 更新 和 head_B 更新
+                    // while 部分 <-- 线程A更快, 首先执行 compare_exchage: _free_nodes_head 对比 tls_head. 此时一致
                     //                compare_exchange给线程A执行 _free_nodes_head 改成 head_A, 返回 True, 从而线程A退出循环
-                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 old_head, 此时不一致(前者已经被线程A修改)
+                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 tls_head, 此时不一致(前者已经被线程A修改成head_A)
                     //                compare_exchange 直接返回 False, 线程B重新进入do 部分 <-- 线程B读到了更新后的 _free_nodes_head, 再一次执行 head_B 更新
-                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 old_head. 此时终于一致
-                    //                compare_exchange给线程A执行 _free_nodes_head 改成 head_B, 返回 True, 从而线程B退出循环
-                    HashTableNode* old_head;
+                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 tls_head. 此时终于一致
+                    //                compare_exchange给线程B执行 _free_nodes_head 改成 head_B, 返回 True, 从而线程B退出循环
+                    HashTableNode* tls_head;
                     do {
-                        old_head = _free_nodes_head.load(std::memory_order_relaxed);
-                        head->free_next = old_head;
-                    } while (!_free_nodes_head.compare_exchange_weak(old_head, head, std::memory_order_release, std::memory_order_relaxed));
-                    // 语义: old_head 是 全局变量 _free_nodes_head 在 do 中读到的旧值. 对比这个全局变量和旧值
+                        tls_head = _free_nodes_head.load(std::memory_order_relaxed);
+                        head->free_next = tls_head;
+                    } while (!_free_nodes_head.compare_exchange_weak(tls_head, head, std::memory_order_release, std::memory_order_relaxed));
+                    // 语义: tls_head 是 全局变量 _free_nodes_head 在 do 中读到的旧值. 对比这个全局变量和旧值
                     // 如果一致, 那么执行全局变量更新为 head(do 中算出来的新值); 如果不一致, 循环do 用 全局变量的新值再来一次, 直到重试成功
 
                     // atomic_var.compare_exchange_weak(expect_val, new_val, success_memory_order, failure_memory_order) 语义:
