@@ -276,7 +276,7 @@ public:
     * 
     * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点key 插入默认值作为value, 然后再更新value. 插入后检查是否需要扩容
     */
-   template <typename K, typename V>
+    template <typename K, typename V>
     bool insert(K&& key, V&& value) {
         // 并发锁: 此操作(insert)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
@@ -570,7 +570,7 @@ public:
 
                     // 摘除 node
                     if (!parent) { // parent为空, 说明其未曾更新, 说明头节点head就是待删除节点
-                        _table[index] = nullptr; // 直接置空指针摘除head
+                        _table[index] = head->next; // 摘除head
                     }
                     else { // 如果 parent 不为空, 说明待删节点head不是头节点
                         parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
