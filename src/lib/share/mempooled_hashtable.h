@@ -506,11 +506,12 @@ public:
             _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
 
-        _free_nodes_head = nullptr; // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
+        _free_nodes_head = nullptr; // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用. 不会复用空闲链表上的空壳node地址.
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
         _size = 0;
     }
 
-    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0
+    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0 即完全破坏表结构
     // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
         // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
@@ -534,6 +535,7 @@ public:
         _size = 0; // node数量置0
         _capacity = 0; // _capacity 置零
         _free_nodes_head = nullptr; // 空闲链表置空
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
     }
 
 
@@ -707,15 +709,28 @@ public:
     // drain range. 利用 RAII 在迭代结束/退出时, 清理哈希表状态(若drain迭代中发生非正常break, 哈希表已经被破坏, 应该彻底清空clear, 不是destroy)
     struct drain_range {
         pooled_hashtable* _map;
+        bool _fully_drained = false;
 
         // 作为 friend, drain_range 封装 drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
         drain_iterator begin() { return drain_iterator(this, 0, nullptr); }
-        drain_iterator end() { return drain_iterator(this, _capacity, nullptr); }
+        drain_iterator end() {
+            _fully_drained = true;
+            return drain_iterator(this, _capacity, nullptr);
+        }
         
         // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要clear已经被drain破坏掉的哈希表 至 空表但可复用状态
         ~drain_range() {
             if (!_map) return;
-            _map->clear();
+            if (_fully_drained) {
+                // 当明确已经全部 drain, 走快速 置空置零命令
+                std::fill(_map->_table, _map->_table + _map->_capacity, nullptr);
+                _map->_size = 0;
+                _map->_free_nodes_head = nullptr;
+            }
+            else {
+                // 当中途break, 兜底清理剩余node
+                _map->clear();
+            }
         }
     };
 
