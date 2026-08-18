@@ -144,14 +144,57 @@ private:
         size_t count = 0;
         uint64_t generation = 0;
     };
-    static thread_local TLSFreeList tls_free_list; // thread_local 只能用于：命名空间作用域变量、类的 static 成员、函数内 static 局部变量
-    // 但是, 同一模板参数的所有哈希表实例共享同一个 TLS free list. TO BE FIX
+
+    // 废弃方案: 直接将 tls free_list 从 thread_local关键字定义. 原因: thread_local 只能用于：命名空间作用域变量、类的 static 成员、函数内 static 局部变量
+    // 即 thread_local关键字的变量, 跟着线程走而不是对象, 所以必须要static(进入静态存储期)这样一来, 所有 同类型哈希表的不同实例, 在同一个线程处理时, 将共用同一个 tls free_list
+    // 其实仔细分析一下, 由于此哈希表是基于 arena mempool 的, 也就是说 tls free_list 都是arena上的地址 --> 只要不同实例在同一 arena 上, 似乎不同实例之间共同复用一个 tls free_list 也无所谓
+    
+    // static thread_local TLSFreeList* tls_free_list;
+
+    // 新方案: 维护一个 tls free lists注册表: tls registry, 它自身是 static thread_local 的, 也就是说同类型哈希表不同实例, 在同一线程下共享这个registry
+    // 但是, 注册表内部维护了所有该同类型哈希表 不同实例的指针 <-> tls free_list 的对应关系. 从而每个实例在要使用 tls free_list 时, 先根据自身指针this从注册表中找到自己的tls free_list再使用
+    struct TLSRegistry {
+        static constexpr size_t MAX_INSTANCES = 4; // 一个线程最多同时操作4个同类哈希表实例
+        struct Entry { // 哈希表实例指针(不允许在这里通过指针改变哈希表) <-> tls free_list 的对应关系
+            const pooled_concurrent_hashtable* owner = nullptr;
+            TLSFreeList free_list;
+        };
+        std::array<Entry, MAX_INSTANCES> entries{};
+        size_t count = 0;
+
+        TLSFreeList* get_or_create_tls_free_list(pooled_concurrent_hashtable* owner) {
+            // 线性查找，N很小，速度极快
+            for (size_t i = 0; i < count; ++i) {
+                if (entries[i].owner == owner) return &entries[i].free_list;
+            }
+            // 查找完毕没找到, 但仍然有空槽位, 为此哈希表实例 创建一个 tls free_list
+            if (count < MAX_INSTANCES) {
+                entries[count].owner = owner;
+                entries[count].free_list = {nullptr, 0, 0};
+                return &entries[count++].free_list;
+            }
+            return nullptr; // Fallback: 超过限制，降级为不使用 TLS
+            // 此时 get node from tls/refill tls / flush tls 这三个操作都放弃; push node to tls改成直接push to global free_list
+        }
+    };
+
+    static thread_local TLSRegistry tls_registry;
+
+    // 根据 本哈希表实例的指针, 本线程可以根据此函数, 找到 本线程local 的 tls free_list
+    inline TLSFreeList* get_tls_free_list() {
+        return tls_registry.get_or_create_tls_free_list(this);
+    }
 
     // TLS free_list 的操作: 纯单线程, 零锁零原子
 
     // 从 TLS free_list 中得到 node: tls_free_list 贡献复用地址, 用于 insert/atomic_upsert
     inline HashTableNode* get_node_from_tls() {
-        // 检查 本地 tls free_list代际是否等于 _generation
+        // 尝试找到 本实例 本线程local 的 tls free_list
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        // 如果失败, get node失败, 返回nullptr
+        if (!tls_free_list) return nullptr;
+
+        // 检查 本地 tls free_list代际是否匹配 _generation
         uint64_t global_gen = _generation.load(std::memory_order_acquire);
         if (tls_free_list->generation != global_gen) {
             // 代际不匹配，说明表在 insert/upsert 释放锁后, 被 clear/destroy
@@ -162,15 +205,25 @@ private:
             return nullptr;
         }
         // 代际匹配
-        if (tls_free_list.count == 0) return nullptr; // 当count为0时, 返回nullptr
-        HashTableNode* node = tls_free_list.head; // tls free_list 的链表头
-        tls_free_list.head = node->free_next; // 更新 tls_free_list 的链表头和count
-        --tls_free_list.count;
+        if (tls_free_list->count == 0) return nullptr; // 当count为0时, 返回nullptr
+        HashTableNode* node = tls_free_list->head; // tls free_list 的链表头
+        tls_free_list->head = node->free_next; // 更新 tls_free_list 的链表头和count
+        --tls_free_list->count;
         return node;
     }
 
     // TLS free_list 回收 node: tls_free_list 回收可复用地址, 用于 pop
     inline void push_node_to_tls(HashTableNode* node) {
+        // 尝试找到 本实例 本线程local 的 tls free_list
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        // 如果失败, 直接 push node 到 global free_list
+        if (!tls_free_list) {
+            // Fallback: 直接放入 global
+            std::lock_guard<std::mutex> lock(_global_free_mutex);
+            node->free_next = _global_free_head;
+            _global_free_head = node;
+            return;
+        }
         // 检查 本地 tls free_list代际是否等于 _generation
         uint64_t global_gen = _generation.load(std::memory_order_acquire);
         if (tls_free_list->generation != global_gen) {
@@ -183,15 +236,18 @@ private:
             return; // 丢弃 node
         }
 
-        node->free_next = tls_free_list.head;
-        tls_free_list.head = node;
-        ++tls_free_list.count;
+        node->free_next = tls_free_list->head;
+        tls_free_list->head = node;
+        ++tls_free_list->count;
     }
 
     // global free_list 与 TLS free_list 之间的交互操作: 需要给 global free_list 上锁
 
     // TLS free_list空了, 从 global free_list 批量refill: 锁住 global free_list, 从其 push 最多 FREE_LIST_BATCH 个node 到 tls free_list
     void refill_tls_from_global() {
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        if (!tls_free_list) return;
+
         std::lock_guard<std::mutex> lock(_global_free_mutex);
         uint64_t global_gen = _generation.load(std::memory_order_acquire);
         if (tls_free_list->generation != global_gen) {
@@ -206,14 +262,17 @@ private:
         for (size_t i = 0; i < FREE_LIST_BATCH && _global_free_head; ++i) {
             HashTableNode* node = _global_free_head;
             _global_free_head = node->free_next;
-            node->free_next = tls_free_list.head;
-            tls_free_list.head = node;
-            ++tls_free_list.count;
+            node->free_next = tls_free_list->head;
+            tls_free_list->head = node;
+            ++tls_free_list->count;
         }
     }
 
     // TLS free_list满了, 向 global free_list 批量flush: 锁住 global free_list, 其从 tls get 最多 FREE_LIST_BATCH 个node
     void flush_tls_to_global() {
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        if (!tls_free_list) return;
+
         std::lock_guard<std::mutex> lock(_global_free_mutex);
         uint64_t global_gen = _generation.load(std::memory_order_acquire);
         if (tls_free_list->generation != global_gen) {
@@ -225,10 +284,10 @@ private:
             return; 
         }
 
-        for (size_t i = 0; i < FREE_LIST_BATCH && tls_free_list.count > 0; ++i) {
-            HashTableNode* node = tls_free_list.head;
-            tls_free_list.head = node->free_next;
-            --tls_free_list.count;
+        for (size_t i = 0; i < FREE_LIST_BATCH && tls_free_list->count > 0; ++i) {
+            HashTableNode* node = tls_free_list->head;
+            tls_free_list->head = node->free_next;
+            --tls_free_list->count;
             node->free_next = _global_free_head;
             _global_free_head = node;
         }
@@ -500,7 +559,8 @@ public:
         // 5. TLC版本里, 挂载 free_list 操作是 thread-local + locked global 串行的, 所以不需要 bucket lock
         if (node_to_recycle) {
             push_node_to_tls(node_to_recycle);
-            if (tls_free_list.count > TLS_FREE_LIST_MAX) {
+            TLSFreeList* tls_free_list = get_tls_free_list();
+            if (tls_free_list && tls_free_list->count > TLS_FREE_LIST_MAX) {
                 flush_tls_to_global();
             }
             return true;
