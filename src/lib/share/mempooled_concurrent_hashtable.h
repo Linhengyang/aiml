@@ -151,7 +151,7 @@ private:
     
     // static thread_local TLSFreeList* tls_free_list;
 
-    // 新方案: 维护一个 tls free lists注册表: tls registry, 它自身是 static thread_local 的, 也就是说同类型哈希表不同实例, 在同一线程下共享这个registry
+    // 新方案: 维护一个 tls free lists注册表: tls registry, 它自身是 static thread_local 的, 也就是说同类型哈希表不同实例, 在同一线程下共享这个registry. thread_local天生线程安全
     // 但是, 注册表内部维护了所有该同类型哈希表 不同实例的指针 <-> tls free_list 的对应关系. 从而每个实例在要使用 tls free_list 时, 先根据自身指针this从注册表中找到自己的tls free_list再使用
     struct TLSRegistry {
         static constexpr size_t MAX_INSTANCES = 4; // 一个线程最多同时操作4个同类哈希表实例
@@ -428,7 +428,7 @@ public:
             }
             
             _table[index] = new_node;
-            _size.fetch_add(1);
+            _size.fetch_add(1, std::memory_order_relaxed);
         }
 
         _lock_table_from_rehash_clear_.unlock();
@@ -446,9 +446,7 @@ public:
     template <typename K, typename FUNC>
     bool atomic_upsert(K&& key, FUNC&& updater, const TYPE_V& default_val) {
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
-
         if (_capacity == 0 || !_table) return false;
-
         size_t index = hash(key) % _capacity;
         {
             std::unique_lock<std::shared_mutex> _lock_bucket_for_insert_(bucket_lock(index));
@@ -489,12 +487,11 @@ public:
 
                 new_node = new(raw_mem) HashTableNode{std::forward<K>(key), default_val, _table[index]};
             }
-
             std::forward<FUNC>(updater)(new_node->value);
             _table[index] = new_node;
-            _size.fetch_add(1);
+            _size.fetch_add(1, std::memory_order_relaxed);
         }
-        
+
         _lock_table_from_rehash_clear_.unlock();
         if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed))
         {
@@ -539,7 +536,7 @@ public:
                     // 4. 清理指针(防御性编程)
                     head->next = nullptr;
                     head->free_next = nullptr;
-                    _size.fetch_sub(1);
+                    _size.fetch_sub(1, std::memory_order_relaxed);
 
                     // 应该把待摘除node 即 head 挂载到 空闲列表.
                     // 如果是单线程版本, 在这里就可以执行这个挂载操作了(如下). 执行完就可以return true跳出循环.
@@ -893,7 +890,7 @@ public:
             // node数量自加1. 原子线程安全
             // std::memory_order_relaxed 就可以保证原子安全. 但未来若需要在某些线程里仅靠_size来判断是否有数据写入, 这个模式不安全.
             // 这个模式下, 其他线程不一定能看到 自增后的 _size. 可以用 _size.fetch_add(1) 默认模式, 最严格, 保证全局一致.
-            _size.fetch_add(1);
+            _size.fetch_add(1, std::memory_order_relaxed);
 
         }
 
@@ -1043,7 +1040,7 @@ public:
             //     new_node->gc_next = old; // 头插 gc 链
             // } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
 
-            _size.fetch_add(1);
+            _size.fetch_add(1, std::memory_order_relaxed);
         }
         
         _lock_table_from_rehash_clear_.unlock();
@@ -1108,7 +1105,7 @@ public:
                     head->next = nullptr;
 
                     // node数量自减1. 原子线程安全
-                    _size.fetch_sub(1);
+                    _size.fetch_sub(1, std::memory_order_relaxed);
 
                     // 把 head 挂到 free_list 上, 然后析构 head. 这样该地址可被 insert/upsert 等插入方法复用
                     // _free_nodes_head 是全局变量, 需要 CAS(compare and swap) 操作以保证 head 挂入时安全
