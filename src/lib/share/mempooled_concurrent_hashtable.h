@@ -135,17 +135,33 @@ private:
     HashTableNode* _global_free_head = nullptr;
     std::mutex _global_free_mutex;
 
-    // TLS free_list(侵入式链表)
+    // 跟着哈希表实例走的全局原子 代际信号量. 只在 clear/destroy 操作中自增, 用处是在线程之间同步是否发生 clear/destroy 操作: 线程在从 tls free_list 取存node前, 都要检查代际generation是否一致
+    std::atomic<uint64_t> _generation{0};
+
+    // TLS free_list(侵入式链表):存储了tls free_list的链表头, tls链表的size, 以及tls链表的代际(每clear/destroy一次, 代际+1)
     struct TLSFreeList {
         HashTableNode* head  = nullptr;
         size_t count = 0;
+        uint64_t generation = 0;
     };
-    thread_local TLSFreeList tls_free_list; // 具备双重属性: 既是 tls free_list的链表头, 又存储了链表的size
+    static thread_local TLSFreeList tls_free_list; // thread_local 只能用于：命名空间作用域变量、类的 static 成员、函数内 static 局部变量
+    // 但是, 同一模板参数的所有哈希表实例共享同一个 TLS free list. TO BE FIX
 
     // TLS free_list 的操作: 纯单线程, 零锁零原子
 
-    // 从 TLS free_list 中拿取 node: tls_free_list贡献复用地址, 用于 insert/atomic_upsert
+    // 从 TLS free_list 中得到 node: tls_free_list 贡献复用地址, 用于 insert/atomic_upsert
     inline HashTableNode* get_node_from_tls() {
+        // 检查 本地 tls free_list代际是否等于 _generation
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配，说明表在 insert/upsert 释放锁后, 被 clear/destroy
+            // 必须丢弃 TLS 中缓存的所有旧节点(因为arena可能要/已 reset, 不能复用了, 随着 arena reset即可), 然后同步 generation
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return nullptr;
+        }
+        // 代际匹配
         if (tls_free_list.count == 0) return nullptr; // 当count为0时, 返回nullptr
         HashTableNode* node = tls_free_list.head; // tls free_list 的链表头
         tls_free_list.head = node->free_next; // 更新 tls_free_list 的链表头和count
@@ -153,29 +169,62 @@ private:
         return node;
     }
 
-    // TLS free_list 回收 node: tls_free_list回收可复用地址, 用于 pop
+    // TLS free_list 回收 node: tls_free_list 回收可复用地址, 用于 pop
     inline void push_node_to_tls(HashTableNode* node) {
+        // 检查 本地 tls free_list代际是否等于 _generation
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配, 说明在 pop 释放锁后，有人执行了 clear/destroy
+            // 此时 node 指向的内存可能已被 arena reset，不能放入 free_list
+            // 直接丢弃该 node，并丢弃 TLS 中缓存的所有旧节点, 然后同步 generation
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return; // 丢弃 node
+        }
+
         node->free_next = tls_free_list.head;
         tls_free_list.head = node;
         ++tls_free_list.count;
     }
-
 
     // global free_list 与 TLS free_list 之间的交互操作: 需要给 global free_list 上锁
 
     // TLS free_list空了, 从 global free_list 批量refill: 锁住 global free_list, 从其 push 最多 FREE_LIST_BATCH 个node 到 tls free_list
     void refill_tls_from_global() {
         std::lock_guard<std::mutex> lock(_global_free_mutex);
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配, 说明有人执行了 clear/destroy. 这二操作会清空 global free_list
+            // 放弃 refill tls free_list, 且清空并同步它
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return; 
+        }
+
         for (size_t i = 0; i < FREE_LIST_BATCH && _global_free_head; ++i) {
             HashTableNode* node = _global_free_head;
             _global_free_head = node->free_next;
-            push_node_to_tls(node);
+            node->free_next = tls_free_list.head;
+            tls_free_list.head = node;
+            ++tls_free_list.count;
         }
     }
 
     // TLS free_list满了, 向 global free_list 批量flush: 锁住 global free_list, 其从 tls get 最多 FREE_LIST_BATCH 个node
     void flush_tls_to_global() {
         std::lock_guard<std::mutex> lock(_global_free_mutex);
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配, 说明有人执行了 clear/destroy. 这二操作会清空 global free_list
+            // 放弃 flush to global free_list. 清空 tls free_list 并同步它
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return; 
+        }
+
         for (size_t i = 0; i < FREE_LIST_BATCH && tls_free_list.count > 0; ++i) {
             HashTableNode* node = tls_free_list.head;
             tls_free_list.head = node->free_next;
@@ -194,10 +243,8 @@ private:
     }
 
     mutable std::shared_mutex _table_mutex; 
-
     mutable std::vector<padded_mutex> _stripes;
     size_t _stripe_mask;
-
     inline std::shared_mutex& bucket_lock(size_t bucket_index) noexcept {
         return _stripes[bucket_index & _stripe_mask].lock;
     }
@@ -291,7 +338,7 @@ public:
             }
             HashTableNode* new_node = nullptr;
             
-            // 复用 空闲链表 里的地址
+            // 优先复用 空闲链表 里的地址
             // 单线程版本
             /*
             new_node = _free_nodes_head; // 获取第一个空闲地址
@@ -323,7 +370,6 @@ public:
             
             _table[index] = new_node;
             _size.fetch_add(1);
-
         }
 
         _lock_table_from_rehash_clear_.unlock();
@@ -451,7 +497,7 @@ public:
             }
         }
 
-        // 5. TLC版本里, 挂载 free_list 操作是 thread-local + locked global串行的, 所以不需要 bucket lock
+        // 5. TLC版本里, 挂载 free_list 操作是 thread-local + locked global 串行的, 所以不需要 bucket lock
         if (node_to_recycle) {
             push_node_to_tls(node_to_recycle);
             if (tls_free_list.count > TLS_FREE_LIST_MAX) {
@@ -477,9 +523,14 @@ public:
             _table[index] = nullptr;
         }
 
-        flush_tls_to_global();
-        _global_free_head = nullptr; // 全表clear时置空 tls和global free_list, 等待 reset 内存池全表复用而不是复用空闲链表上的地址
-        // 疑惑: 如何保证所有线程的 tls free_list 都清空?
+        // 全表clear时置空 global free_list, 等待 reset 内存池全表复用而不是复用空闲链表上的地址
+        {
+            std::lock_guard<std::mutex> lock(_global_free_mutex);
+            _global_free_head = nullptr; 
+        }
+
+        // 增加 generation，使所有线程的 TLS 缓存 懒更新失效(线程要用的时候检查generation发现失效)
+        _generation.fetch_add(1, std::memory_order_release);
         _size.store(0, std::memory_order_relaxed);
 
     }
@@ -498,11 +549,13 @@ public:
         }
         
         free_table_ptrs();
-
+        {
+            std::lock_guard<std::mutex> lock(_global_free_mutex);
+            _global_free_head = nullptr;
+        }
         _capacity = 0;
         _resize_threshold.store(0, std::memory_order_relaxed);
-        flush_tls_to_global();
-        _global_free_head = nullptr;
+        _generation.fetch_add(1, std::memory_order_release);
         _size.store(0, std::memory_order_relaxed);
     }
 
@@ -1071,11 +1124,14 @@ public:
             _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
 
-        _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是复用空闲链表上的地址
+        _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用. 不会复用空闲链表上的空壳node地址.
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
         _size.store(0, std::memory_order_relaxed);
 
     }
 
+    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0 即完全破坏表结构
+    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
         // 析构全表时, 析构过程要全程 独占表锁
         std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
@@ -1099,10 +1155,11 @@ public:
         // 本哈希表不再可复用. 但内存尚未释放, 等待内存池操作
         free_table_ptrs();
 
+        _size.store(0, std::memory_order_relaxed);
         _capacity = 0;
         _resize_threshold.store(0, std::memory_order_relaxed);
         _free_nodes_head.store(nullptr, std::memory_order_relaxed);
-        _size.store(0, std::memory_order_relaxed);
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
     }
 
     size_t size() const {
