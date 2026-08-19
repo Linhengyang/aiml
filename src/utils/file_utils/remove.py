@@ -8,11 +8,10 @@ def clean_folder(folder_path: str, method:t.Literal['all', 'only_file', 'only_fo
     """
     按方法清空指定文件夹中的所有文件
     Args:
-        folder_path (str): 要清空的文件夹的路径
-        method:
-            all
-            only_file
-            only_folder
+        folder_path（str）: 要清空的文件夹的路径
+        method（literal）:
+            all、only_file、only_folder
+        keep（bool）: 是否要保存 folder_path
     """
     # 检查路径是否存在 / 检查路径是否确实是一个目录
     assert os.path.exists(folder_path), f"error: folder '{folder_path}' not exists"

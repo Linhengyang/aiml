@@ -9,6 +9,7 @@
 #include "mempooled_hashtable.h"
 #include "memory_pool.h"
 
+// 全局使用的基本函数
 
 // 拼合两个 u32 token 成为一个 u64 的方法
 uint64_t combine_2tokens(const uint32_t left_token, const uint32_t right_token) {
@@ -21,6 +22,7 @@ std::pair<uint32_t, uint32_t> split_2tokens(const uint64_t combined_tokens) {
     return {static_cast<uint32_t>(combined_tokens >> 32), static_cast<uint32_t>(combined_tokens & 0xFFFFFFFFULL)};
 }
 
+// 主要使用的重要数据结构
 
 class Word {
 
@@ -79,7 +81,7 @@ public:
     */
     class pair_iterator {
     private:
-        const Word* _word; // 这种写法代表 word是一个指向 const Word的指针: 不能通过word来改变其指向的数据, 只能通过word来读取数据.
+        const Word* _word; // 这种写法代表 _word 是一个指向 const Word的指针: 不能通过 _word 来改变其指向的数据, 只能通过 _word 来读取数据.
         size_t _index;
     public:
         pair_iterator(const Word* word, size_t index) // 这种写法代表 word是一个指向 const Word的指针: 不能通过word来改变其指向的数据, 只能通过word来读取数据.
@@ -133,12 +135,12 @@ public:
 };
 
 
-// 定义 不可重复的集合容器(set)
+// 定义 不可重复的集合容器(set) 作为 unique_words & freqs 的 index 位置 pos 的集合体 positions
 using position_set = std::unordered_set<size_t>;
 
 
 
-// 定义 优先队列的节点(node)
+// 定义 优先队列(最大堆)的节点(node)
 struct merge_node {
     uint64_t token_pair;
     uint64_t p_cnts;
@@ -153,7 +155,7 @@ struct merge_node {
 };
 
 
-// 定义 严格弱序优先级函数(compare): 当 b 优先级更高时, 返回 True
+// 定义 严格弱序优先级函数(compare): 需满足当 b 优先级更高时, 返回 True. 堆顶为优先级最高.
 // 由于此优先队列是大顶堆(p_cnts大者靠顶), 所以 b 优先级更高 <--> a.p_cnts < b.p_cnts
 struct node_comparator {
     bool operator()(const merge_node& a, const merge_node& b) {
@@ -181,11 +183,16 @@ struct hasher {
 using hashmap = pooled_hashtable<uint64_t, position_set, mempool, hasher>;
 
 
+
+
+
+// 主要的 Cython<->C++ 桥梁函数, 以及 C++ 核心函数
+
 extern "C" {
 
 // unique_words & freqs --window2_token遍历--> pair_counts(hashmap{u64: u64}), where_to_update(hashmap{u64: unordered_set})
 // 移动语义遍历where_to_update: pair & move(positions) + pair_counts --> C++ Merge构造 --heapify--> max_heap(8-ary heap of Merge), 置空where_to_update
-// 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, pool, num_merges)
+// 调用 nonpar_bpe_loop_core: merges(vector of (u64, u64)) = nonpar_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, where_to_update, num_merges)
 // 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 并返回
 std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
     const int num_merges,
@@ -208,9 +215,10 @@ std::vector<std::pair<uint64_t, uint64_t>> nonpar_bpe_loop_core(
 );
 
 
-// 与非并行版大致相同, 只是从 unique_words & freqs 生产 pair_counts & where_to_update 时并行. 这里方法1: 需要 pair_counts & where_to_update 都线程安全(从而必然引入线程安全的内存池pool)
-// 方法2: 对 unique_words & freqs 执行chunk分块，每个线程计算一个大块，并实现TLS的无锁 pair_counts & where_to_update. 最后再加总少数个 pair_counts & where_to_update.
-// 调用 par_bpe_loop_core: merges(vector of (u64, u64)) = par_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, pool, num_merges)
+// 与非并行版大致相同, 只是从 unique_words & freqs 生产 pair_counts & where_to_update 时并行. 这里并行方法可以是
+// 方法1: 需要 pair_counts & where_to_update 都线程安全(从而必然引入线程安全的内存池pool), 遍历 unique_words & freqs时, 跨线程并发修改 pair_counts & where_to_update --> 不采纳
+// 方法2: 对 unique_words & freqs 执行chunk分块，每个线程计算一个大块，并实现TLS的无锁 pair_counts & where_to_update. 最后再 聚合加总 少数个 pair_counts & where_to_update.
+// 调用 par_bpe_loop_core: merges(vector of (u64, u64)) = par_bpe_loop_core(max_heap, unique_words, freqs(const), pair_counts, where_to_update, num_merges)
 // 转换 merges(vector of (u64, u64)) --> merges(vector of ((u32, u32), u64)), 返回
 // ---> 考虑到并行版BPE LOOP也完全是TLS的，所以整个并行版BPE 也完全不需要引入线程安全的类. 所以 where_to_update 完全不需要销毁-新建. 传给 loop_core 复用即可
 std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_par_bpe(
@@ -222,9 +230,11 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_par_bpe(
 );
 
 
-// 与非并行版大致相同, 只是对每个pos代表的word执行merge时，可以并行. 由此需要一个线程安全的线性容器changes(或者是用安全的方式收集local_changes). 而local_changes的产出完全是tls的, 不涉及线程共享
-// where_to_update不需要并发安全, 不管其基于的内存池是否线性安全, 其本身不涉及线程共享
-// ---> 综上, 即使是并行版BPE LOOP, 其并行计算也完全是 tls 的, 不需要引入线程安全
+// 与非并行版大致相同, 只是对每个pos代表的word执行merge时，可以多个pos并行产出 local_changes per pos(说明 local_changes 完全是 TLS的, 不跨线程). 这里并行方法可以是
+// 方法1: 一个线程安全的线性容器changes, 跨线程并发修改之, 以收集 各线程产出的 local_changes(或者是用安全的方式收集local_changes)
+// 方法2: 每个线程 TLS的 local_changes 计算完毕后, 聚合合并 多个 local_changes
+// 不管如何, where_to_update不需要并发安全, 其本身不涉及线程共享(因为其是线性扫描已经收集完全的线性容器changes, 逐kv节点插入得到的. 然后再遍历移动其节点逐个插入到max_heap. 全程没有并发)
+// ---> 综上, 即使是并行版BPE LOOP, 其并行计算也完全可以是 tls 的, 不需要引入线程安全
 std::vector<std::pair<uint64_t, uint64_t>> par_bpe_loop_core(
     max_octanory_heap& max_heap,
     std::vector<Word>& unique_words,

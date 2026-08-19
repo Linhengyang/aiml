@@ -31,6 +31,7 @@ private:
     // HASH_FUNC 可以用默认 std::hash<TYPE_K>, 这样初始化时不输入额外hasher, 也可以在初始化时输入额外hasher以支持自定义
     using hash_table = selected_hash_table<TYPE_K, HASH_FUNC, threadsafe, TYPE_MEMPOOL>;
 
+    // counter 与 hashtable 的关系是  counter is-a hashtable
     hash_table _hash_table;
 
 public:
@@ -98,13 +99,16 @@ public:
         return _hash_table.size();
     }
 
-    // 暴露哈希表的迭代器以支持迭代输出计数的结果
-    auto begin() { return _hash_table.begin(); }
-    auto end() { return _hash_table.end(); }
-
-    // 暴露哈希表的只读迭代器以支持迭代输出计数的结果
-    auto cbegin() const { return _hash_table.cbegin(); }
-    auto cend() const { return _hash_table.cend(); }
+    // 封装哈希表的 (强一致性)只读迭代range, 支持迭代输出计数的结果
+    auto iterate() const {
+        // constexpr 在编译器内便计算, 对于不满足条件的分支, 编译器会直接丢弃而不会进行语法检查或实例化
+        if constexpr (threadsafe) {
+            return _hash_table.const_iter_map_locked_view();
+        }
+        else {
+            return _hash_table.const_iter_range();
+        }
+    }
 
 }; // end of counter definition
 

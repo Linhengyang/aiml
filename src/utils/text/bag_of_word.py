@@ -5,7 +5,7 @@ import regex as re
 import pyarrow as pa
 import pyarrow.parquet as pq
 from concurrent.futures import ProcessPoolExecutor
-from ext.bpeboost import bow_chunk_count_bytes
+from ext.bpeboost import bytes_chunk_count
 from ..parquet.sharding import shard_pq_to_ds
 from ...common.stream_control import stream_parallel_process_with_pending
 
@@ -21,16 +21,16 @@ from ...common.stream_control import stream_parallel_process_with_pending
 
 # 一: shard只作分片, 不作任何其他操作. 预切分和utf-8编码都 放在拿到batch后、counter计数前.
 #   原因: parquet存储超多个独立字符串对象word造成压缩率下降, 而拿到batch后一股脑切分+编码+计数, 紧凑高效，IO效率高，原始数据只读取一次.
-# 二：无论输出格式是binary/string/integer，在计数前都将word作utf-8编码成bytes, 使用bytes作为key计数.
-#   原因: bytes哈希更快, 只需要编码一次，在python侧bytes更紧凑; string哈希慢，且每次计数都要处理编码后再哈希，在python侧str对象开销更大
-#   建议把utf-8编码(string-->bytes)操作放在cython/C++侧, 这样比python侧编码更快更紧凑.
+# 二：无论输出格式是binary/string/integer，在计数前都得 将word作utf-8编码 成bytes, 使用bytes作为key计数.
+#   原因: bytes哈希更快, 只需要编码一次，在python侧bytes更紧凑; string哈希慢，且每次计数都要编码处理后再哈希，在python侧str对象开销更大
+#   建议把utf-8编码(string-->bytes)操作放在cython/C++侧, 这样比在python侧编码更快更紧凑.
 #   计数统一使用bytes类型, 在python侧拿到global_counter之后落盘前, 根据输出类型统一转换成目标类型（整数/bytes/字符）
 
 def bow_worker(pq_fpath, text_colname: str, split_pattern: str):
     '''
-    执行BoW的进程: 分发得到 parquet 文件地址, 遍历 batch, 对每一个 batch 执行 utf-8 encode / split / count, 累积更新至 local_counter
+    执行BoW的进程: 分发得到 parquet 文件地址, 遍历 batches, 对每一个 batch 执行 utf-8 encode / split / count, 累积更新至 local_counter
     编码 预切分 计数, naive做法是在 python层预切分成list of string, 在Cython层逐一编码 然后计数. 比较低效
-    最高效做法是: 在python层一次性完成编码成bytes, 然后将bytes传入Cython，配合传入的compiled_pattern作预切分 + 计数
+    最高效做法是: 在python层一次性完成编码成bytes, 然后将bytes传入Cython, 配合传入的compiled_pattern作预切分 + 计数
     '''
     local_counter = Counter()
     pf = pq.ParquetFile(pq_fpath)
@@ -43,11 +43,11 @@ def bow_worker(pq_fpath, text_colname: str, split_pattern: str):
         if not batch_text:
             continue
         # BoW的本质是预切分+计数. 由于计数的时候需要对字符串作哈希计算, 所以中间加一道字节编码，能有效加快计数.
-        # 不过编码可以放在python层一次完成, 然后用同样编码完成的正则表达式去切分字节序列而不是字符串序列
+        # 不过编码可以放在python层一次完成, 然后用同样编码完成的正则表达式去 切分 字节序列 而不是 字符串序列
         text_bytes = '\n'.join(batch_text).encode('utf-8')
         # accelerate by Cython/C++: 
         # input py-obj: text bytes + compiled_pattern
-        batch_counts = bow_chunk_count_bytes(text_bytes, compiled_regex) # 编码->切分+计数-> dict of {bytes: uint64} 
+        batch_counts = bytes_chunk_count(text_bytes, compiled_regex) # 编码->切分+计数-> dict of {bytes: uint64} 
         # output py-obj: dict of {bytes: uint64}
 
         local_counter.update(batch_counts)
@@ -74,14 +74,15 @@ def get_BoW(
     :bow_save_colnames: 如果保存BoW为parquet, 那么 save_colnames 是parquet文件的列名
 
     returns: 生成corpora语料的词袋BoW
-        save_path is None, 那么分别以list形式返回 BoW (words, freqs); else via save_path, 那么保存BoW为parquet, 一列words & 一列freqs
-        word_format指定了word的格式: 字符串 / 二进制字节 / u32序列
+        when bow_save_path is None, 那么分别以list形式返回 BoW as (words, freqs); 
+        else via bow_save_path, 那么保存 BoW 为parquet, 一列words & 一列freqs.
+        word_format指定了word的格式: string->字符串 / binary->二进制字节 / u32list->u32序列
     '''
     if isinstance(corpora, str):
         # 若 column not None 且 corpora 作为路径 --> 组装成list
         if column is not None and os.path.isfile(corpora) and os.path.exists(corpora) and corpora.endswith('.parquet'):
             corpora = [corpora]
-        # 若 column is None, corpora 作为语料文本 --> 保存成parquet文件
+        # 若 column is None,或者是 corpora 不作为有效parquet文件存在, 则 corpora 作为语料文本 --> 保存成parquet文件
         else:
             chunks_str = re.findall(split_pattern, corpora) # 直接把语料切分为 list of tokens(string)
             BoW = Counter(chunks_str)
@@ -111,7 +112,7 @@ def get_BoW(
             pq.write_table(table, bow_save_path, compression = compression) # 写入 BoW 结果
             return
 
-    # 0 对 corpora 执行 sharding 分片, 直接存储在 BoW 所在文件夹
+    # 0 对 corpora 执行 sharding 分片, 直接存储在 目标结果BoW 所在文件夹. 当下此函数的处理是不删除这些shards的.
     shards_dir = os.path.dirname(bow_save_path)
     shard_pq_to_ds(corpora, shards_dir, shard_size_mb = 2048, compression = compression, write_metadata = False)
     shards = [ os.path.join(shards_dir, pf) for pf in os.listdir(shards_dir) if pf.endswith('.parquet')]

@@ -13,7 +13,7 @@ import typing as t
 
 # 但列表生成式没有背压设计, 即 for item in data_gen 会在主线程中, 无视下游的处理消费能力, 一直消费data_gen
 # 若下游的处理消费能力跟不上, 那么就会使得 item 大量积压在内存中, 造成内存爆炸. 即 同步for-loop不作任何协调暂停
-# 真正的背压设计只存在在 asyncio, RxPy, Streams 和 kafka-like queue. 这里提供一个可以pending消费的同步流式处理
+# 真正的背压设计只存在在 asyncio, RxPy, Streams 和 kafka-like queue. 这里提供一个可以pending for-loop消费的同步流式处理
 
 
 def stream_parallel_process_with_pending(

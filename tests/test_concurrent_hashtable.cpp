@@ -3,6 +3,9 @@
 #include <iostream>
 #include <cassert>
 #include <thread>
+#include <string>
+#include <cassert>
+#include <chrono>
 
 using namespace std;
 
@@ -14,7 +17,7 @@ struct hasher {
 };
 
 
-void test_concurrent_hash_map() {
+void test1_concurrent_hash_map() {
 
     // 创建 内存池单例: 并发哈希表必须要使用 线程安全的内存池
     size_t block_size = 40LL * 172470436LL;
@@ -125,7 +128,95 @@ void test_concurrent_hash_map() {
     cout << "✅ ConcurrentHashMap test passed!" << endl;
 }
 
+
+
+void test2_concurrent_hash_map() {
+    // 创建 内存池单例: 并发哈希表必须要使用 线程安全的内存池
+    size_t block_size = 40LL * 172470436LL;
+    threadsafe_singleton_mempool& pool = threadsafe_singleton_mempool::get(block_size, 64);
+
+    // 创建 哈希器
+    // hasher my_hasher;
+
+    using MapType = pooled_concurrent_hashtable<int, std::string, threadsafe_singleton_mempool>;
+    MapType map(1024, &pool, 64);
+
+    std::cout << "=== Test 1: Basic Insert & Get ===" << std::endl;
+    for (int i = 0; i < 1000; ++i) {
+        map.insert(i, "value_" + std::to_string(i));
+    }
+    assert(map.size() == 1000);
+
+    std::string val;
+    assert(map.get(500, val) && val == "value_500");
+    std::cout << "Basic test passed. Size: " << map.size() << std::endl;
+
+    std::cout << "\n=== Test 2: Concurrent Insert & Pop ===" << std::endl;
+    map.clear();
+    pool.reset();
+
+    const int NUM_THREADS = 8;
+    const int OPS_PER_THREAD = 50000;
+    std::vector<std::thread> threads;
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (int t = 0; t < NUM_THREADS; ++t) {
+        threads.emplace_back([&, t]() {
+            for (int i = 0; i < OPS_PER_THREAD; ++i) {
+                int key = t * OPS_PER_THREAD + i;
+                map.insert(key, "thread_" + std::to_string(t));
+            }
+            for (int i = 0; i < OPS_PER_THREAD; ++i) {
+                int key = t * OPS_PER_THREAD + i;
+                std::string out;
+                map.pop(key, out);
+            }
+        });
+    }
+
+    for (auto& th : threads) th.join();
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Concurrent Insert/Pop finished. Final Size: " << map.size() 
+              << " (Expected 0). Time: " 
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
+    assert(map.size() == 0);
+
+    std::cout << "\n=== Test 3: Concurrent Clear (Generation Stress Test) ===" << std::endl;
+    std::atomic<bool> stop_flag{false};
+
+    // 线程 A: 疯狂 insert 和 pop
+    std::thread worker([&]() {
+        int i = 0;
+        while (!stop_flag.load(std::memory_order_relaxed)) {
+            map.insert(i, "worker_val");
+            std::string out;
+            map.pop(i, out);
+            i++;
+        }
+    });
+
+    // 线程 B: 疯狂 clear 和 reset arena (模拟极端并发破坏)
+    std::thread clearer([&]() {
+        for (int i = 0; i < 100; ++i) {
+            map.clear();
+            pool.reset(); // 模拟外部 reset arena
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+        stop_flag.store(true, std::memory_order_relaxed);
+    });
+
+    worker.join();
+    clearer.join();
+
+    std::cout << "Stress test with clear/reset passed without crashing!" << std::endl;
+
+    map.destroy();
+    std::cout << "\nAll tests passed successfully!" << std::endl;
+}
+
 int main() {
-    test_concurrent_hash_map();
+    test2_concurrent_hash_map();
     return 0;
 }

@@ -27,6 +27,7 @@
 #include <cstring>
 #include <new>
 #include <stdexcept>
+#include <array>
 
 constexpr size_t next_pow2(size_t x) {
     if (x <= 1) return 1;
@@ -68,6 +69,13 @@ struct padded_mutex {
 // 线程A在 持有锁期间对共享数据的所有 写操作, 在它 unlock 之后, 线程B lock同一把锁时, 一定拿到线程A在持锁期间的所有修改 --> 跨线程的内存同步
 // ----> synchronize-with 的语义. 注意只在 临界区内部有同步关系, 所以要避免锁外数据写入操作
 
+
+
+
+
+
+
+
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC = std::hash<TYPE_K>>
 class pooled_concurrent_hashtable {
 
@@ -78,16 +86,17 @@ private:
         TYPE_V value;
         HashTableNode* next;
         HashTableNode* free_next = nullptr;
-        // 拷贝构造
-        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
-        // 拷贝赋值
+        // 禁止赋值(拷贝or移动)
         HashTableNode& operator=(const HashTableNode& other) = delete;
-        // 移动构造
+        HashTableNode& operator=(HashTableNode&& other) = delete;
+
+        // 业务(普通)构造函数
+        // 拷贝 key & value 资源 构造node
+        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+        // 移动 key & value 资源 构造node
         HashTableNode(TYPE_K&& k, TYPE_V&& v, HashTableNode* ptr): key(std::move(k)), value(std::move(v)), next(ptr) {}
         // 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形需要重载: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
         HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
-        // 移动赋值
-        HashTableNode& operator=(HashTableNode&& other) = delete;
     };
     
     void destroy_node(HashTableNode* node) {
@@ -96,6 +105,523 @@ private:
         }
     }
 
+
+    size_t _capacity;
+    const float _max_load_factor = 0.75f;
+    std::atomic<size_t> _size{0};
+    HashTableNode** _table = nullptr;
+    
+    void alloc_table_ptrs(size_t n) {
+        if (n == 0) {
+            _table = nullptr;
+            return;
+        }
+        _table = static_cast<HashTableNode**>(std::calloc(n, sizeof(HashTableNode*)));
+        if (!_table) throw std::bad_alloc();
+    }
+
+    void free_table_ptrs() noexcept {
+        std::free(_table);
+        _table = nullptr;
+    }
+
+    // 空闲 free 链表: 链起 析构后的 poped nodes. 采用 TLC 设计: tls free_list + lock on global free_list
+    // 对于 insert node, 线程优先从tls free_list中无锁取地址, 如果取不到, 从 global free_list refill 地址再取, 如果还是失败, 从 arena 分配
+    // 对于 pop node, 线程优先把地址回收到 tls free_list, 如果塞满了, flush 到 global free_list
+
+    static constexpr size_t TLS_FREE_LIST_MAX = 128;
+    static constexpr size_t FREE_LIST_BATCH   = 32;
+
+    // 全局 free_list(带锁)
+    HashTableNode* _global_free_head = nullptr;
+    std::mutex _global_free_mutex;
+
+    // 跟着哈希表实例走的全局原子 代际信号量. 只在 clear/destroy 操作中自增, 用处是在线程之间同步是否发生 clear/destroy 操作: 线程在从 tls free_list 取存node前, 都要检查代际generation是否一致
+    std::atomic<uint64_t> _generation{0};
+
+    // TLS free_list(侵入式链表):存储了tls free_list的链表头, tls链表的size, 以及tls链表的代际(每clear/destroy一次, 代际+1)
+    struct TLSFreeList {
+        HashTableNode* head  = nullptr;
+        size_t count = 0;
+        uint64_t generation = 0;
+    };
+
+    // 废弃方案: 直接将 tls free_list 从 thread_local关键字定义. 原因: thread_local 只能用于：命名空间作用域变量、类的 static 成员、函数内 static 局部变量
+    // 即 thread_local关键字的变量, 跟着线程走而不是对象, 所以必须要static(进入静态存储期)这样一来, 所有 同类型哈希表的不同实例, 在同一个线程处理时, 将共用同一个 tls free_list
+    // 其实仔细分析一下, 由于此哈希表是基于 arena mempool 的, 也就是说 tls free_list 都是arena上的地址 --> 只要不同实例在同一 arena 上, 似乎不同实例之间共同复用一个 tls free_list 也无所谓
+    
+    // static thread_local TLSFreeList* tls_free_list;
+
+    // 新方案: 维护一个 tls free lists注册表: tls registry, 它自身是 static thread_local 的, 也就是说同类型哈希表不同实例, 在同一线程下共享这个registry. thread_local天生线程安全
+    // 但是, 注册表内部维护了所有该同类型哈希表 不同实例的指针 <-> tls free_list 的对应关系. 从而每个实例在要使用 tls free_list 时, 先根据自身指针this从注册表中找到自己的tls free_list再使用
+    struct TLSRegistry {
+        static constexpr size_t MAX_INSTANCES = 4; // 一个线程最多同时操作4个同类哈希表实例
+        struct Entry { // 哈希表实例指针(不允许在这里通过指针改变哈希表) <-> tls free_list 的对应关系
+            const pooled_concurrent_hashtable* owner = nullptr;
+            TLSFreeList free_list;
+        };
+        std::array<Entry, MAX_INSTANCES> entries{};
+        size_t count = 0;
+
+        TLSFreeList* get_or_create_tls_free_list(pooled_concurrent_hashtable* owner) {
+            // 线性查找，N很小，速度极快
+            for (size_t i = 0; i < count; ++i) {
+                if (entries[i].owner == owner) return &entries[i].free_list;
+            }
+            // 查找完毕没找到, 但仍然有空槽位, 为此哈希表实例 创建一个 tls free_list
+            if (count < MAX_INSTANCES) {
+                entries[count].owner = owner;
+                entries[count].free_list = {nullptr, 0, 0};
+                return &entries[count++].free_list;
+            }
+            return nullptr; // Fallback: 超过限制，降级为不使用 TLS
+            // 此时 get node from tls/refill tls / flush tls 这三个操作都放弃; push node to tls改成直接push to global free_list
+        }
+    };
+
+    inline static thread_local TLSRegistry tls_registry;
+
+    // 根据 本哈希表实例的指针, 本线程可以根据此函数, 找到 本线程local 的 tls free_list
+    inline TLSFreeList* get_tls_free_list() {
+        return tls_registry.get_or_create_tls_free_list(this);
+    }
+
+    // TLS free_list 的操作: 纯单线程, 零锁零原子
+
+    // 从 TLS free_list 中得到 node: tls_free_list 贡献复用地址, 用于 insert/atomic_upsert
+    inline HashTableNode* get_node_from_tls() {
+        // 尝试找到 本实例 本线程local 的 tls free_list
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        // 如果失败, get node失败, 返回nullptr
+        if (!tls_free_list) return nullptr;
+
+        // 检查 本地 tls free_list代际是否匹配 _generation
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配，说明表在 insert/upsert 释放锁后, 被 clear/destroy
+            // 必须丢弃 TLS 中缓存的所有旧节点(因为arena可能要/已 reset, 不能复用了, 随着 arena reset即可), 然后同步 generation
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return nullptr;
+        }
+        // 代际匹配
+        if (tls_free_list->count == 0) return nullptr; // 当count为0时, 返回nullptr
+        HashTableNode* node = tls_free_list->head; // tls free_list 的链表头
+        tls_free_list->head = node->free_next; // 更新 tls_free_list 的链表头和count
+        --tls_free_list->count;
+        return node;
+    }
+
+    // TLS free_list 回收 node: tls_free_list 回收可复用地址, 用于 pop
+    inline void push_node_to_tls(HashTableNode* node) {
+        // 尝试找到 本实例 本线程local 的 tls free_list
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        // 如果失败, 直接 push node 到 global free_list
+        if (!tls_free_list) {
+            // Fallback: 直接放入 global
+            std::lock_guard<std::mutex> lock(_global_free_mutex);
+            node->free_next = _global_free_head;
+            _global_free_head = node;
+            return;
+        }
+        // 检查 本地 tls free_list代际是否等于 _generation
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配, 说明在 pop 释放锁后，有人执行了 clear/destroy
+            // 此时 node 指向的内存可能已被 arena reset，不能放入 free_list
+            // 直接丢弃该 node，并丢弃 TLS 中缓存的所有旧节点, 然后同步 generation
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return; // 丢弃 node
+        }
+
+        node->free_next = tls_free_list->head;
+        tls_free_list->head = node;
+        ++tls_free_list->count;
+    }
+
+    // global free_list 与 TLS free_list 之间的交互操作: 需要给 global free_list 上锁
+
+    // TLS free_list空了, 从 global free_list 批量refill: 锁住 global free_list, 从其 push 最多 FREE_LIST_BATCH 个node 到 tls free_list
+    void refill_tls_from_global() {
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        if (!tls_free_list) return;
+
+        std::lock_guard<std::mutex> lock(_global_free_mutex);
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配, 说明有人执行了 clear/destroy. 这二操作会清空 global free_list
+            // 放弃 refill tls free_list, 且清空并同步它
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return; 
+        }
+
+        for (size_t i = 0; i < FREE_LIST_BATCH && _global_free_head; ++i) {
+            HashTableNode* node = _global_free_head;
+            _global_free_head = node->free_next;
+            node->free_next = tls_free_list->head;
+            tls_free_list->head = node;
+            ++tls_free_list->count;
+        }
+    }
+
+    // TLS free_list满了, 向 global free_list 批量flush: 锁住 global free_list, 其从 tls get 最多 FREE_LIST_BATCH 个node
+    void flush_tls_to_global() {
+        TLSFreeList* tls_free_list = get_tls_free_list();
+        if (!tls_free_list) return;
+
+        std::lock_guard<std::mutex> lock(_global_free_mutex);
+        uint64_t global_gen = _generation.load(std::memory_order_acquire);
+        if (tls_free_list->generation != global_gen) {
+            // 代际不匹配, 说明有人执行了 clear/destroy. 这二操作会清空 global free_list
+            // 放弃 flush to global free_list. 清空 tls free_list 并同步它
+            tls_free_list->head = nullptr;
+            tls_free_list->count = 0;
+            tls_free_list->generation = global_gen;
+            return; 
+        }
+
+        for (size_t i = 0; i < FREE_LIST_BATCH && tls_free_list->count > 0; ++i) {
+            HashTableNode* node = tls_free_list->head;
+            tls_free_list->head = node->free_next;
+            --tls_free_list->count;
+            node->free_next = _global_free_head;
+            _global_free_head = node;
+        }
+    }
+
+    TYPE_MEMPOOL* _pool;
+
+    HASH_FUNC _hasher;
+
+    size_t hash(const TYPE_K& key) const {
+        return _hasher(key);
+    }
+
+    mutable std::shared_mutex _table_mutex; 
+    mutable std::vector<padded_mutex> _stripes;
+    size_t _stripe_mask;
+    inline std::shared_mutex& bucket_lock(size_t bucket_index) noexcept {
+        return _stripes[bucket_index & _stripe_mask].lock;
+    }
+
+    std::atomic<size_t> _resize_threshold{0};
+
+    void rehash(size_t new_capacity) {
+        HashTableNode** _new_table = static_cast<HashTableNode**>(std::calloc(new_capacity, sizeof(HashTableNode*)));
+        if (!_new_table) throw std::bad_alloc();
+        size_t actual_node_count = 0;
+
+        for (size_t old_index = 0; old_index < _capacity; ++old_index) {
+
+            HashTableNode* curr = _table[old_index];
+            while (curr) {
+                HashTableNode* next = curr->next;
+                size_t new_index = hash(curr->key) % new_capacity;
+                curr->next = _new_table[new_index];
+                _new_table[new_index] = curr;
+                ++actual_node_count;
+                curr = next;
+            }
+        }
+
+        std::free(_table);
+        _table = _new_table;
+        _capacity = new_capacity;
+        _size.store(actual_node_count, std::memory_order_relaxed);
+        _resize_threshold.store(static_cast<size_t>(new_capacity * _max_load_factor), std::memory_order_relaxed); // 更新 下一次 rehash 的 size 阈值
+        // global free_list 和 tls free_list 都不需要变动
+    }
+
+
+public:
+
+    explicit pooled_concurrent_hashtable(const HASH_FUNC& hasher, size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
+        _hasher(hasher),
+        _capacity(capacity),
+        _pool(pool),
+        _stripe_mask(next_pow2(stripe_hint)-1),
+        _stripes(next_pow2(stripe_hint))
+    {
+        _resize_threshold.store(static_cast<size_t>(capacity * _max_load_factor), std::memory_order_relaxed);
+        alloc_table_ptrs(_capacity);
+    }
+
+    explicit pooled_concurrent_hashtable(size_t capacity, TYPE_MEMPOOL* pool, size_t stripe_hint = 4096):
+        _hasher(),
+        _capacity(capacity),
+        _pool(pool),
+        _stripe_mask(next_pow2(stripe_hint)-1),
+        _stripes(next_pow2(stripe_hint))
+    {
+        _resize_threshold.store(static_cast<size_t>(capacity * _max_load_factor), std::memory_order_relaxed);
+        alloc_table_ptrs(_capacity);
+    }
+
+    ~pooled_concurrent_hashtable() {
+        destroy();
+    }
+
+
+    bool get(const TYPE_K& key, TYPE_V& value) {
+        std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
+        if (_capacity == 0 || !_table) return false;
+        size_t index = hash(key) % _capacity;
+
+        std::shared_lock<std::shared_mutex> _lock_from_insert_(bucket_lock(index));
+
+        for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+            if (cur->key == key) {
+                value = cur->value;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    template <typename K, typename V>
+    bool insert(K&& key, V&& value) {
+        std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
+        if (_capacity == 0 || !_table) return false;
+        size_t index = hash(key) % _capacity;
+        {
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_insert_(bucket_lock(index));
+            for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+                if (cur->key == key) {
+                    cur->value = std::forward<V>(value);
+                    return true;
+                }
+            }
+            HashTableNode* new_node = nullptr;
+            
+            // 优先复用 空闲链表 里的地址
+            // 单线程版本
+            /*
+            new_node = _free_nodes_head; // 获取第一个空闲地址
+            _free_nodes_head = new_node->free_next; // 更新空闲列表
+            */
+            // 并发安全 TLC 版本:
+            // 首先尝试从 tls free_list 中找地址(最快, 无锁)
+            if (HashTableNode* node = get_node_from_tls()) {
+                new_node = node;
+            }
+            // 如果从 tls free_list 拿到的是nullptr, 那么的先从 global free_list 批量补充 tls free_list(如有), 再从 tls free_list 取node(不一定有)
+            else {
+                refill_tls_from_global();
+                new_node = get_node_from_tls(); // 不一定有: 如果 global free_list也空了, 那么这里 new_node = nullptr
+            }
+
+            if (new_node) {
+                new(&new_node->key) TYPE_K(std::forward<K>(key));
+                new(&new_node->value) TYPE_V(std::forward<V>(value));
+                new_node->next = _table[index];
+                new_node->free_next = nullptr;
+            }
+            else {
+                void* raw_mem = _pool->allocate(sizeof(HashTableNode));
+                if (!raw_mem) return false;
+
+                new_node = new(raw_mem) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+            }
+            
+            _table[index] = new_node;
+            _size.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        _lock_table_from_rehash_clear_.unlock();
+        if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed))
+        {
+            std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
+            if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed)) {
+                rehash( _capacity*2 );
+            }
+        }
+
+        return true;
+    }
+
+    template <typename K, typename FUNC>
+    bool atomic_upsert(K&& key, FUNC&& updater, const TYPE_V& default_val) {
+        std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
+        if (_capacity == 0 || !_table) return false;
+        size_t index = hash(key) % _capacity;
+        {
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_insert_(bucket_lock(index));
+            for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
+                if (cur->key == key) {
+                    std::forward<FUNC>(updater)(cur->value);
+                    return true;
+                }
+            }
+            HashTableNode* new_node = nullptr;
+            
+            // 优先复用 空闲列表 里的地址
+            // 单线程版本
+            /*
+            new_node = _free_nodes_head; // 获取第一个空闲地址
+            _free_nodes_head = new_node->free_next; // 更新空闲列表
+            */
+            // 并发安全 TLC 版本:
+            // 首先尝试从 tls free_list 中找地址(最快, 无锁)
+            if (HashTableNode* node = get_node_from_tls()) {
+                new_node = node;
+            }
+            // 如果从 tls free_list 拿到的是nullptr, 那么的先从 global free_list 批量补充 tls free_list(如有), 再从 tls free_list 取node(不一定有)
+            else {
+                refill_tls_from_global();
+                new_node = get_node_from_tls(); // 不一定有: 如果 global free_list也空了, 那么这里 new_node = nullptr
+            }
+
+            if (new_node) {
+                new(&new_node->key) TYPE_K(std::forward<K>(key));
+                new(&new_node->value) TYPE_V(default_val);
+                new_node->next = _table[index];
+                new_node->free_next = nullptr;
+            }
+            else {
+                void* raw_mem = _pool->allocate(sizeof(HashTableNode));
+                if (!raw_mem) return false;
+
+                new_node = new(raw_mem) HashTableNode{std::forward<K>(key), default_val, _table[index]};
+            }
+            std::forward<FUNC>(updater)(new_node->value);
+            _table[index] = new_node;
+            _size.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        _lock_table_from_rehash_clear_.unlock();
+        if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed))
+        {
+            std::unique_lock<std::shared_mutex> _lock_table_for_rehash_(_table_mutex);
+            if (_size.load(std::memory_order_relaxed) >= _resize_threshold.load(std::memory_order_relaxed)) {
+                rehash( _capacity*2 );
+            }
+        }
+
+        return true;
+    }
+
+    bool pop(const TYPE_K& key, TYPE_V& value) {
+        std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
+        if (_capacity == 0 || !_table) return false;
+        size_t index = hash(key) % _capacity;
+
+        // 预设一个 node_to_recycle: 如果它在后续的过程中被更新到确实存在, 那么执行挂载到 free_list 的动作可以在 桶锁/条带锁 之外: 因为它是线程local的
+        HashTableNode* node_to_recycle = nullptr;
+        {
+            std::unique_lock<std::shared_mutex> _lock_bucket_for_pop_(bucket_lock(index));
+            HashTableNode* head = _table[index];
+            HashTableNode* parent = nullptr;
+
+            while (head) {
+                if (head->key == key) { // 已定位到 待摘除node: head
+                    // 1. 先拷贝 value
+                    value = head->value;
+
+                    // 2. 从 bucket链表中摘除 head
+                    if (!parent) {
+                        _table[index] = head->next;
+                    }
+                    else {
+                        parent->next = head->next;
+                    }
+
+                    // 3. 先析构 key 和 value
+                    if constexpr(!std::is_trivially_destructible<TYPE_K>::value) head->key.~TYPE_K();
+                    if constexpr(!std::is_trivially_destructible<TYPE_V>::value) head->value.~TYPE_V();
+
+                    // 4. 清理指针(防御性编程)
+                    head->next = nullptr;
+                    head->free_next = nullptr;
+                    _size.fetch_sub(1, std::memory_order_relaxed);
+
+                    // 应该把待摘除node 即 head 挂载到 空闲列表.
+                    // 如果是单线程版本, 在这里就可以执行这个挂载操作了(如下). 执行完就可以return true跳出循环.
+                    /*
+                    head->free_next = _free_nodes_head; // 更新 head
+                    _free_nodes_head = head; // _free_nodes_head 改成 head
+                    */
+                    // TLC版本在这里确定好 node_to_recycle, 然后在桶锁之外执行挂载 free_list 操作
+                    node_to_recycle = head;
+                    break;
+                }
+                parent = head;
+                head = head->next;
+            }
+        }
+
+        // 5. TLC版本里, 挂载 free_list 操作是 thread-local + locked global 串行的, 所以不需要 bucket lock
+        if (node_to_recycle) {
+            push_node_to_tls(node_to_recycle);
+            TLSFreeList* tls_free_list = get_tls_free_list();
+            if (tls_free_list && tls_free_list->count > TLS_FREE_LIST_MAX) {
+                flush_tls_to_global();
+            }
+            return true;
+        }
+        
+        return false;
+    }
+
+    void clear() {
+        std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
+        for (size_t index = 0; index < _capacity; ++index) {
+            HashTableNode* head = _table[index];
+            if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+                while (head) {
+                    HashTableNode* next = head->next;
+                    destroy_node(head);
+                    head = next;
+                }
+            }
+            _table[index] = nullptr;
+        }
+
+        // 全表clear时置空 global free_list, 等待 reset 内存池全表复用而不是复用空闲链表上的地址
+        {
+            std::lock_guard<std::mutex> lock(_global_free_mutex);
+            _global_free_head = nullptr; 
+        }
+
+        // 增加 generation，使所有线程的 TLS 缓存 懒更新失效(线程要用的时候检查generation发现失效)
+        _generation.fetch_add(1, std::memory_order_release);
+        _size.store(0, std::memory_order_relaxed);
+
+    }
+
+    void destroy() {
+        std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
+        for (size_t index = 0; index < _capacity; ++index) {
+            HashTableNode* head = _table[index];
+            if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+                while (head) {
+                    HashTableNode* next = head->next;
+                    destroy_node(head);
+                    head = next;
+                }
+            }
+        }
+        
+        free_table_ptrs();
+        {
+            std::lock_guard<std::mutex> lock(_global_free_mutex);
+            _global_free_head = nullptr;
+        }
+        _capacity = 0;
+        _resize_threshold.store(0, std::memory_order_relaxed);
+        _generation.fetch_add(1, std::memory_order_release);
+        _size.store(0, std::memory_order_relaxed);
+    }
+
+    size_t size() const {
+        return _size.load();
+    }
+
+#if 0
     // _capacity 的修改 必须在 表级写锁下, 这保证了它的线程安全性, 以及“同一把表级写锁在线程之间的内存同步性”，故不需要引入原子类型
     size_t _capacity;
 
@@ -129,6 +655,7 @@ private:
     // 空闲 free 链表: 链起所有 析构后的 poped nodes. 其修改 存在并发写入的可能(不同条带/桶), 故需要引入原子类型
     std::atomic<HashTableNode*> _free_nodes_head{nullptr};
 
+    // 非空桶记录  --> 已废弃
     // 记录非空bucket index. 桶置空操作时只需遍历这些桶即可. index类型要与 _capacity 类型对齐, 因为它是 hash成员函数的输出 取_capacity余
     // 要么给 _occuped_indices 另外加一个 锁, 要么去掉. 选择 去掉 _occupied_indices
     // std::vector<size_t> _occupied_indices;
@@ -142,9 +669,12 @@ private:
         return _hasher(key);
     }
 
-    std::shared_mutex _table_mutex; // 读写锁: 读锁可并发, 写锁必排他
+    // mutable 关键字: 被修饰的成员变量, 即使在const成员函数中也可以修改. 此豁免多用于 锁: const函数不改变用户视角的数据, 却对_mutex变量有加锁操作
+    // 本质是告诉编译器: 虽然加锁操作在物理上修改了mutex的状态, 但逻辑上该成员函数并未改变数据内容, 所以允许在const方法中加锁
 
-    std::vector<padded_mutex> _stripes;
+    mutable std::shared_mutex _table_mutex; // 读写锁: 读锁可并发, 写锁必排他
+
+    mutable std::vector<padded_mutex> _stripes;
     size_t _stripe_mask;  // 从 桶编号 bucket_index 映射到 条带编号 stripe
 
     inline std::shared_mutex& bucket_lock(size_t bucket_index) noexcept {
@@ -242,7 +772,7 @@ public:
     * 行为: 若 key 存在, 则获取对应的 value 到可变引用, 返回 true; 否则返回 false
     */
     bool get(const TYPE_K& key, TYPE_V& value) {
-        // 并发锁: 此操作(get)不独占表锁
+        // 表读锁: 此操作(get) 要排除 rehash & clear 等需要独占(写锁)表锁的行为
         std::shared_lock<std::shared_mutex> _lock_from_rehash_clear_(_table_mutex);
 
         if (_capacity == 0 || !_table) return false;
@@ -254,6 +784,7 @@ public:
 
         for (HashTableNode* cur = _table[index]; cur; cur = cur->next) {
             if (cur->key == key) {
+                // 获取值回调. 触发 node.value 的拷贝赋值: 生命周期分离, 这里不返回引用, 保证哈希表的资源生命周期不影响外部变量对象
                 value = cur->value;
                 return true;
             }
@@ -271,7 +802,7 @@ public:
     * 
     * 行为: 若 key 已经存在, 则更新对应的 value; 否则新建节点key 插入默认值作为value, 然后再更新value. 插入后检查是否需要扩容
     */
-   template <typename K, typename V>
+    template <typename K, typename V>
     bool insert(K&& key, V&& value) {
         // 并发锁: 此操作(insert)不独占表锁
         std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
@@ -302,12 +833,17 @@ public:
             new_node = _free_nodes_head; // 获取第一个空闲地址
             _free_nodes_head = std::launder(new_node)->free_next; // 更新空闲列表
             */
+            // 并发安全 CAS 版本:
             while (_free_nodes_head.load(std::memory_order_relaxed) != nullptr) { 
                 // 尝试从 free list 中复用: 获取 _free_nodes_head(relaxed表示无同步成本)
                 HashTableNode* curr_head = _free_nodes_head.load(std::memory_order_relaxed);
 
-                if (_free_nodes_head.compare_exchange_weak(
-                    curr_head, std::launder(curr_head)->free_next,
+                if (curr_head != nullptr && _free_nodes_head.compare_exchange_weak(
+                    curr_head,
+                    // 废弃方案
+                    // std::launder(curr_head)->free_next,
+                    // 新方案
+                    curr_head->free_next,
                     std::memory_order_acquire, std::memory_order_relaxed)
                 ) {
                     // 语义: curr_head 是 全局变量 _free_nodes_head 尝试读到的旧值. 对比这个全局变量和旧值
@@ -324,8 +860,15 @@ public:
             }
 
             if (new_node) {
+                // 废弃方案:
                 // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-                new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+                // new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+                // 新方案:
+                new_node->next = _table[index];
+                new_node->free_next = nullptr;
+                new(&new_node->key) TYPE_K(std::forward<K>(key));
+                new(&new_node->value) TYPE_V(std::forward<V>(value));
+
                 // 完美转发以保持key和value的 左/右 值引用性质, 才能触发对应的 HashTableNode 构造函数(左(常)值引用-->拷贝, 右值引用-->移动)
                 // 如果传入的是右值引用，那么源对象会被掏空. 这样调用的本意就是转移资源，所以不介意源被掏空.
             }
@@ -337,9 +880,6 @@ public:
                 new_node = new(raw_mem) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
             }
             
-            // 更新插入后的默认值value
-            std::forward<FUNC>(updater)(new_node->value);
-
             _table[index] = new_node;
 
             // // 新的 node 要线程安全地插入gc链: 独占的桶锁(条带锁)仅锁住了当前桶(条带), 但是gc链是全局的, 可能有其他桶(条带)在写入, 故这里要线程安全 --> 废弃
@@ -351,7 +891,7 @@ public:
             // node数量自加1. 原子线程安全
             // std::memory_order_relaxed 就可以保证原子安全. 但未来若需要在某些线程里仅靠_size来判断是否有数据写入, 这个模式不安全.
             // 这个模式下, 其他线程不一定能看到 自增后的 _size. 可以用 _size.fetch_add(1) 默认模式, 最严格, 保证全局一致.
-            _size.fetch_add(1);
+            _size.fetch_add(1, std::memory_order_relaxed);
 
         }
 
@@ -446,12 +986,17 @@ public:
             new_node = _free_nodes_head; // 获取第一个空闲地址
             _free_nodes_head = std::launder(new_node)->free_next; // 更新空闲列表
             */
+            // 并发安全 CAS 版本:
             while (_free_nodes_head.load(std::memory_order_relaxed) != nullptr) { 
-                // 尝试从 free list 中复用: 获取 _free_nodes_head(relaxed表示无同步成本)
+                // 尝试从 free list 中复用: 获取 _free_nodes_head (relaxed表示无同步成本) 的 tls副本
                 HashTableNode* curr_head = _free_nodes_head.load(std::memory_order_relaxed);
 
-                if (_free_nodes_head.compare_exchange_weak(
-                    curr_head, std::launder(curr_head)->free_next,
+                if (curr_head != nullptr && _free_nodes_head.compare_exchange_weak(
+                    curr_head,
+                    // 废弃方案:
+                    // std::launder(curr_head)->free_next,
+                    // 新方案:
+                    curr_head->free_next,
                     std::memory_order_acquire, std::memory_order_relaxed)
                 ) {
                     // 语义: curr_head 是 全局变量 _free_nodes_head 尝试读到的旧值. 对比这个全局变量和旧值
@@ -468,8 +1013,14 @@ public:
             }
 
             if (new_node) {
+                // 废弃方案:
                 // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-                new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
+                // new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
+                // 新方案:
+                new_node->next = _table[index];
+                new_node->free_next = nullptr;
+                new(&new_node->key) TYPE_K(std::forward<K>(key));
+                new(&new_node->value) TYPE_V(default_val);
             }
             else {
                 // 空闲列表为空, 申请新内存
@@ -479,6 +1030,9 @@ public:
                 new_node = new(raw_mem) HashTableNode{std::forward<K>(key), default_val, _table[index]};
             }
 
+            // 更新插入后的默认值value
+            std::forward<FUNC>(updater)(new_node->value);
+
             _table[index] = new_node;
 
             // // 新的 node 要线程安全地插入gc链: 独占的桶锁(条带锁)仅锁住了当前桶(条带), 但是gc链是全局的, 可能有其他桶(条带)在写入, 故这里要线程安全 --> 废弃
@@ -487,7 +1041,7 @@ public:
             //     new_node->gc_next = old; // 头插 gc 链
             // } while (!_all_nodes_head.compare_exchange_weak(old, new_node, std::memory_order_release, std::memory_order_relaxed));
 
-            _size.fetch_add(1);
+            _size.fetch_add(1, std::memory_order_relaxed);
         }
         
         _lock_table_from_rehash_clear_.unlock();
@@ -526,7 +1080,7 @@ public:
             std::unique_lock<std::shared_mutex> _lock_bucket_for_pop_(bucket_lock(index));
 
             // 遍历查询 key
-            
+
             // 若 key-hash 不存在, 直接返回 false 结束
             HashTableNode* head = _table[index];
             if (!head) return false;
@@ -536,12 +1090,13 @@ public:
 
             while (head) {
                 if (head->key == key) {
-                    // 获取 value
+                    // 已定位到待摘除的node
+                    // 获取 value. 触发 node.value 的拷贝赋值: 生命周期分离, 这里不返回引用, 保证哈希表的资源生命周期不影响外部变量对象
                     value = head->value;
 
                     // 摘除 node
-                    if (!parent) { // parent为空, 说明头节点head就是待删除节点
-                        _table[index] = nullptr; // 直接置空指针摘除head
+                    if (!parent) { // parent为空, 说明其未曾更新, 说明头节点head就是待删除节点
+                        _table[index] = head->next; // 摘除head
                     }
                     else { // 如果 parent 不为空, 说明待删节点head不是头节点
                         parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
@@ -551,7 +1106,7 @@ public:
                     head->next = nullptr;
 
                     // node数量自减1. 原子线程安全
-                    _size.fetch_sub(1);
+                    _size.fetch_sub(1, std::memory_order_relaxed);
 
                     // 把 head 挂到 free_list 上, 然后析构 head. 这样该地址可被 insert/upsert 等插入方法复用
                     // _free_nodes_head 是全局变量, 需要 CAS(compare and swap) 操作以保证 head 挂入时安全
@@ -561,20 +1116,22 @@ public:
                     head->free_next = _free_nodes_head; // 更新 head
                     _free_nodes_head = head; // _free_nodes_head 改成 head
                     */
-                    // 并发安全 CAS 版本
-                    // 竞争的线程AB各自读到了 _free_nodes_head 并执行了 head_A 更新 和 head_B 更新 --> do 部分
-                    // while 部分 <-- 线程A更快, 首先执行 compare_exchage: _free_nodes_head 对比 old_head. 此时一致
+                    // _free_nodes_head作为被输入到多个线程的指针, 它是共享变量. 它的取值&更新, 在线程之间存在竞争问题; 而head已经在桶(条带)锁之下, 不会有竞争问题
+
+                    // 并发安全 CAS 版本: 时间顺序详解如下
+                    // do 部分 <-- 竞争的线程AB各自读到了 _free_nodes_head 并执行了 head_A 更新 和 head_B 更新
+                    // while 部分 <-- 线程A更快, 首先执行 compare_exchage: _free_nodes_head 对比 tls_head. 此时一致
                     //                compare_exchange给线程A执行 _free_nodes_head 改成 head_A, 返回 True, 从而线程A退出循环
-                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 old_head, 此时不一致(前者已经被线程A修改)
+                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 tls_head, 此时不一致(前者已经被线程A修改成head_A)
                     //                compare_exchange 直接返回 False, 线程B重新进入do 部分 <-- 线程B读到了更新后的 _free_nodes_head, 再一次执行 head_B 更新
-                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 old_head. 此时终于一致
-                    //                compare_exchange给线程A执行 _free_nodes_head 改成 head_B, 返回 True, 从而线程B退出循环
-                    HashTableNode* old_head;
+                    // while 部分 <-- 线程B执行 compare_exchange: _free_nodes_head 对比 tls_head. 此时终于一致
+                    //                compare_exchange给线程B执行 _free_nodes_head 改成 head_B, 返回 True, 从而线程B退出循环
+                    HashTableNode* tls_head;
                     do {
-                        old_head = _free_nodes_head.load(std::memory_order_relaxed);
-                        head->free_next = old_head;
-                    } while (!_free_nodes_head.compare_exchange_weak(old_head, head, std::memory_order_release, std::memory_order_relaxed));
-                    // 语义: old_head 是 全局变量 _free_nodes_head 在 do 中读到的旧值. 对比这个全局变量和旧值
+                        tls_head = _free_nodes_head.load(std::memory_order_relaxed);
+                        head->free_next = tls_head;
+                    } while (!_free_nodes_head.compare_exchange_weak(tls_head, head, std::memory_order_release, std::memory_order_relaxed));
+                    // 语义: tls_head 是 全局变量 _free_nodes_head 在 do 中读到的旧值. 对比这个全局变量和旧值
                     // 如果一致, 那么执行全局变量更新为 head(do 中算出来的新值); 如果不一致, 循环do 用 全局变量的新值再来一次, 直到重试成功
 
                     // atomic_var.compare_exchange_weak(expect_val, new_val, success_memory_order, failure_memory_order) 语义:
@@ -585,7 +1142,12 @@ public:
                     // std::memory_order_release: 生产者(写操作)内存序, 代表CPU保证 --> 共享变量在执行该内存序操作前的所有指令, 必须不能重排到该内存序后面
                     // 代表一种生产者逻辑: 东西全部生产完毕了才能release. 这里 pop 函数对 全局变量_free_nodes_head而言就是生产者: 它生产空闲地址发布到_free_nodes_head上
 
-                    destroy_node(head); // _free_nodes_head 指向的地址被析构了
+                    // 废弃方案: 析构整个被摘除的 node
+                    // destroy_node(head);
+
+                    // 新方案: 只析构数据成员变量 key 和 value, head指向的 HashTableNode 作为空壳仍然valid等待复用
+                    if constexpr(!std::is_trivially_destructible<TYPE_K>::value) head->key.~TYPE_K();
+                    if constexpr(!std::is_trivially_destructible<TYPE_V>::value) head->value.~TYPE_V();
 
                     return true;
                 }
@@ -620,11 +1182,14 @@ public:
             _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
 
-        _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
+        _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用. 不会复用空闲链表上的空壳node地址.
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
         _size.store(0, std::memory_order_relaxed);
 
     }
 
+    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0 即完全破坏表结构
+    // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
         // 析构全表时, 析构过程要全程 独占表锁
         std::unique_lock<std::shared_mutex> _lock_table_(_table_mutex);
@@ -648,211 +1213,260 @@ public:
         // 本哈希表不再可复用. 但内存尚未释放, 等待内存池操作
         free_table_ptrs();
 
+        _size.store(0, std::memory_order_relaxed);
         _capacity = 0;
         _resize_threshold.store(0, std::memory_order_relaxed);
-        _free_nodes_head.store(nullptr, std::memory_order_relaxed); // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
-        _size.store(0, std::memory_order_relaxed);
+        _free_nodes_head.store(nullptr, std::memory_order_relaxed);
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
     }
 
     size_t size() const {
         return _size.load();
     }
+#endif
 
+
+    // 迭代相关. 详见 mempooled_concurrent_hashtable_iterators.inl
+
+    struct MutableProxy {
+        const TYPE_K& key;
+        TYPE_V& value;
+    }
+
+    struct ConstProxy {
+        const TYPE_K& key;
+        const TYPE_V& value;
+    }
+
+    struct DrainProxy {
+        // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
+        TYPE_K key;
+        TYPE_V value;
+    }
 
 
     /*
-    * 迭代器
-    * 线程安全的迭代器, 到底是指什么? 
-    * 首先, 单线程下, 迭代哈希表时也不应该insert/remove/change key操作, 因为这些都可能导致rehash, 会导致 iterator 失效
-    * 所以在单线程下, 迭代哈希表时最多 只允许change value, 不允许其他任何操作. 单线程下可以不用 只读迭代器. 允许迭代器change value
-    * 
-    * 那么在多线程下, 首先迭代器在运行时，肯定也要禁止任何线程作 change value 之外的操作. 问题是, 是否允许change value(即使它线程安全)?
-    * 答案是: 否. 在缺乏同步机制的前提下, 当某个线程在执行迭代遍历时, 若其他线程在 thread-safe change value, 会导致两个可能的严重后果
-    * 1. 撕裂读取：迭代器在读取 key-value 时，可能读取到value的一部分后，另一部分被另一个线程改变了，导致读到了一个”混合value”
-    * 2. 后续逻辑破坏：迭代读到了一个value, 但实际上这个value在随后就被改了然而迭代器线程并不知情, 可能会导致后续逻辑错误
-    * 所以归纳一下：
-    *   1. 若非const迭代器, 只能单线程迭代, 且加锁不允许其他线程作只读之外的任何操作.
-    *      这样迭代器允许change value, 但若迭代器change value, 其他线程不能作任何操作(读写都不可以)
-    *   2. 若要并发迭代，必须都是const迭代. 且加锁不允许其他线程作只读之外的任何操作.
-    * 归并一下同类项，迭代器应该这样设计:
-    *   1. 非const迭代器, 应该在迭代时上独占表锁, 其他任何线程不能对表有任何操作(读写都不行). 迭代器自身可change value,
-    *   2. const迭代器, 允许并发迭代, 应该共享表锁(禁止了需要独占表锁的rehash/clear), 共享桶锁(禁止了需要独占桶锁的insert/remove)
-    *      迭代器是只读的. 哈希表不可被任何change, 即线程A迭代bucket_i时, 不该允许线程B在bucket_i作insert和remove
-    *      这里似乎可以允许线程B在bucket_j作insert和remove, 因为线程A在迭代bucket_i时, 对其他桶似乎可以不作要求. 只不过这样的话，
-    *      多线程并发迭代的结果可能会不一样. 如果要求保证并发迭代的结果一致, 那么线程A在迭代bucket_i时, 应该对全部bucket都共享锁.
-    *      可是这种需求有更好的实现方式: 先单线程迭代一遍哈希表并dump成副本, 然后多线程使用该副本. 所以这里不对全部桶上共享锁.
-    * 
-    *      并发迭代有不同的设计模式: 1. 多个线程并发无误遍历一遍哈希表（总共一遍），2. 多个线程各自并发无误遍历一遍哈希表（总共多遍）
-    *      前者多个线程并发遍历一遍哈希表,（迭代器的_node指针是线程local的, 不能多线程共享. 遍历过程中_node指针很多跳转, 共享需要极其精细的
-    *      同步机制, 那就不现实.）即使是为了加速迭代也应该使用分片（sharding）多线程迭代的方式（每个线程负责一部分bucket）. 
-    *      那么这样的迭代器和全迭代肯定是不同设计的（需要输入bucket id以发送给不同线程，以实现sharding并行扫描），是高性能哈希表TBB/folly::F14的做法,
-    *      并不是常规iterator的职责范围. 在这里首先实现的是“多个线程各自并发无误遍历一遍哈希表（总共多遍）”的const只读迭代器。
+    * 不加锁、线程不安全的 只读迭代器
     */
-
-    /*
-    * const只读迭代器
-    * 
-    * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
-    */
-    class const_iterator {
-
+    class unsafe_const_iterator {
+        // pooled_concurrent_hashtable 为 friend, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        // ---> 嵌套类自动是母类的 friend, 而母类访问嵌套类的 private 需要 申明母类是friend
+        friend class pooled_concurrent_hashtable;
     public:
-
-        const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table),
-            _bucket_index(bucket_index),
-            _node(node)
-        {
-            _null_node_advance_to_next_valid_bucket();
-        }
-
-        // *it 迭代器对象解引用 --> 只读返回
-        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
-        }
-
-        // 迭代器对象前置++
-        const_iterator& operator++() {
-            if (_node) {
-                _node = _node->next;
-            }
-
-            if (!_node) {
-                _bucket_index++;
-                _null_node_advance_to_next_valid_bucket();
-            }
-            return *this;
-        }
-
-        // 迭代器对象后置++
-        const_iterator operator++(int) {
-            const_iterator tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        // 迭代器对象 == 运算
-        bool operator==(const const_iterator& other) const {
-            return _node == other._node && _hash_table == other._hash_table;
-        }
-
-        // 迭代器对象 != 运算
-        bool operator!=(const const_iterator& other) const {
-            return !(*this == other);
-        }
-
+        ConstProxy operator*() const {}
+        unsafe_const_iterator& operator++() {}
+        unsafe_const_iterator operator++(int) {}
+        bool operator==(const unsafe_const_iterator& other) const {}
+        bool operator!=(const unsafe_const_iterator& other) const {}
     private:
-
+        explicit unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         const pooled_concurrent_hashtable* _hash_table;
-
         size_t _bucket_index;
-
         HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {}
+    };
 
-        // 迭代器内部不加锁逻辑。锁在迭代器外部调用
-        void _null_node_advance_to_next_valid_bucket() {
-            while (!_node && _bucket_index < _hash_table->_capacity) {
+    // 暴露 unsafe_const_iterator 迭代器接口. 仅供 write_lock_const_view 内部或明确知道风险的外部使用
+    unsafe_const_iterator unsafe_const_begin() const { return unsafe_const_iterator(this, 0, nullptr); }
+    unsafe_const_iterator unsafe_const_end() const { return unsafe_const_iterator(this, _capacity, nullptr); }
 
-                _node = (_hash_table->_table)[_bucket_index];
-
-                if (_node) break;
-
-                _bucket_index++;
-            }
+    /*
+    * 用 RAII视图(view) 提供安全的 给全表上 写锁的 接口. 目的是把 全表上锁 的操作交给业务层, 从而可以在业务层实现强一致性(阻塞写入表)的迭代遍历
+    * 此 view 返回的是 const迭代
+    * 用法(强一致性场景/阻塞表级写入): for循环持续期内, 表都上了写锁
+    * for (auto&& [k, v] : hashtable.const_iter_map_locked_view()) {
+    *       ..code using k(const K&类型), v(const V&类型)...
+    *   }
+    */
+    class write_lock_const_view {
+        // pooled_concurrent_hashtable 为友元, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        friend class pooled_concurrent_hashtable;
+    private:
+        const pooled_concurrent_hashtable& _map;
+        std::unique_lock<std::shared_mutex> _map_write_lock;
+        explicit write_lock_const_view(pooled_concurrent_hashtable& hashtable):
+            _map(hashtable),
+            _map_write_lock(hashtable._table_mutex)
+        {
+            // 在此 write_lock_const_view 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
+            // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
         }
+    public:
+        // 禁用拷贝, 防止锁被意外释放或多次释放
+        write_lock_const_view(const write_lock_const_view&) = delete; // 禁用拷贝构造
+        write_lock_const_view& operator=(const write_lock_const_view&) = delete; // 禁用拷贝赋值
+        write_lock_const_view(write_lock_const_view&&) = default; // 显式确认 default 移动构造
+        write_lock_const_view& operator=(write_lock_const_view&&) = default; // 显式确认 default 移动赋值
 
-    }; // end of const_iterator definition
+        // 在 view 中封装 hashtable 的 unsafe_const_begin & unsafe_const_end 方法(无论是否私密, 作为嵌套类的view类 自动是 hashtable的friend, 可以访问)
+        // 包装成 begin 和 end 提供给 for循环. 在 for循环中 ++it会自动调用 返回类型(即 unsafe_const_iterator) 的++操作符
+        unsafe_const_iterator begin() { return _map.unsafe_const_begin(); }
+        unsafe_const_iterator end() { return _map.unsafe_const_end(); }
+    };
 
-    const_iterator cbegin() const {
-        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
+    // 提供获取view的接口
+    write_lock_const_view const_iter_map_locked_view() const {
+        return write_lock_const_view(*this);
     }
 
-    const_iterator cend() const {
-        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
+
+
+    /*
+    * 不加锁、线程不安全的 可变迭代器
+    */
+    class unsafe_iterator {
+        // pooled_concurrent_hashtable 为 friend, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        // ---> 嵌套类自动是母类的 friend, 而母类访问嵌套类的 private 需要 申明母类是friend
+        friend class pooled_concurrent_hashtable;
+    public:
+        MutableProxy operator*() const {}
+        unsafe_iterator& operator++() {}
+        unsafe_iterator operator++(int) {}
+        bool operator==(const unsafe_iterator& other) const {}
+        bool operator!=(const unsafe_iterator& other) const {}
+    private:
+        explicit unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        pooled_concurrent_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
+        size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
+        HashTableNode* _node; // 遍历所有桶的所有node
+        void _null_node_advance_to_next_valid_bucket() {}
+    };
+
+    // 暴露 unsafe_iterator 迭代器接口. 仅供 write_lock_view 内部或明确知道风险的外部使用
+    unsafe_iterator unsafe_begin() { return unsafe_iterator(this, 0, nullptr); }
+    unsafe_iterator unsafe_end() { return unsafe_iterator(this, _capacity, nullptr); }
+
+    /*
+    * 用 RAII视图(view) 提供安全的 给全表上 写锁的 接口. 目的是把 全表上锁 的操作交给业务层, 从而可以在业务层实现强一致性(阻塞写入表)的迭代遍历
+    * 此 view 返回的是 可变迭代
+    * 用法(强一致性场景/阻塞表级写入): for循环持续期内, 表都上了写锁
+    * for (auto&& [k, v] : hashtable.iter_map_locked_view()) {
+    *       v(V&类型) = some code using k(const K&类型)
+    *   }
+    */
+    class write_lock_view {
+        // pooled_concurrent_hashtable 为友元, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        friend class pooled_concurrent_hashtable;
+    private:
+        pooled_concurrent_hashtable& _map;
+        std::unique_lock<std::shared_mutex> _map_write_lock;
+        explicit write_lock_view(pooled_concurrent_hashtable& hashtable):
+            _map(hashtable),
+            _map_write_lock(hashtable._table_mutex)
+        {
+            // 在此 write_lock_view 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
+            // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
+        }
+    public:
+        // 禁用拷贝, 防止锁被意外释放或多次释放
+        write_lock_view(const write_lock_view&) = delete; // 禁用拷贝构造
+        write_lock_view& operator=(const write_lock_view&) = delete; // 禁用拷贝赋值
+        write_lock_view(write_lock_view&&) = default; // 显式确认 default 移动构造
+        write_lock_view& operator=(write_lock_view&&) = default; // 显式确认 default 移动赋值
+
+        // 在 view 中封装 hashtable 的 unsafe_begin & unsafe_end 方法(无论是否私密, 作为嵌套类的view类 自动是 hashtable的friend, 可以访问)
+        // 包装成 begin 和 end 提供给 for循环. 在 for循环中 ++it会自动调用 返回类型(即unsafe_itgerator) 的++操作符
+        unsafe_iterator begin() { return _map.unsafe_begin(); }
+        unsafe_iterator end() { return _map.unsafe_end(); }
+    };
+
+    // 提供获取view的接口
+    write_lock_view iter_map_locked_view() {
+        return write_lock_view(*this);
     }
 
     /*
-    * 非const迭代器
-    * 
-    * 用法: for(auto it = hash_table.begin(); it != hash_table.end(); ++it) {auto& [k, v] = *it; //code//}
+    * 提供 key只读快照, 供 弱一致性(不阻塞写，故而不保证前后一致,允许漏看多看)的迭代遍历, 配合 get(只读) / insert(改变value) / atomic_upsert(改变value) 调用, 完成相应迭代目的
+    * 用法:
+    * auto keys_snaptshot = hashtable.get_readonly_kesy();
+    * for (const auto& key: keys_snaptshot) {
+    *     V value;
+    *     hashtable.get(key, value); // 只读遍历
+    *     hashtable.insert(key, value); // 改value遍历
+    *     hashtable.atomic_upsert(key, som_func, some_default_value); // 改value遍历-回调
+    * }
     */
-    class iterator {
+    std::vector<TYPE_K> get_readonly_keys() const {}
 
-    public:
 
-        // 迭代器的构造函数
-        iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table),
-            _bucket_index(bucket_index),
-            _node(node)
-        {
-            _null_node_advance_to_next_valid_bucket();
-        }
 
-        // *it 迭代器对象解引用 --> v可变返回
-        std::pair<const TYPE_K&, TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
-        }
-
-        // 迭代器对象前置++
-        iterator& operator++() {
-            if (_node) {
-                _node = _node->next;
-            }
-
-            if (!_node) {
-                _bucket_index++;
-                _null_node_advance_to_next_valid_bucket(); // 
-            }
-            return *this;
-        }
-
-        // 迭代器对象后置++
-        iterator operator++(int) {
-            iterator tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        // 迭代器对象 == 运算
-        bool operator==(const iterator& other) const {
-            return _node == other._node && _hash_table == other._hash_table;
-        }
-
-        // 迭代器对象 != 运算
-        bool operator!=(const iterator& other) const {
-            return !(*this == other);
-        }
-
+    /*
+    * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
+    */
+    class unsafe_drain_iterator {
+        // drain_iterator的构造方法为private为防止误用. 只能在 write_lock_drain_range 内部调用
+        friend class write_lock_drain_range;
     private:
-
+        // 显式构造
+        explicit unsafe_drain_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         pooled_concurrent_hashtable* _hash_table;
-
         size_t _bucket_index;
-
         HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {}
+    public:
+        // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
+        unsafe_drain_iterator(const unsafe_drain_iterator&) = delete;
+        unsafe_drain_iterator& operator=(const unsafe_drain_iterator&) = delete;
+        // 移动构造
+        unsafe_drain_iterator(unsafe_drain_iterator&&) noexcept {}
+        unsafe_drain_iterator& operator=(unsafe_drain_iterator&&) = default;
+        DrainProxy operator*() {}
+        unsafe_drain_iterator& operator++() {}
+        unsafe_drain_iterator operator++(int) {}
+        bool operator==(const unsafe_drain_iterator& other) const {}
+        bool operator!=(const unsafe_drain_iterator& other) const {}
+    };
 
-        void _null_node_advance_to_next_valid_bucket() {
-            while (!_node && _bucket_index < _hash_table->_capacity) {
-                _node = (_hash_table->_table)[_bucket_index];
-                if (_node) break;
-                _bucket_index++;
-            }
+    
+    // 不暴露 unsafe_drain_iterator 的 任何构造接口, 只允许在 drain_map_locked_view() 接口中构造 drain_range 使用
+
+    // drain range
+    class write_lock_drain_range {
+        // pooled_concurrent_hashtable 为友元, 因为要允许它访问私有的构造方法. 构造方法私有是为了防止暴露误用
+        friend class pooled_concurrent_hashtable;
+    private:
+        pooled_concurrent_hashtable* _map;
+        std::unique_lock<std::shared_mutex> _map_write_lock;
+        explicit write_lock_drain_range(pooled_concurrent_hashtable* hashtable):
+            _map(hashtable),
+            _map_write_lock(hashtable->_table_mutex)
+        {
+            // 在此 write_lock_drain_range 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
+            // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
+        }
+    
+    public:
+        // 禁用拷贝, 防止锁被意外释放或多次释放
+        write_lock_drain_range(const write_lock_drain_range&) = delete; // 禁用拷贝构造
+        write_lock_drain_range& operator=(const write_lock_drain_range&) = delete; // 禁用拷贝赋值
+        write_lock_drain_range(write_lock_drain_range&&) = default; // 显式确认 default 移动构造
+        write_lock_drain_range& operator=(write_lock_drain_range&&) = default; // 显式确认 default 移动赋值
+
+        // drain write_lock_drain_range 的析构: 在退出(无论是正常还是非正常)for循环时, write_lock_drain_range 被析构, 此时要清空已经被drain破坏掉的哈希表为 空表状态
+        ~write_lock_drain_range() {
+            if (!_map) return;
+            // TODO: 析构所有未被转移的资源. free_list置空, _table置空
         }
 
-    }; // end of iterator definition
-    
-    iterator begin() const {
-        return iterator(this, 0, nullptr);
+        // 作为 friend, write_lock_drain_range 封装 unsafe_drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
+        unsafe_drain_iterator begin() {
+            // TODO
+        }
+        unsafe_drain_iterator end() {
+            // TODO
+        }
+    };
+
+    write_lock_drain_range drain_map_locked_view() {
+        return write_lock_drain_range{this};
     }
 
-    iterator end() const {
-        return iterator(this, _capacity, nullptr);
-    }
 
 }; // end of pooled_concurrent_hashtable definition
 
 
 
+// include separated nested iterator classes for mempooled_concurrent_hashtable 
+#include "mempooled_concurrent_hashtable_iterators.inl"
 
 #endif

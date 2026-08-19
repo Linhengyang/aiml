@@ -35,10 +35,12 @@ private:
         HashTableNode* free_next = nullptr; // free空闲链表，用于将 poped nodes 链接之后再析构, 供给insert/upsert等方法复用地址
         // 提供placement new 构造支持
         
-        // RULE of 5
+        // RULE of 5: 本类对象之间的拷贝和移动, 关注的是“对象本身的状态转移”. 
+        // 与之相对的是 业务构造(转换构造)函数, 关注“从无到有创建对象”
+        // 拷贝构造/赋值的参数签名一定是 T(const T& other), 移动构造/赋值的参数签名一定是 T(T&& other). 其他参数签名的都是业务构造/赋值函数
+
         // ---> RULE of 0(只要 TYPE_K 和 TYPE_V 等都实现了标准的拷贝/移动+构造/赋值, 编译器就能给组合结构体实现RULE of 5)
-        
-        // 拷贝构造/赋值的参数签名一定是 const T& other, 移动构造/赋值的参数签名一定是 T&& other. 其他参数签名的都是业务构造/赋值函数
+        // 什么时候是触发 构造? 什么是是触发 赋值? --> 不看是否有等号, 看该句执行时, 变量已有的为赋值, 变量未有的为构造
 
     // RULE 1: 析构函数: ~ClassName(), 负责释放资源(if有资源)
         /*
@@ -55,50 +57,57 @@ private:
         // HashNodeTable 的析构函数 --> 只要 TYPE_K 和 TYPE_V 作为 资源管理类型时，实现了完善的析构, 那么 哈希表节点的析构就无需手动编写
 
     // RULE 2: 拷贝构造函数: ClassName(const ClassName& other), 负责深拷贝资源(if有资源, 分配新内存, 深拷贝资源)
-
-        /* 业务拷贝构造函数: 1个
-        k/v 类型都是 const TYPE&, 不可变动引用, 那么在用 k / v 初始化 key / value 时, 会分别触发 TYPE_K / TYPE_V 的 构造函数
-        由于 k / v 都是不可变动引用, 无法移动掏空源对象, 故都会触发 TYPE_K 和 TYPE_V 的拷贝构造 --> 发生 k 和 v 的拷贝
-        */
-        // HashNodeTable 的拷贝构造函数 --> 只要 TYPE_K 和 TYPE_V 实现了完善的拷贝构造函数, 那么哈希表节点的拷贝构造就是用 const& 类型去触发成员构造即可
-        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
-
     // RULE 3: 拷贝赋值运算符: ClassName& operator=(const ClassName& other), 负责自赋值(if有资源, 释放旧资源, 深拷贝新资源)
         /*
         HashTableNode 应该满足 unique 性质: 不应该允许拷贝赋值 搞出两个一模一样的 节点，这没有意义
         */
-        // 禁止 哈希表节点 的 拷贝赋值
+        // 禁止 哈希表节点 的 拷贝构造 & 拷贝赋值
+        HashTableNode(const HashTableNode& other) = delete;
         HashTableNode& operator=(const HashTableNode& other) = delete;
 
-        // &&符号在 模板函数(的参数签名) 中代表 万能引用: 
-        //      万能引用&&: 如果实参是左值/常左值, 那函数参数推导为 左值引用/常左值引用; 如果实参是右值(移动/临时), 那函数参数推导为 右值引用
-        // 配合 std::forward<TYPE>(arg) 完美转发: 在函数内部保持 std::forward<TYPE>(arg) 为推导出来的类型（引用/常引用/右值引用）
 
-        // &&符号在 非模板函数(的参数签名) 中代表 右值引用: 本身不拥有数据, 绑定右值(临时对象/被std::move标记的对象)的引用
-        //  额外Tip: 在函数内部当用一个具名变量（或形参自身）"承接"右值引用后, 它本身就成了一个左值(可能是左值引用). 如果需要保持移动, 用std::move
-    
+    // &&符号在 模板函数(的参数签名) 中代表 万能引用: 
+    //      万能引用&&: 如果实参是左值/常左值, 那函数参数推导为 左值引用/常左值引用; 如果实参是右值(移动/临时), 那函数参数推导为 右值引用
+    // 配合 std::forward<TYPE>(arg) 完美转发: 在函数内部保持 std::forward<TYPE>(arg) 为推导出来的类型（引用/常引用/右值引用）
+
+    // &&符号在 非模板函数(的参数签名) 中代表 右值引用: 本身不拥有数据, 绑定右值(临时对象/被std::move标记的对象)的引用
+    //  额外Tip: 在函数内部当用一个具名变量（或形参自身）"承接"右值引用后, 它本身就成了一个左值(可能是左值引用). 如果需要保持移动, 用std::move
+
+
     // RULE 4: 移动构造函数: ClassName(ClassName&& other), 负责窃取资源(if有资源, 将other的资源指针复制过来, 置空other的资源指针), 避免拷贝开销
+    // RULE 5: 移动赋值运算符: ClassName& operator=(ClassName&& other), 负责窃取置换资源(if有资源, 释放旧资源, 窃取新资源)
+        /*
+        HashTableNode Node 与 Node 之间, 除了next寻址没有交互的必要, 故禁止 移动赋值. 这没有意义
+        */
+        HashTableNode(HashTableNode&& other) = delete;
+        HashTableNode& operator=(HashTableNode&& other) = delete;
 
-        /* 业务移动构造函数: 2个
-        对于 资源管理类型(非平凡析构类型), 移动构造是刚需:
+    
+    // 业务构造(普通构造)函数: 
+        /* 业务构造函数情景1: 哈希节点的插入(主要是key&value的构造)纯粹是key和value作为记录的副作用,不希望key和value的来源受影响.
+        那么应该触发 TYPE_K 和 TYPE_V 的深拷贝, 以隔绝 表内kv 和 kv源 之间的生命周期关系.
+        ---> k/v 类型都是 const TYPE&, 不可变动引用, 那么在用 k / v 初始化 key / value 时, 会分别触发 TYPE_K / TYPE_V 的 构造函数
+        由于 k / v 都是不可变动引用, 无法移动掏空源对象, 故都会触发 TYPE_K 和 TYPE_V 的拷贝构造 --> 发生 k 和 v 的拷贝
+        */
+        // HashNodeTable 的业务构造函数1 --> 只要 TYPE_K 和 TYPE_V 实现了完善的拷贝构造函数, 此节点构造就是用 const& 类型去触发成员的拷贝构造
+        HashTableNode(const TYPE_K& k, const TYPE_V& v, HashTableNode* ptr): key(k), value(v), next(ptr) {}
+
+        /* 业务构造函数情景2: 哈希节点的插入是一种key和value的资源转移, 多用于哈希表与其他数据结构(比如堆树图等)之间的数据交互.此时希望key和value的来源被移动.
+        此时, 若 TYPE_K 和 TYPE_V 是资源管理类型(非平凡析构类型), 那么移动构造是刚需(减少数据拷贝负担):
         可能1. 用临时资源作为参数去构造对象, 比如 std::string("hello") --> TYPE_K(std::string('hello'))
-               当然了, 由于 C++ 允许 const& 参数去 const引用 临时资源(并延长临时资源的生命周期), 所以即使没有 移动构造函数, 临时资源还是可以作为参数触发拷贝构造
+               当然了, 由于 C++ 允许 const& 参数去 const引用 临时资源(并延长临时资源的生命周期), 所以即使没有参数移动, 临时资源还是可以作为参数触发拷贝构造
         可能2. 用非常巨大的源对象去构造新对象，且不在乎构造后的源对象，比如 std::string s = "超长文本" --> TYPE_K(s);
         HashTableNode在构造时，成员中 key / value 确实都有可能是 巨大复杂对象or临时资源, 所以对于key/value, 支持移动构造是有必要的；对于 节点指针, 浅拷贝即可
         */
-        // HashNodeTable 的移动构造函数 --> 只要 TYPE_K 和 TYPE_V 实现了完善的移动构造函数, 那么哈希表节点的移动构造就是 保持右值类型 std::move 去触发成员构造即可
+        // HashNodeTable 的业务构造函数2 --> 只要 TYPE_K 和 TYPE_V 实现了完善的移动构造函数, 此节点构造就是用 保持右值类型 std::move 去触发成员的移动构造
         HashTableNode(TYPE_K&& k, TYPE_V&& v, HashTableNode* ptr): key(std::move(k)), value(std::move(v)), next(ptr) {}
-        // 既然 k 已经是 右值引用 类型 TYPE_K&&, 为什么要用 std::move(k) 保持右值？
+        // 问: 既然 k 已经是 右值引用 类型 TYPE_K&&, 为什么要用 std::move(k) 保持右值？
         // 答: 旧版本 C++ 在函数内部会把带名字的变量(具名变量)视为左值. 新版本引入移动语义后, std::move保持兼容性
 
-        // 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形需要重载: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
-        HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
-
-    // RULE 5: 移动赋值运算符: ClassName& operator=(ClassName&& other), 负责窃取置换资源(if有资源, 释放旧资源, 窃取新资源)
-        /*
-        HashTableNode Node 与 Node 之间, 除了索引没有交互的必要, 故禁止 移动赋值. 这没有意义
+        /* 业务构造函数情景3: 哈希表node 在 atomic_upsert 方法里有一个比较特殊的情形: key实参右值以移动/临时, 而default_value作为重复使用的对象, 必须const&
         */
-        HashTableNode& operator=(HashTableNode&& other) = delete;
+        // HashNodeTable 的业务构造函数3 --> TYPE_K 实现了完善的移动构造, TYPE_V 实现了完善的拷贝构造, 此节点构造就是用 保持右值类型std::move 触发key成员的移动构造, 用常引用触发 value成员的拷贝构造
+        HashTableNode(TYPE_K&& k, const TYPE_V& v, HashTableNode* ptr): key(std::move(k)), value(v), next(ptr) {}
     };
 
     // 如果 node 存在非平凡析构对象, 那么对 HashTableNode 显式调用析构
@@ -277,18 +286,27 @@ public:
         // 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
         HashTableNode* new_node;
 
-        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址, 如果存在
-            // 直接复用 _free_nodes_head 地址: 
-            new_node = _free_nodes_head; // 这里 new_node 指向的地址已经被析构
+        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址(如果存在). _free_nodes_head的唯一非nullptr途径就是通过 pop 方法更新
+            // 取待复用地址: 直接复用 _free_nodes_head
+            new_node = _free_nodes_head; // 废弃方案中这里new_node指向的地址已经被析构, 新方案中这里new_node指向的Node只是成员变量key和value被析构, Node作为空壳仍然valid
 
-            // 更新 _free_nodes_head
-            // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
-            _free_nodes_head = std::launder(new_node)->free_next;
-            // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
-            // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
+            // 更新 _free_nodes_head, 然后 re-placement new
+            // 废弃方案:
+            // // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
+            // _free_nodes_head = std::launder(new_node)->free_next;
+            // // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移". 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
+            // // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+            // new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
 
-            // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-            new(new_node) HashTableNode{std::forward<K>(key), std::forward<V>(value), _table[index]};
+            // 新方案:
+            // new_node指向的node作为空壳仍然valid, 内部key&value已经析构, next已经置空, free_next指向下一个待复用地址(如果有)
+            _free_nodes_head = new_node->free_next;
+            // 在空壳 new_node 内部成员变量key&value(已析构)上placement new构造, 并用头插法将该index代表的bucekt插入new_node->next, 置空free_next表示从free_list中脱离
+            new_node->next = _table[index];
+            new_node->free_next = nullptr;
+            new(&new_node->key) TYPE_K(std::forward<K>(key));
+            new(&new_node->value) TYPE_V(std::forward<V>(value));
+
             // 完美转发以保持key和value的 左/右 值引用性质, 才能触发对应的 HashTableNode 构造函数(左(常)值引用-->拷贝, 右值引用-->移动)
             // 如果传入的是右值引用，那么源对象会被掏空. 这样调用的本意就是转移资源，所以不介意源被掏空.
 
@@ -350,19 +368,26 @@ public:
         // 执行 insert 逻辑. 那么就要执行新建节点, 并将新节点放到 _table[index] 这个bucket的头部
         HashTableNode* new_node;
 
-        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址, 如果存在
-            // 直接复用 _free_nodes_head 地址: 
-            new_node = _free_nodes_head; // 这里 new_node 指向的地址已经被析构
+        if (_free_nodes_head) { // 首先复用 _free_nodes_head 里的地址(如果存在). _free_nodes_head的唯一非nullptr途径就是通过 pop 方法更新
+            // 取待复用地址: 直接复用 _free_nodes_head
+            new_node = _free_nodes_head; // 废弃方案中这里new_node指向的地址已经被析构, 新方案中这里new_node指向的Node只是成员变量key和value被析构, Node作为空壳仍然valid
+            
+            // 更新 _free_nodes_head, 然后 re-placement new
+            // 废弃方案:
+            // // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
+            // _free_nodes_head = std::launder(new_node)->free_next;
+            // // new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移". 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
+            // // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
+            // new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
 
-            // 更新 _free_nodes_head
-            // 尽管 new_node 指向的地址已经析构, 但->是纯粹的偏移操作, 允许执行读取free_next来更新. 当然free_next也是析构后的地址
-            _free_nodes_head = std::launder(new_node)->free_next;
-            //new_node指向的地址已析构, 有些编译器会警告这种读取"析构后的地址的偏移"
-            // 用 launder 告诉编译器: 虽然 new_node 这块对象死了, 但数据还在, 我要读取
-
-            // 在 new_node指向的地址上(已析构), placement new 构造, 并用头插法在构造时直接把该index代表的bucket插入new_node->next
-            new(new_node) HashTableNode{std::forward<K>(key), default_val, _table[index]};
-
+            // 新方案:
+            // new_node指向的node作为空壳仍然valid, 内部key&value已经析构, next已经置空, free_next指向下一个待复用地址(如果有)
+            _free_nodes_head = new_node->free_next;
+            // 在空壳 new_node 内部成员变量key&value(已析构)上placement new构造, 并用头插法将该index代表的bucekt插入new_node->next, 置空free_next表示从free_list中脱离
+            new_node->next = _table[index];
+            new_node->free_next = nullptr;
+            new(&new_node->key) TYPE_K(std::forward<K>(key));
+            new(&new_node->value) TYPE_V(default_val);
         }
         else { // 如果没有 _free_nodes_head 可复用地址
             // 在 内存池 上分配新内存给新节点, raw_mem 内存
@@ -410,21 +435,23 @@ public:
         if (!head) return false;
 
         // 若 key-hash 存在, 遍历该链表以查询 key
-        HashTableNode* parent = head; // 为了"删除"节点, 需要跟随保留父节点指针
+        HashTableNode* parent = nullptr; // 为了"删除"节点, 需要跟随保留父节点指针
 
         while (head) {
             if (head->key == key) {
+                // 已定位到待摘除的node
                 // 获取 value
                 value = head->value;
 
                 // 摘除 node
-                if (!parent) { // parent为空, 说明头节点head就是待删除节点
-                    _table[index] = nullptr; // 直接置空指针摘除head
+                if (!parent) { // parent为空, 说明其未曾更新, 说明头节点head就是待删除节点
+                    _table[index] = head->next; // 摘除head
                 }
                 else { // 如果 parent 不为空, 说明待删节点head不是头节点
                     parent->next = head->next; // parent 一定不是空指针: next重挂, 从而 head 从链表中脱离
                 }
 
+                // 已摘除
                 // 防御性编程 置空 head 的 next以防止非法访问
                 head->next = nullptr;
 
@@ -435,7 +462,13 @@ public:
                 head->free_next = _free_nodes_head;
                 // _free_nodes_head 是 Node* 类链表头, 其自身以及其->free_next 指向的是析构后的nodes的地址们.
                 _free_nodes_head = head;
-                destroy_node(head); // _free_nodes_head 指向的地址被析构了
+                
+                // 废弃方案: 析构整个被摘除的 node
+                // destroy_node(head);
+                
+                // 新方案: 只析构数据成员变量 key 和 value, head指向的 HashTableNode 作为空壳仍然valid等待复用
+                if constexpr(!std::is_trivially_destructible<TYPE_K>::value) head->key.~TYPE_K();
+                if constexpr(!std::is_trivially_destructible<TYPE_V>::value) head->value.~TYPE_V();
 
                 return true;
             }
@@ -473,12 +506,12 @@ public:
             _table[index] = nullptr; // _table指针数组(buckets)保持结构.
         }
 
-        _free_nodes_head = nullptr; // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用而不是node地址复用
+        _free_nodes_head = nullptr; // 全表clear时置空 空闲链表, 等待 reset 内存池全表复用. 不会复用空闲链表上的空壳node地址.
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
         _size = 0;
-
     }
 
-    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0
+    // clear 不破坏表结构, 即 bucket 数组仍然存在. destroy 在 clear 基础上, 释放 bucket 数组 _table, _capacity置0 即完全破坏表结构
     // destroy 之后 哈希表不可复用. 但是所使用过的内存未释放, 等待mempool在外部统一释放
     void destroy() {
         // 遍历所有(非空)buckets, 首先对每个链表头, 沿着链表头析构所有node, 然后将该链表头置空
@@ -502,6 +535,7 @@ public:
         _size = 0; // node数量置0
         _capacity = 0; // _capacity 置零
         _free_nodes_head = nullptr; // 空闲链表置空
+        // 不要沿着空闲链表去析构那些空壳node. 它们内部的非平凡析构成员(如果是)key和value已经被析构了, 只剩下平凡析构的两个指针. 再次析构会造成double free
     }
 
 
@@ -510,206 +544,206 @@ public:
         return _size; // 原子读取
     }
 
+
+
+    // 迭代相关. 详见 mempooled_hashtable_iterators.inl
+
+    struct ConstProxy {
+        const TYPE_K& key;
+        const TYPE_V& value;
+    }
+
+    struct MutableProxy {
+        const TYPE_K& key; // 即使是 MutableProxy, 也不会允许改动 key, 因为这会触发 rehash
+        TYPE_V& value;
+    }
+
+    struct DrainProxy {
+        // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
+        TYPE_K key;
+        TYPE_V value;
+
+        // 允许隐式转换为 std::pair, 方便外部容器接受
+        // TODO: 添加 .first & .second 访问
+
+        // 支持结构化绑定
+        // TODO
+
+        // 禁止深拷贝: 这个 drain遍历返回的结果, 强制只能移动使用. 实际上尽量使用 C++17的结构化绑定 auto&& [k,v]
+        DrainProxy(const DrainProxy&) = delete;
+        DrainProxy& operator=(const DrainProxy&) = delete;
+
+        // 允许移动: 省略
+    }
+
+
     /*
     * 只读迭代器
-    * 
-    * 用法: 单一线程下 for(auto it = hash_table.cbegin(); it != hash_table.cend(); ++it) {auto [k, v] = *it; //code//}
     */
     class const_iterator {
-
+        // const_iterator的构造函数private防止误用. hashtable作为母类需要申明friend才能调用
+        friend class pooled_hashtable;
     public:
-
-        const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table),
-            _bucket_index(bucket_index),
-            _node(node)
-        {
-            _null_node_advance_to_next_valid_bucket();
-        }
-
-        // *it 迭代器对象解引用 --> 只读返回
-        std::pair<const TYPE_K&, const TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
-        }
-        
-
-        const_iterator& operator++() {
-            if (_node) {
-                _node = _node->next;
-            }
-            if (!_node) {
-                _bucket_index++;
-                _null_node_advance_to_next_valid_bucket(); // 
-            }
-            return *this;
-        }
-
-
-        const_iterator operator++(int) {
-            const_iterator tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-
-        bool operator==(const const_iterator& other) const {
-            return _node == other._node && _hash_table == other._hash_table;
-        }
-
-
-        bool operator!=(const const_iterator& other) const {
-            return !(*this == other);
-        }
-
+        // 标准的 Iterator Traits: 标记为 forwardIterator
+        using iterator_category = std::forward_iterator_tag;
+        ConstProxy operator*() const {}
+        const_iterator& operator++() {}
+        const_iterator operator++(int) {}
+        bool operator==(const const_iterator& other) const {}
+        bool operator!=(const const_iterator& other) const {}
     private:
-
+        explicit const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
         const pooled_hashtable* _hash_table;
-
         size_t _bucket_index;
-
         HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {} //若当前遍历指针为nullptr,移动其指向下一个有效node
+    };
 
-        void _null_node_advance_to_next_valid_bucket() {
+    // 暴露 const_iterator 迭代器接口. 直接在外部使用其要慎重. 推荐使用 const_range 接口
+    const_iterator cbegin() const { return const_iterator(this, 0, nullptr); } // 首迭代器: 自动定位到第一个有效节点
+    const_iterator cend() const { return const_iterator(this, _capacity, nullptr); } // 尾后迭代器: 返回的迭代器应该处于 end临界状态, 即 刚结束迭代的状态
 
-            while (!_node && _bucket_index < _hash_table->_capacity) {
-
-                _node = (_hash_table->_table)[_bucket_index];
-
-                if (_node) break;
-
-                _bucket_index++;
-            }
-        }
-
-    }; // end of const_iterator definition
-
-    
-    const_iterator cbegin() const {
-        return const_iterator(this, 0, nullptr); // 会自动定位到第一个有效节点
-    }
-
-    const_iterator cend() const {
-        return const_iterator(this, _capacity, nullptr); // 尾后迭代器: 返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    }
 
     /*
-    * 迭代器
-    * 
-    // for(auto it = iterator.begin(); it != iterator.end(); ++it)
-    // 上述是迭代器的用法. 迭代器 iterator类 本质是对 "迭代产出对象" it 的引用, it 是 iterator 缩写.
-    // 即一个迭代器类经过 begin 构造为迭代器对象 it 之后, it 就一直是该迭代器的引用, 迭代器内部不同的状态引向不同it结果
-    // 哈希表迭代器, 输出 k-v. 对 it 解引用 *it 即得到想要的输出
+    * 此 const range 返回的是只读迭代
+    * for (auto&& [k, v] : hashtable.const_iter_range()) {
+    *       ..code using k(const K&类型), v(const V&类型)...
+    *   }
+    */
+    struct const_range {
+        const pooled_hashtable& _map;
+
+        // 在 const_range 中封装 hashtable 的 cbegin & cend 成员函数, 
+        const_iterator begin() { return _map.cbegin(); }
+        const_iterator end() { return _map.cend(); }
+    };
+
+    // 提供获取const range的接口
+    const_range const_iter_range() const {
+        return const_range{*this};
+    }
+
+
+
+    /*
+    * value可变迭代器
     */
     class iterator {
-
-    // 哈希表的迭代器应该返回所有 node 的 key-value. 所以要遍历所有 buckets 的所有 nodes
+        // iterator的构造函数private防止误用. hashtable需要申明friend才能调用
+        friend class pooled_hashtable;
     public:
+        // 标准的 Iterator Traits: 标记为 forwardIterator
+        using iterator_category = std::forward_iterator_tag;
+        MutableProxy operator*() const {}
+        iterator& operator++() {}
+        iterator operator++(int) {}
+        bool operator==(const iterator& other) const {}
+        bool operator!=(const iterator& other) const {}
+    private:
+        explicit iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        pooled_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
+        size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
+        HashTableNode* _node; // 遍历所有桶的所有node
+        void _null_node_advance_to_next_valid_bucket() {}
+    };
 
-        // 迭代器的构造, 应该满足能准确表达构造 begin 状态, 和 end 状态. 中间线性迁移交给 ++ 操作
-        /*
-        * @param hash_table: 本哈希表指针
-        * @param bucket_index: for begin: 0; for end: 本哈希表的_capacity
-        * @param node: for begin: nullptr; for end: nullptr
-        * 
-        * 上述三个属性决定了本迭代器的状态, 然后决定了不同的迭代产出
-        * 行为: begin(this哈希表指针, 0, nullptr)初始化下, 成功自定位到first valid bucket状态
-        *       end(this哈希表指针, _capacity, nullptr)下成功定位到 ++ 操作符的临界退出点
-        */
-        // for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
-        // for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
-        iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-            :_hash_table(hash_table),
-            _bucket_index(bucket_index),
-            _node(node)
-        {
-            _null_node_advance_to_next_valid_bucket();
-        }
+    // 暴露 iterator 迭代器接口. 推荐在 range 接口中使用, 如果在外部使用要慎重
+    iterator begin() { return iterator(this, 0, nullptr); }
+    iterator end() { return iterator(this, _capacity, nullptr); }
 
-        // 对迭代器的解引用 *it --> 返回 k-v pair. 注意在外面不能引用接收, 即 pair& p = *it 是非法的
-        // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用(结构化绑定)
-        // 这样设计下来, 返回类型是个代理类型: 即本质是个值, 但试图是引用. 所以在外部只能用值作为承接变量
-        std::pair<const TYPE_K&, TYPE_V&> operator*() const {
-            return {_node->key, _node->value}; // 返回 pair(key, value)临时对象
+    /*
+    * 此 range 返回的是 可变迭代
+    * for (auto&& [k, v] : hashtable.iter_range()) {
+    *       v(V&类型) = some code using k(const K&类型)
+    *   }
+    */
+    struct range {
+        pooled_hashtable& _map;
+
+        // 在 range 中封装 hashtable 的 begin & end 成员函数. range作为嵌套类可以直接使用外围类的所有成员
+        iterator begin() { return _map.begin(); }
+        iterator end() { return _map.end(); }
+    };
+
+    // 提供获取range的接口
+    range iter_range() {
+        return range{*this};
+    }
+
+
+
+
+    /*
+    * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
+    */
+    class drain_iterator {
+        // drain_iterator的构造方法为private为防止误用. 只能在 drain_range 内部调用
+        friend struct drain_range;
+    private:
+        // 显式构造, 但 private化构造函数, 意味着只允许 类内部以及友元 drain_range 执行该构造函数
+        explicit drain_iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        // 由于 drain_iterator 的生命周期由 drain_range 绑定, 所以clean_remaining逻辑可以放在 drain_range 的析构函数里.
+        pooled_hashtable* _hash_table;
+        size_t _bucket_index;
+        HashTableNode* _node;
+        void _null_node_advance_to_next_valid_bucket() {}
+    public:
+        // 标准的 Iterator Traits: 标记为 inputIterator
+        using iterator_category = std::input_iterator_tag
+        // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
+        drain_iterator(const drain_iterator&) = delete;
+        drain_iterator& operator=(const drain_iterator&) = delete;
+        // 允许移动, 原迭代器失效
+        drain_iterator(drain_iterator&&) noexcept {}
+        drain_iterator& operator=(drain_iterator&&) = default;
+        DrainProxy operator*() {}
+        drain_iterator& operator++() {}
+        drain_iterator operator++(int) {}
+        bool operator==(const drain_iterator& other) const {}
+        bool operator!=(const drain_iterator& other) const {}
+    };
+
+    
+    // 不暴露 drain_iterator 的 任何构造接口, 只允许在 drain() 接口中构造 drain_range 使用
+
+    // drain range. 利用 RAII 在迭代结束/退出时, 清理哈希表状态(若drain迭代中发生非正常break, 哈希表已经被破坏, 应该彻底清空clear, 不是destroy)
+    struct drain_range {
+        pooled_hashtable* _map;
+        bool _fully_drained = false;
+
+        // 作为 friend, drain_range 封装 drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
+        drain_iterator begin() { return drain_iterator(this, 0, nullptr); }
+        drain_iterator end() {
+            _fully_drained = true;
+            return drain_iterator(this, _capacity, nullptr);
         }
         
-        // C++/C 风格: 前置自增: 返回改变后的对象自身(引用)；后置自增：对象改变后，返回原值副本
-        // 对迭代器的前置自增（自增自身, 返回自增后新值引用） ++it --> 下一个状态的迭代器
-        iterator& operator++() {
-            if (_node) {
-                _node = _node->next; // 如果当前 _node 仍然在某链表里, move to next
+        // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要clear已经被drain破坏掉的哈希表 至 空表但可复用状态
+        ~drain_range() {
+            if (!_map) return;
+            if (_fully_drained) {
+                // 当明确已经全部 drain, 走快速 置空置零命令
+                std::fill(_map->_table, _map->_table + _map->_capacity, nullptr);
+                _map->_size = 0;
+                _map->_free_nodes_head = nullptr;
             }
-            // 如果 _node 为空, 不论是next为空, 还是本来就空, 说明当前桶已经遍历完了
-            if (!_node) {
-                _bucket_index++; // move to next bucket
-                _null_node_advance_to_next_valid_bucket(); // 
-            }
-            return *this; // this是本对象指针, *this就是返回本对象
-        }
-
-        // 对迭代器的后置自增（自增自身, 返回自增前原值副本） it++ --> 下一个状态的迭代器
-        iterator operator++(int) {
-            iterator tmp = *this;
-            ++(*this);
-            return tmp; // 返回原值副本
-        }
-
-        // 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
-        bool operator==(const iterator& other) const {
-            return _node == other._node && _hash_table == other._hash_table;
-        }
-
-        // 给出两个迭代器状态是否不相等的判决方法, 必须是 operator == 操作的反面
-        bool operator!=(const iterator& other) const {
-            return !(*this == other); // this是本对象指针, *this就是返回本对象
-        }
-
-    private:
-
-        // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
-        pooled_hashtable* _hash_table;
-
-        // 遍历哈希表的所有桶, 0 -> _capacity-1
-        size_t _bucket_index;
-
-        // 遍历所有桶的所有node
-        HashTableNode* _node;
-
-        // 当 _node 沿着 _bucket 链表移动到 nullptr, 亦或是初始化为 nullptr, 需要"跳步"到next valid bucket链表头
-
-        // 此跳步操作, 只在 _node 为空时才会执行
-        // 执行结果1: _node 跳转到 next valid bucket head, _bucket_index 正确为该 valid bucket
-        // 执行结果2: _node 仍然为空, _bucket_index = hashtable capacity
-        void _null_node_advance_to_next_valid_bucket() {
-            // 当前 _node 为 nullptr, 且当前 _bucket_index 尚未穷尽
-            while (!_node && _bucket_index < _hash_table->_capacity) {
-                // 哈希表取出_table内部属性, 再取出当前 bucket 链表头作为 potential next node
-                _node = (_hash_table->_table)[_bucket_index];
-
-                if (_node) break; // 如果 _node 不为 nullptr, 说明跳步 bucket 成功了, break
-
-                // 如果 _node 仍然是 null, 说明 _bucket_index 对应桶是空的. 尝试下一个桶
-                _bucket_index++;
+            else {
+                // 当中途break, 兜底清理剩余node
+                _map->clear();
             }
         }
+    };
 
-    };  // end of iterator definition
-
-    // pooled_hashtable 类对象 hashtable 调用 begin 方法, 返回一个迭代器
-    // begin 方法返回的迭代器应该处于 begin 的状态, 即指向 first it
-    // .begin 方法返回的是 iterator 对象, 故同一张哈希表, 多次调用会返回不同的 iterator 对象.
-    iterator begin() {
-        return iterator(this, 0, nullptr);
+    drain_range drain() {
+        return drain_range{this};
     }
 
-    // pooled_hashtable 类对象 hashtable 调用 end 方法, 返回一个迭代器
-    // end 方法返回的迭代器应该处于 end 的临界状态, 即刚结束迭代的 状态
-    iterator end() {
-        return iterator(this, _capacity, nullptr);
-    }
 
 }; // end of pooled_hashtable definition
 
 
 
+// include separated nested iterator classes for mempooled_hashtable 
+#include "mempooled_hashtable_iterators.inl"
 
 #endif
