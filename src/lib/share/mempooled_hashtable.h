@@ -551,12 +551,12 @@ public:
     struct ConstProxy {
         const TYPE_K& key;
         const TYPE_V& value;
-    }
+    };
 
     struct MutableProxy {
         const TYPE_K& key; // 即使是 MutableProxy, 也不会允许改动 key, 因为这会触发 rehash
         TYPE_V& value;
-    }
+    };
 
     struct DrainProxy {
         // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
@@ -573,8 +573,10 @@ public:
         DrainProxy(const DrainProxy&) = delete;
         DrainProxy& operator=(const DrainProxy&) = delete;
 
-        // 允许移动: 省略
-    }
+        // 允许移动: 显式
+        DrainProxy(DrainProxy&&) = default;
+        DrainProxy& operator=(DrainProxy&&) = default;
+    };
 
 
     /*
@@ -689,16 +691,15 @@ public:
         void _null_node_advance_to_next_valid_bucket() {}
     public:
         // 标准的 Iterator Traits: 标记为 inputIterator
-        using iterator_category = std::input_iterator_tag
+        using iterator_category = std::input_iterator_tag;
         // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
         drain_iterator(const drain_iterator&) = delete;
         drain_iterator& operator=(const drain_iterator&) = delete;
         // 允许移动, 原迭代器失效
-        drain_iterator(drain_iterator&&) noexcept {}
+        drain_iterator(drain_iterator&&) = default;
         drain_iterator& operator=(drain_iterator&&) = default;
         DrainProxy operator*() {}
         drain_iterator& operator++() {}
-        drain_iterator operator++(int) {}
         bool operator==(const drain_iterator& other) const {}
         bool operator!=(const drain_iterator& other) const {}
     };
@@ -712,10 +713,10 @@ public:
         bool _fully_drained = false;
 
         // 作为 friend, drain_range 封装 drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
-        drain_iterator begin() { return drain_iterator(this, 0, nullptr); }
+        drain_iterator begin() { return drain_iterator(_map, 0, nullptr); }
         drain_iterator end() {
             _fully_drained = true;
-            return drain_iterator(this, _capacity, nullptr);
+            return drain_iterator(_map, _map->_capacity, nullptr);
         }
         
         // drain range 的析构: 在退出(无论是正常还是非正常)for循环时, drain_range 被析构, 此时要clear已经被drain破坏掉的哈希表 至 空表但可复用状态

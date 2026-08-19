@@ -68,28 +68,41 @@ pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::drain
 
 
 // *it 迭代器对象解引用 --> 临时局部变量k & v 移动构造, _node->key 和 _node->value 处于 moved-from 状态. 析构它们后, 返回临时对象 {move(k), move(v)} 作为 DrainProxy 将其转移出去
+// 不在解引用这里析构被移动的node, 保持它们是moved-from状态, 并且仍然未脱表. 在下一步++析构被移动的node, 并将其脱表
+// 这样设计的好处是, 万一for-迭代中途break, 节点无论是否moved-from状态, 其仍然在表中, 全表clear操作可以对其执行析构. 假设设计成在解引用这里析构, 在++脱表, 那么万一中途break执行clear, 会造成二次析构
+// --> 解决方案: 析构和脱表必须放在同一个操作, 即++操作. *操作只移动
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
 auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator*()
     -> DrainProxy
 {
-    TYPE_K k = std::move(_node->key);
-    TYPE_V v = std::move(_node->value);
-    // 析构 _node->key 和 _node->value
-    if constexpr(!std::is_trivially_destructible<TYPE_K>::value) _node->key.~TYPE_K();
-    if constexpr(!std::is_trivially_destructible<TYPE_V>::value) _node->value.~TYPE_V();
+    // TYPE_K k = std::move(_node->key);
+    // TYPE_V v = std::move(_node->value);
+    // // 析构 _node->key 和 _node->value
+    // if constexpr(!std::is_trivially_destructible<TYPE_K>::value) _node->key.~TYPE_K();
+    // if constexpr(!std::is_trivially_destructible<TYPE_V>::value) _node->value.~TYPE_V();
 
-    return DrainProxy{std::move(k), std::move(v)};
+    return DrainProxy{std::move(_node->key), std::move(_node->value)};
 }
 
 
-//  ++it 迭代器对象自增后返回自身引用. 使用尾置返回类型
+//  ++it 迭代器对象自增后返回自身引用. 使用尾置返回类型: 除了自增之外, 内部要完成 moved-from node 析构 + 脱表
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
 auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator++()
     -> drain_iterator&
 {
     if (_node) {
-        // _node 的 key & value 都已经析构
-        _node = _node->next;
+        HashTableNode* curr = _node;
+        HashTableNode* next_node = _node->next;
+        // 析构 _node 的 key & value
+        if constexpr(!std::is_trivially_destructible<TYPE_K>::value) curr->key.~TYPE_K();
+        if constexpr(!std::is_trivially_destructible<TYPE_V>::value) curr->value.~TYPE_V();
+        // 节点脱表
+        _hash_table->_table[_bucket_index] = next_node;
+        --_hash_table->_size;
+        // 可以设计成 moved-from 节点在析构后加入 free_list. 不过其实没有必要, 因为drain之后全表应该处于clear状态
+        // curr->next = _hash_table->_free_nodes_head;
+        // _hash_table->_free_nodes_head = curr;
+        _node = next_node;
     }
     if (!_node) {
         _bucket_index++;
@@ -99,15 +112,7 @@ auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::
 }
 
 
-// it++ 迭代器对象自增后, 返回自增前的自身拷贝. 使用尾置返回类型
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-auto pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator++(int)
-    -> drain_iterator
-{
-    drain_iterator tmp = *this;
-    ++(*this);
-    return tmp;
-}
+// it++ 迭代器对象自增后, 返回自增前的自身拷贝. 由于 drain_iterator 禁止了拷贝构造, 且 input_iterator 也不需要返回值的后置++ 
 
 
 // 迭代器相等状态判断
@@ -120,7 +125,7 @@ bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::
 
 // 迭代器不等状态判断
 template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator==(const drain_iterator& other) const
+bool pooled_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::drain_iterator::operator!=(const drain_iterator& other) const
 {
     return !(*this == other);
 }
