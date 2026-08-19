@@ -27,6 +27,7 @@
 #include <cstring>
 #include <new>
 #include <stdexcept>
+#include <array>
 
 constexpr size_t next_pow2(size_t x) {
     if (x <= 1) return 1;
@@ -178,7 +179,7 @@ private:
         }
     };
 
-    static thread_local TLSRegistry tls_registry;
+    inline static thread_local TLSRegistry tls_registry;
 
     // 根据 本哈希表实例的指针, 本线程可以根据此函数, 找到 本线程local 的 tls free_list
     inline TLSFreeList* get_tls_free_list() {
