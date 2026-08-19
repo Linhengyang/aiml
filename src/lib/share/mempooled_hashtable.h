@@ -546,38 +546,17 @@ public:
 
 
 
-    // 迭代相关. 详见 mempooled_hashtable_iterators.inl
+    // 迭代相关
+    // 为 mempooled_hashtable 提供各种性质的遍历器
+    // 遍历器本意该是轻包袱的, *it返回一个对左值的引用 T&, 这样在外部可以引用接取 T& val = *it, 然后也符合stl里find/swap等标准算法. 一般不返回一个临时值, 比如 {K&, V&} 这样会造成外部无法用 左值引用类型 去接取.
+    // 但一这里不需要符合stl标准, 二聚焦drain语义无论是在rust还是在c++, 都是一种破坏性遍历, 无需详细维护哈希表内部状态(事后清空即可), 三在外部使用c++17结构化绑定 auto&& 直接去接取 临时对象
+
+    // ================= 嵌套类实现区 =================
 
     struct ConstProxy {
         const TYPE_K& key;
         const TYPE_V& value;
     };
-
-    struct MutableProxy {
-        const TYPE_K& key; // 即使是 MutableProxy, 也不会允许改动 key, 因为这会触发 rehash
-        TYPE_V& value;
-    };
-
-    struct DrainProxy {
-        // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
-        TYPE_K key;
-        TYPE_V value;
-
-        // 允许隐式转换为 std::pair, 方便外部容器接受
-        // TODO: 添加 .first & .second 访问
-
-        // 支持结构化绑定
-        // TODO
-
-        // 禁止深拷贝: 这个 drain遍历返回的结果, 强制只能移动使用. 实际上尽量使用 C++17的结构化绑定 auto&& [k,v]
-        DrainProxy(const DrainProxy&) = delete;
-        DrainProxy& operator=(const DrainProxy&) = delete;
-
-        // 允许移动: 显式
-        DrainProxy(DrainProxy&&) = default;
-        DrainProxy& operator=(DrainProxy&&) = default;
-    };
-
 
     /*
     * 只读迭代器
@@ -588,23 +567,61 @@ public:
     public:
         // 标准的 Iterator Traits: 标记为 forwardIterator
         using iterator_category = std::forward_iterator_tag;
-        ConstProxy operator*() const {}
-        const_iterator& operator++() {}
-        const_iterator operator++(int) {}
-        bool operator==(const const_iterator& other) const {}
-        bool operator!=(const const_iterator& other) const {}
+        // *it 迭代器对象解引用 --> 只读返回
+        ConstProxy operator*() const {
+            // 返回 pair(key, value)临时对象
+            return ConstProxy{_node->key, _node->value};
+        }
+        // ++it 迭代器对象自增后返回自身引用
+        const_iterator& operator++() {
+            if (_node) {
+                _node = _node->next;
+            }
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket();
+            }
+            return *this;
+        }
+        // it++ 迭代器对象自增后, 返回自增前的自身拷贝. 使用尾置返回类型
+        const_iterator operator++(int) {
+            const_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+        // 返回类型（第一个 pooled_hashtable<...>::const_iterator）：此时编译器还没有进入 pooled_hashtable 或 const_iterator 的作用域（因为它在 :: 之前）。所以必须使用完全限定名
+        // 参数列表（const const_iterator& other）：此时编译器已经进入了 const_iterator 的作用域（在 :: 之后）。在类作用域内，可以直接使用类名，所以不需要加前缀
+        // 迭代器的 == 相等判断 用于是否结束状态
+        bool operator==(const const_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+        // 迭代器的 != 不等判断
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
     private:
-        explicit const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit const_iterator(const pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
         const pooled_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
-        void _null_node_advance_to_next_valid_bucket() {} //若当前遍历指针为nullptr,移动其指向下一个有效node
+        void _null_node_advance_to_next_valid_bucket() { //若当前遍历指针为nullptr,移动其指向下一个有效node
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                _node = (_hash_table->_table)[_bucket_index];
+                if (_node) break;
+                _bucket_index++;
+            }
+        }
     };
 
     // 暴露 const_iterator 迭代器接口. 直接在外部使用其要慎重. 推荐使用 const_range 接口
     const_iterator cbegin() const { return const_iterator(this, 0, nullptr); } // 首迭代器: 自动定位到第一个有效节点
     const_iterator cend() const { return const_iterator(this, _capacity, nullptr); } // 尾后迭代器: 返回的迭代器应该处于 end临界状态, 即 刚结束迭代的状态
-
 
     /*
     * 此 const range 返回的是只读迭代
@@ -626,27 +643,101 @@ public:
     }
 
 
+    struct MutableProxy {
+        const TYPE_K& key; // 即使是 MutableProxy, 也不会允许改动 key, 因为这会触发 rehash
+        TYPE_V& value;
+    };
 
     /*
-    * value可变迭代器
+    * 迭代器: iterator类 本质是对 "迭代产出对象" it 的引用, it 是 iterator 缩写. value可修改
+    * 
+
+    一个迭代器类经过 begin 构造为迭代器对象 it 之后, it 就一直是该迭代器的引用, 迭代器内部不同的状态引向不同it结果
+    哈希表迭代器, 输出 k-v. 对 it 解引用 *it 即得到想要的输出. 迭代器的构造, 应该满足能准确表达构造 begin 状态, 和 end 状态. 中间线性迁移交给 ++ 操作
     */
+
+
+    /*
+    * @param hash_table: 本哈希表指针
+    * @param bucket_index: for begin: 0; for end: 本哈希表的_capacity
+    * @param node: for begin: nullptr; for end: nullptr
+    * 
+    * 上述三个属性决定了本迭代器的状态, 然后决定了不同的迭代产出
+    * 行为: begin(this哈希表指针, 0, nullptr)初始化下, 成功自定位到first valid bucket状态
+    *       end(this哈希表指针, _capacity, nullptr)下成功定位到 ++ 操作符的临界退出点
+    */
+    // for begin: _node = nullptr, _bucket_index=0 开始寻找第一个valid bucket
+    // for end: _node = nullptr, _bucket_index=_capacity, 正好是迭代结束后的临界点
     class iterator {
         // iterator的构造函数private防止误用. hashtable需要申明friend才能调用
         friend class pooled_hashtable;
     public:
         // 标准的 Iterator Traits: 标记为 forwardIterator
         using iterator_category = std::forward_iterator_tag;
-        MutableProxy operator*() const {}
-        iterator& operator++() {}
-        iterator operator++(int) {}
-        bool operator==(const iterator& other) const {}
-        bool operator!=(const iterator& other) const {}
+        // 对迭代器的解引用 *it --> 返回 k-v pair. 注意这里返回的是代理类型, 在外面不能引用接收, 即 pair& p = *it 是非法的
+        // 只能 pair p = *it; 这样 p 是两个引用组成的 pair, 或 auto&& [k, v] = *it; C++17的万能引用(结构化绑定)
+        // 这样设计下来, 返回类型是个代理类型: 即本质是个值, 但试图是引用. 所以在外部只能用值作为承接变量
+        MutableProxy operator*() const {
+            // 返回 pair(key, value)临时对象
+            return MutableProxy{_node->key, _node->value};
+        }
+
+        // C++/C 风格: 前置自增: 返回改变后的对象自身(引用)；后置自增：对象改变后，返回原值副本
+
+        // 对迭代器的前置自增（自增自身, 返回自增后新值引用） ++it --> 下一个状态的迭代器
+        iterator& operator++() {
+            if (_node) {
+                // 如果当前 _node 仍然在某链表里, move to next
+                _node = _node->next;
+            }
+            if (!_node) { // 如果 _node 为空, 不论是next为空, 还是本来就空, 说明当前桶已经遍历完了
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket();
+            }
+            return *this;
+        }
+        // 对迭代器的后置自增（自增自身, 返回自增前原值副本） it++ --> 下一个状态的迭代器
+        iterator operator++(int) {
+            iterator tmp = *this;
+            ++(*this);
+            // 返回原值副本
+            return tmp;
+        }
+        // 给出两个迭代器状态是否相等的判决方法: 稳态下判断 _node 就够了, 因为节点已经蕴含了桶信息
+        bool operator==(const iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+        // 给出两个迭代器状态是否不相等的判决方法, 必须是 operator == 操作的反面
+        bool operator!=(const iterator& other) const {
+            return !(*this == other);
+        }
     private:
-        explicit iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
         pooled_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
         size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
         HashTableNode* _node; // 遍历所有桶的所有node
-        void _null_node_advance_to_next_valid_bucket() {}
+        // 当 _node 沿着 _bucket 链表移动到 nullptr, 亦或是初始化为 nullptr, 需要"跳步"到next valid bucket链表头
+
+        // 此跳步操作, 只在 _node 为空时才会执行
+        // 执行结果1: _node 跳转到 next valid bucket head, _bucket_index 正确为该 valid bucket
+        // 执行结果2: _node 仍然为空, _bucket_index = hashtable capacity
+        void _null_node_advance_to_next_valid_bucket() {
+            // 当前 _node 为 nullptr, 且当前 _bucket_index 尚未穷尽
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                // 哈希表取出_table内部属性, 再取出当前 bucket 链表头作为 potential next node
+                _node = (_hash_table->_table)[_bucket_index];
+                // 如果 _node 不为 nullptr, 说明跳步 bucket 成功了, break
+                if (_node) break;
+                // 如果 _node 仍然是 null, 说明 _bucket_index 对应桶是空的. 尝试下一个桶
+                _bucket_index++;
+            }
+        }
     };
 
     // 暴露 iterator 迭代器接口. 推荐在 range 接口中使用, 如果在外部使用要慎重
@@ -673,22 +764,95 @@ public:
     }
 
 
+    // drain_iterator: 移动语义下的 哈希表 迭代器, 把所有 节点node 的 key-value 都用移动的方式转移出去, 即:
+    // std::pair<K, V> operator*() {
+    //     return {std::move(k), std::move(v)};
+    //     或
+    //     return std::make_pair(std::move(k), std::move(v));
+    // }
+    // 在外部使用C++17结构化绑定 auto&& [k, v] = *it; // 外部 k 和 v 移动承接 迭代器解引用返回的key-value资源.
+    // 节点移动之后，要对 moved-from节点 作显式析构
 
+    // drain_iterator 必然是 InputIterator(阅后即焚类型, 只迭代一次). 不过针对要不要暴露迭代器, 有两种设计:
+
+    // 设计1: 不要把迭代器暴露出来, 用一个 哈希表的成员函数, 来封装迭代的过程
+    // for (auto&& [k, v]: map.drain()) { // drain方法返回一个 drain range, 内部定义好 begin 和 end, 就能在 for : 语句中自动*解引用和++移动
+    //     code using std::move(k) & std::move(v) to keep them in move // kv已经是具名变量, 所以要用std::move去保持移动语义来触发移动构造/赋值
+    // }
+
+    // 设计2: 把迭代器暴露出来, *和++解耦 迭代中允许解引用多次(幂等), 用一个缓存, 承接*的结果
+    // for (auto it = map.drain_begin(); it != map.drain_end(); ++it) {
+    //     auto&& [k, v] = *it;
+    //     code using std::move(k) & std::move(v) to keep them in move 
+    // }
+
+    // --> 建议设计1. 首先设计1更接近drain的语义, 其次设计2中, 加了缓存 std::pair<K, V> _cache 之后, 它不再只是个轻量级的引用/指针包装，而是成了一个持有完整K和V的胖对象. 设计2可以另外再写成一个MoveIterator
+    // --> 外部变量承接, 一定使用 auto&& 即 C++17结构化绑定 写法. 编译器会搞定一切.
+
+
+    // 额外的设计
+    // 1. 返回代理类型drainProxy (本质是值, 但是尽量模拟引用, 且要把潜在的引发深拷贝的操作禁用，强制必须是移动使用这个*it返回的值)
+    //    此外, 代理类型使得使用可以更明确: std::pair<K, V>.first --> drainProxy.key, std::pair<K, V>.second --> drainProxy.value
+    // 2. 破坏式清空clean_up兜底设计: 采用设计1之后，drainIterator就像哈希表的rehash过程一样, 是破坏性的, 如果遍历中因为某些原因break掉了, 这里也对应 上面这两种设计:
+    //    设计1: 中途break之后, 哈希表剩下的部分也全部释放清空掉(但内存池reset还是交给内存池来做). 这样在drain的过程中就无需维护size / buckets数组等 哈希表的内部状态
+    //    ---> drain_iterator析构时要执行 cleaup_remaining
+    //    设计2: 支持部分node移动转移, 也就是说哈希表剩下的部分仍然保持一个有效完整的哈希表状态. 这样在drain过程中需要细心维护哈希表的所有内部状态, 好处是可以支持条件性node移动
+    //    但不管怎么样, 都要求 哈希表在 drain遍历之后, 处于 "空但有效, 允许重新insert节点" 的状态
+    // 3. 把 drainIterator / drainProxy / drainRange 设计成 哈希表 的嵌套类, 但是拆分实现. 给哈希表添加 drain_range() 成员方法封装使用
+    // 4. drain后这些node的内存池地址, 是该进入free_list等待复用, 还是直接free_list也置空, 整个表全部重新置初始态? 
+    //    --> ARENA内存池支持reset, 全表置初始态是更好的选择. 避免free_list膨胀, 新插入的node排列也更紧凑
+
+    struct DrainProxy {
+        // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
+        TYPE_K key;
+        TYPE_V value;
+
+        // 允许隐式转换为 std::pair, 方便外部容器接受
+        // TODO: 添加 .first & .second 访问
+
+        // 支持结构化绑定
+        // TODO
+
+        // 禁止深拷贝: 这个 drain遍历返回的结果, 强制只能移动使用. 实际上尽量使用 C++17的结构化绑定 auto&& [k,v]
+        DrainProxy(const DrainProxy&) = delete;
+        DrainProxy& operator=(const DrainProxy&) = delete;
+
+        // 允许移动: 显式
+        DrainProxy(DrainProxy&&) = default;
+        DrainProxy& operator=(DrainProxy&&) = default;
+    };
 
     /*
     * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
     */
+    
+    // 只能在 drain_range 里使用. 前向声明 drain_range 作为 drain_iterator 的友元. 在后面详细定义 drain_range
+    struct drain_range;
+
     class drain_iterator {
         // drain_iterator的构造方法为private为防止误用. 只能在 drain_range 内部调用
         friend struct drain_range;
     private:
         // 显式构造, 但 private化构造函数, 意味着只允许 类内部以及友元 drain_range 执行该构造函数
-        explicit drain_iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit drain_iterator(pooled_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
         // 由于 drain_iterator 的生命周期由 drain_range 绑定, 所以clean_remaining逻辑可以放在 drain_range 的析构函数里.
         pooled_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
-        void _null_node_advance_to_next_valid_bucket() {}
+        // 迭代器的关键私有函数: 当遍历指针为nullptr时, 找到下一个(第一个)有效node
+        void _null_node_advance_to_next_valid_bucket() {
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                _node = (_hash_table->_table)[_bucket_index];
+                if (_node) break;
+                _bucket_index++;
+            }
+        }
     public:
         // 标准的 Iterator Traits: 标记为 inputIterator
         using iterator_category = std::input_iterator_tag;
@@ -698,10 +862,55 @@ public:
         // 允许移动, 原迭代器失效
         drain_iterator(drain_iterator&&) = default;
         drain_iterator& operator=(drain_iterator&&) = default;
-        DrainProxy operator*() {}
-        drain_iterator& operator++() {}
-        bool operator==(const drain_iterator& other) const {}
-        bool operator!=(const drain_iterator& other) const {}
+
+        // *it 迭代器对象解引用 --> 临时局部变量k & v 移动构造, _node->key 和 _node->value 处于 moved-from 状态. 析构它们后, 返回临时对象 {move(k), move(v)} 作为 DrainProxy 将其转移出去
+        // 不在解引用这里析构被移动的node, 保持它们是moved-from状态, 并且仍然未脱表. 在下一步++析构被移动的node, 并将其脱表
+        // 这样设计的好处是, 万一for-迭代中途break, 节点无论是否moved-from状态, 其仍然在表中, 全表clear操作可以对其执行析构. 假设设计成在解引用这里析构, 在++脱表, 那么万一中途break执行clear, 会造成二次析构
+        // --> 解决方案: 析构和脱表必须放在同一个操作, 即++操作. *操作只移动
+        DrainProxy operator*() {
+            // TYPE_K k = std::move(_node->key);
+            // TYPE_V v = std::move(_node->value);
+            // // 析构 _node->key 和 _node->value
+            // if constexpr(!std::is_trivially_destructible<TYPE_K>::value) _node->key.~TYPE_K();
+            // if constexpr(!std::is_trivially_destructible<TYPE_V>::value) _node->value.~TYPE_V();
+
+            return DrainProxy{std::move(_node->key), std::move(_node->value)};
+        }
+
+        //  ++it 迭代器对象自增后返回自身引用. 使用尾置返回类型: 除了自增之外, 内部要完成 moved-from node 析构 + 脱表
+        drain_iterator& operator++() {
+            if (_node) {
+                HashTableNode* curr = _node;
+                HashTableNode* next_node = _node->next;
+                // 析构 _node 的 key & value
+                if constexpr(!std::is_trivially_destructible<TYPE_K>::value) curr->key.~TYPE_K();
+                if constexpr(!std::is_trivially_destructible<TYPE_V>::value) curr->value.~TYPE_V();
+                // 节点脱表
+                _hash_table->_table[_bucket_index] = next_node;
+                --_hash_table->_size;
+                // 可以设计成 moved-from 节点在析构后加入 free_list. 不过其实没有必要, 因为drain之后全表应该处于clear状态
+                // curr->next = _hash_table->_free_nodes_head;
+                // _hash_table->_free_nodes_head = curr;
+                _node = next_node;
+            }
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket();
+            }
+            return *this;
+        }
+
+        // it++ 迭代器对象自增后, 返回自增前的自身拷贝. 由于 drain_iterator 禁止了拷贝构造, 且 input_iterator 也不需要返回值的后置++ 
+
+        // 迭代器相等状态判断
+        bool operator==(const drain_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+
+        // 迭代器不等状态判断
+        bool operator!=(const drain_iterator& other) const {
+            return !(*this == other);
+        }
     };
 
     
@@ -739,12 +948,7 @@ public:
         return drain_range{this};
     }
 
-
 }; // end of pooled_hashtable definition
 
-
-
-// include separated nested iterator classes for mempooled_hashtable 
-#include "mempooled_hashtable_iterators.inl"
 
 #endif
