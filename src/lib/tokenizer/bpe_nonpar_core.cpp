@@ -54,7 +54,8 @@ std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint64_t>> c_nonpar_bpe(
         }
     }
 
-    // 3. 移动语义遍历 where_to_update: pair & move(positions) + pair_counts[pair] --merge_node构造--> heapify--> max_octanory_heap. 置空 where_to_update
+    // 3. 移动语义遍历 where_to_update: pair & move(positions) + pair_counts[pair] --merge_node构造--> heapify--> max_octanory_heap
+    //    置空 where_to_update. 若顺利drain完, where_to_update 应该已经处于 clear 完毕状态. reset mempool
     /*TODO*/
 
     // 4. 调用 nonpar_bpe_loop_core
