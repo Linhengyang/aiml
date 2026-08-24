@@ -87,8 +87,11 @@ private:
         HashTableNode* next;
         HashTableNode* free_next = nullptr;
         // 禁止赋值(拷贝or移动)
+        HashTableNode(const HashTableNode& other) = delete;
         HashTableNode& operator=(const HashTableNode& other) = delete;
+        HashTableNode(HashTableNode&& other) = delete;
         HashTableNode& operator=(HashTableNode&& other) = delete;
+        
 
         // 业务(普通)构造函数
         // 拷贝 key & value 资源 构造node
@@ -1274,17 +1277,48 @@ public:
         // ---> 嵌套类自动是母类的 friend, 而母类访问嵌套类的 private 需要 申明母类是friend
         friend class pooled_concurrent_hashtable;
     public:
-        ConstProxy operator*() const {}
-        unsafe_const_iterator& operator++() {}
-        unsafe_const_iterator operator++(int) {}
-        bool operator==(const unsafe_const_iterator& other) const {}
-        bool operator!=(const unsafe_const_iterator& other) const {}
+        ConstProxy operator*() const {
+            return ConstProxy{_node->key, _node->value};
+        }
+        unsafe_const_iterator& operator++() {
+            if (_node) {
+                _node = _node->next;
+            }
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket();
+            }
+            return *this;
+        }
+        unsafe_const_iterator operator++(int) {
+            unsafe_const_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+        bool operator==(const unsafe_const_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+        bool operator!=(const unsafe_const_iterator& other) const {
+            return !(*this == other);
+        }
     private:
-        explicit unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
         const pooled_concurrent_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
-        void _null_node_advance_to_next_valid_bucket() {}
+        void _null_node_advance_to_next_valid_bucket() {
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                _node = (_hash_table->_table)[_bucket_index];
+                if (_node) break;
+                _bucket_index++;
+            }
+        }
     };
 
     // 暴露 unsafe_const_iterator 迭代器接口. 仅供 write_lock_const_view 内部或明确知道风险的外部使用
@@ -1305,12 +1339,13 @@ public:
     private:
         const pooled_concurrent_hashtable& _map;
         std::unique_lock<std::shared_mutex> _map_write_lock;
-        explicit write_lock_const_view(pooled_concurrent_hashtable& hashtable):
-            _map(hashtable),
-            _map_write_lock(hashtable._table_mutex)
+        explicit write_lock_const_view(const pooled_concurrent_hashtable& hashtable):
+            _map(hashtable)
+            // _map_write_lock(hashtable._table_mutex)
         {
             // 在此 write_lock_const_view 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
             // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
+            _map_write_lock(_map._table_mutex);
         }
     public:
         // 禁用拷贝, 防止锁被意外释放或多次释放
@@ -1429,7 +1464,7 @@ public:
         unsafe_drain_iterator(const unsafe_drain_iterator&) = delete;
         unsafe_drain_iterator& operator=(const unsafe_drain_iterator&) = delete;
         // 移动构造
-        unsafe_drain_iterator(unsafe_drain_iterator&&) noexcept {}
+        unsafe_drain_iterator(unsafe_drain_iterator&&) = default;
         unsafe_drain_iterator& operator=(unsafe_drain_iterator&&) = default;
         DrainProxy operator*() {}
         unsafe_drain_iterator& operator++() {}

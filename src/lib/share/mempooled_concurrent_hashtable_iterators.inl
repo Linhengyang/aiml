@@ -47,81 +47,12 @@
 /*
 * 不加锁、线程不安全的 只读迭代器
 */
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsafe_const_iterator::unsafe_const_iterator(const pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
-        :_hash_table(hash_table),
-        _bucket_index(bucket_index),
-        _node(node)
-{
-    _null_node_advance_to_next_valid_bucket();
-}
 
-
-// *it 迭代器对象解引用 --> 只读返回
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-auto pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsafe_const_iterator::operator*() const
-    -> ConstProxy
-{
-    // 返回 ConstProxy(key, value)临时对象: 是一个代理类型
-    return ConstProxy{_node->key, _node->value};
-}
-
-
-// ++it 迭代器对象自增后返回自身引用. 使用尾置返回类型
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-auto pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsafe_const_iterator::operator++()
-    -> unsafe_const_iterator&
-{
-    if (_node) {
-        _node = _node->next;
-    }
-    if (!_node) {
-        _bucket_index++;
-        _null_node_advance_to_next_valid_bucket();
-    }
-    return *this;
-}
-
-
-// it++ 迭代器对象自增后, 返回自增前的自身拷贝. 使用尾置返回类型
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-auto pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsafe_const_iterator::operator++(int)
-    -> unsafe_const_iterator
-{
-    unsafe_const_iterator tmp = *this;
-    ++(*this);
-    return tmp;
-}
 
 
 // 返回类型（第一个 pooled_hashtable<...>::const_iterator）：此时编译器还没有进入 pooled_hashtable 或 const_iterator 的作用域（因为它在 :: 之前）。所以必须使用完全限定名
 // 参数列表（const const_iterator& other）：此时编译器已经进入了 const_iterator 的作用域（在 :: 之后）。在类作用域内，可以直接使用类名，所以不需要加前缀
 // 迭代器的 == 相等判断 用于是否结束状态
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-bool pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsafe_const_iterator::operator==(const unsafe_const_iterator& other) const
-{
-    return _node == other._node && _hash_table == other._hash_table;
-}
-
-
-// 迭代器的 != 不等判断
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-bool pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsafe_const_iterator::operator!=(const unsafe_const_iterator& other) const
-{
-    return !(*this == other);
-}
-
-
-// 迭代器的关键私有函数: 找到下一个(第一个)有效node
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-void pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsafe_const_iterator::_null_node_advance_to_next_valid_bucket()
-{
-    while (!_node && _bucket_index < _hash_table->_capacity) {
-        _node = (_hash_table->_table)[_bucket_index];
-        if (_node) break;
-        _bucket_index++;
-    }
-}
 
 
 
