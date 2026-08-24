@@ -206,28 +206,3 @@ void pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::unsaf
         _bucket_index++;
     }
 }
-
-
-template <typename TYPE_K, typename TYPE_V, typename TYPE_MEMPOOL, typename HASH_FUNC>
-std::vector<TYPE_K> pooled_concurrent_hashtable<TYPE_K, TYPE_V, TYPE_MEMPOOL, HASH_FUNC>::get_readonly_keys() const
-{
-    std::vector<TYPE_K> keys_snapshot;
-    {
-        // 上 表读锁: 要排除 rehash & clear 等需要独占(写锁)表锁的行为
-        std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
-        keys_snapshot.reserve( size() ); // 预设大小
-
-        // 遍历所有 bucket
-        for (size_t i = 0; i < _capacity; ++i) {
-            // 上 桶(条带)读锁: 要排除 insert/atomic_upsert/pop 等需要独占(写锁)桶锁的行为
-            std::shared_lock<std::shared_mutex> _lock_from_insert_(bucket_lock(i));
-
-            for (HashTableNode* node = _table[i]; node; node = node->next) {
-                keys_snapshot.push_back(node->key);
-            }
-        }
-        // 该单次循环结束时 释放对应的共享桶(条带)锁
-    }
-    // 释放共享表锁
-    return keys_snapshot;
-}

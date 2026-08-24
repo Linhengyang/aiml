@@ -1227,23 +1227,44 @@ public:
 
 
     // 迭代相关. 详见 mempooled_concurrent_hashtable_iterators.inl
+    // 迭代相关的正确设计模式: 只要是迭代(const / value-mutable / drain), 都要阻塞写——即独占写锁给全局表锁. 这样完全放弃了并发, 好处是得到了完全的强一致性迭代
 
-    struct MutableProxy {
-        const TYPE_K& key;
-        TYPE_V& value;
+    // 至于需要并发的场景, 那么只能提供弱一致性(某个状态下的可运行状态). 不提供 并发+强一致性遍历 的原因, 是其极难处理且严重影响性能.
+    // 应该在业务侧避免这种需求, 不在基建侧提供这种能力. 基建侧只提供 key只读快照, 供 弱一致性(不阻塞写，故而不保证前后一致,允许漏看多看)的迭代遍历
+    /*
+    * 配合 get(只读) / insert(改变value) / atomic_upsert(改变value) 并发调用, 完成相应迭代目的
+    * 用法:
+    * auto keys_snapshot = hashtable.get_readonly_kesy(); // keys_snapshot 是 vector<TYPE_K>. 对其的元素遍历+get(元素)/insert(元素)/upsert(元素)可以并发
+    * for (const auto& key: keys_snapshot) {
+    *     V value;
+    *     hashtable.get(key, value); // 只读遍历
+    *     hashtable.insert(key, value); // 改value遍历
+    *     hashtable.atomic_upsert(key, som_func, some_default_value); // 改value遍历-回调
+    * }
+    */
+    std::vector<TYPE_K> get_readonly_keys() const {
+        std::vector<TYPE_K> keys_snapshot;
+        { // 上 表读锁: 要排除 rehash & clear 等需要独占(写锁)表锁的行为
+            std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
+            keys_snapshot.reserve( size() ); // 预设大小
+            // 遍历所有 bucket
+            for (size_t i = 0; i < _capacity; ++i) {
+                // 上 桶(条带)读锁: 要排除 insert/atomic_upsert/pop 等需要独占(写锁)桶锁的行为
+                std::shared_lock<std::shared_mutex> _lock_from_insert_(bucket_lock(i));
+                for (HashTableNode* node = _table[i]; node; node = node->next) {
+                    keys_snapshot.push_back(node->key);
+                }
+            } // 该单次循环结束时 释放对应的共享桶(条带)锁
+        } // 释放共享表锁
+        return keys_snapshot;
     }
+
+
 
     struct ConstProxy {
         const TYPE_K& key;
         const TYPE_V& value;
-    }
-
-    struct DrainProxy {
-        // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
-        TYPE_K key;
-        TYPE_V value;
-    }
-
+    };
 
     /*
     * 不加锁、线程不安全的 只读迭代器
@@ -1311,6 +1332,13 @@ public:
 
 
 
+
+
+    struct MutableProxy {
+        const TYPE_K& key;
+        TYPE_V& value;
+    };
+
     /*
     * 不加锁、线程不安全的 可变迭代器
     */
@@ -1375,20 +1403,13 @@ public:
         return write_lock_view(*this);
     }
 
-    /*
-    * 提供 key只读快照, 供 弱一致性(不阻塞写，故而不保证前后一致,允许漏看多看)的迭代遍历, 配合 get(只读) / insert(改变value) / atomic_upsert(改变value) 调用, 完成相应迭代目的
-    * 用法:
-    * auto keys_snaptshot = hashtable.get_readonly_kesy();
-    * for (const auto& key: keys_snaptshot) {
-    *     V value;
-    *     hashtable.get(key, value); // 只读遍历
-    *     hashtable.insert(key, value); // 改value遍历
-    *     hashtable.atomic_upsert(key, som_func, some_default_value); // 改value遍历-回调
-    * }
-    */
-    std::vector<TYPE_K> get_readonly_keys() const {}
 
 
+    struct DrainProxy {
+        // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
+        TYPE_K key;
+        TYPE_V value;
+    };
 
     /*
     * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
