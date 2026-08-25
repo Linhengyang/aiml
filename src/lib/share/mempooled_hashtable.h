@@ -922,6 +922,13 @@ public:
     struct drain_range {
         pooled_hashtable* _map;
         bool _fully_drained = false;
+        // 由于 drain_range 与 lock_view 不同, 其析构函数含有对成员变量_map指向的数据 析构的逻辑, 所以若允许移动, 那么两个range在析构时都会触发同一个_map地址的数据析构造成二次析构
+        // 禁用拷贝, 防止锁被意外释放或多次释放
+        drain_range(const drain_range&) = delete; // 禁用拷贝构造
+        drain_range& operator=(const drain_range&) = delete; // 禁用拷贝赋值
+        // 在C++17标准, drain_range(this) 构造时使用强制拷贝消除优化, 编译器不需要移动构造也能完美构造drain_range。故可以直接禁用掉移动
+        drain_range(drain_range&&) = delete;
+        drain_range& operator=(drain_range&&) = delete;
 
         // 作为 friend, drain_range 封装 drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
         drain_iterator begin() { return drain_iterator(_map, 0, nullptr); }

@@ -1521,7 +1521,6 @@ public:
         // 允许移动: 显式
         DrainProxy(DrainProxy&&) = default;
         DrainProxy& operator=(DrainProxy&&) = default;
-
     };
 
     /*
@@ -1609,9 +1608,17 @@ public:
         // 禁用拷贝, 防止锁被意外释放或多次释放
         write_lock_drain_range(const write_lock_drain_range&) = delete; // 禁用拷贝构造
         write_lock_drain_range& operator=(const write_lock_drain_range&) = delete; // 禁用拷贝赋值
-         // 显式确认移动
-        write_lock_drain_range(write_lock_drain_range&&) = default;
-        write_lock_drain_range& operator=(write_lock_drain_range&&) = default;
+        // 由于 drain_range 与 lock_view 不同, 其析构函数含有对成员变量_map指向的数据 析构的逻辑, 所以若允许移动, 那么两个range在析构时都会触发同一个_map地址的数据析构造成二次析构
+        // 在C++14及以下标准, drain_range(this) 构造时涉及移动, 所以不能禁用移动否则编译不通过，那么解决办法就是自定义移动赋值/构造, 将other的_map置空
+        // write_lock_drain_range(write_lock_drain_range&& other) noexcept 
+        //     : _map(other._map), _lock(std::move(other._lock)) { other._map = nullptr; }
+        // write_lock_drain_range& operator=(write_lock_drain_range&& other) noexcept {
+        //     if (this != &other) { _map = other._map; _lock = std::move(other._lock); other._map = nullptr; }
+        //     return *this;
+        // }
+        // 在C++17标准, drain_range(this) 构造时使用强制拷贝消除优化, 编译器不需要移动构造也能完美构造drain_range。故可以直接禁用掉移动
+        write_lock_drain_range(write_lock_drain_range&&) = delete;
+        write_lock_drain_range& operator=(write_lock_drain_range&&) = delete;
 
         // drain write_lock_drain_range 的析构: 在退出(无论是正常还是非正常)for循环时, write_lock_drain_range 被析构, 此时要清空已经被drain破坏掉的哈希表为 空表状态
         ~write_lock_drain_range() {
