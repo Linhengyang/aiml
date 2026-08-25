@@ -209,9 +209,48 @@ void test2_concurrent_hash_map() {
 
     worker.join();
     clearer.join();
-
     std::cout << "Stress test with clear/reset passed without crashing!" << std::endl;
 
+    std::cout << "\n=== Test 4: Iterators ===" << std::endl;
+    map.clear();
+    pool.reset();
+
+    std::cout << "\n=== Test 4.1: Readonly Keys ===" << std::endl;
+    for (int i = 0; i < 10; ++i) map.insert(i, "val_" + std::to_string(i));
+    auto keys = map.get_readonly_keys();
+    assert(keys.size() == 10);
+    std::cout << "Keys count: " << keys.size() << std::endl;
+
+    std::cout << "\n=== Test 4.2: const_iter_map_locked_view ===" << std::endl;
+    {
+        int count = 0;
+        for (auto&& [k, v]: map.const_iter_map_locked_view()) {
+            count++;
+        }
+        assert(count == 10);
+        std::cout << "Const iterated " << count << " elements." << std::endl;
+    }
+
+    std::cout << "\n=== Test 4.3: iter_map_locked_view (Mutable) ===" << std::endl;
+    {
+        for (auto&& [k, v] : map.iter_map_locked_view()) {
+            v += "_modified"; // 修改 value
+        }
+    }
+    std::string v;
+    map.get(5, v);
+    assert(v == "val_5_modified");
+
+    std::cout << "\n=== Test 4.4: drain_map_locked_view (Full Drain) ===" << std::endl;
+    std::vector<std::pair<int, std::string>> heap;
+    {
+        for (auto&& [k, v] : map.drain_map_locked_view()) {
+            heap.push_back({std::move(k), std::move(v)});
+        }
+    }
+    assert(heap.size() == 10);
+    assert(map.size() == 0);
+    
     map.destroy();
     std::cout << "\nAll tests passed successfully!" << std::endl;
 }

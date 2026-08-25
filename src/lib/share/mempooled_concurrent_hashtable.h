@@ -1283,7 +1283,7 @@ public:
     *     hashtable.atomic_upsert(key, som_func, some_default_value); // 改value遍历-回调
     * }
     */
-    std::vector<TYPE_K> get_readonly_keys() const {
+    std::vector<TYPE_K> get_readonly_keys() {
         std::vector<TYPE_K> keys_snapshot;
         { // 上 表读锁: 要排除 rehash & clear 等需要独占(写锁)表锁的行为
             std::shared_lock<std::shared_mutex> _lock_table_from_rehash_clear_(_table_mutex);
@@ -1523,6 +1523,8 @@ public:
         DrainProxy& operator=(DrainProxy&&) = default;
     };
 
+    class write_lock_drain_range;
+
     /*
     * drain语义迭代器: 破坏式遍历、移动转移资源、遍历后原容器为空
     */
@@ -1638,7 +1640,7 @@ public:
                     if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
                         while (head) {
                             HashTableNode* next = head->next;
-                            destroy_node(head);
+                            _map->destroy_node(head);
                             head = next;
                         }
                     }
