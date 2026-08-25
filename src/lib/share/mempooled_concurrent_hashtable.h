@@ -1229,7 +1229,45 @@ public:
 #endif
 
 
-    // 迭代相关. 详见 mempooled_concurrent_hashtable_iterators.inl
+    // 迭代相关
+    /*
+    * 迭代器
+    * 线程安全的迭代器, 到底是指什么? 
+    * 首先, 单线程下, 迭代哈希表时也不应该insert/remove/change key操作, 因为这些都可能导致rehash, 会导致 iterator 失效
+    * 所以在单线程下, 迭代哈希表时最多 只允许change value, 不允许其他任何操作. 单线程下可以不用 只读迭代器. 允许迭代器change value
+    * 
+    * 那么在多线程下, 首先迭代器在运行时，肯定也要禁止任何线程作 change value 之外的操作. 问题是, 是否允许change value(即使它线程安全)?
+    * 答案是: 否. 在缺乏同步机制的前提下, 当某个线程在执行迭代遍历时, 若其他线程在 thread-safe change value, 会导致两个可能的严重后果
+    * 1. 撕裂读取：迭代器在读取 key-value 时，可能读取到value的一部分后，另一部分被另一个线程改变了，导致读到了一个”混合value”
+    * 2. 后续逻辑破坏：迭代读到了一个value, 但实际上这个value在随后就被改了然而迭代器线程并不知情, 可能会导致后续逻辑错误
+    * 所以归纳一下：
+    *   1. 若非const迭代器, 只能单线程迭代, 且加锁不允许其他线程作只读之外的任何操作.
+    *      这样迭代器允许change value, 但若迭代器change value, 其他线程不能作任何操作(读写都不可以)
+    *   2. 若要并发迭代，必须都是const迭代. 且加锁不允许其他线程作只读之外的任何操作.
+    * 归并一下同类项，迭代器应该这样设计:
+    *   1. 非const迭代器, 应该在迭代时上独占表锁, 其他任何线程不能对表有任何操作(读写都不行). 迭代器可change value
+    *      : 不依靠数据结构解决业务层的问题
+    *      --> 如果需要强一致性的全局遍历(可修改value), 应该是业务层对整个容器加锁 + unsafe遍历(*返回MutableProxy)
+    *      --> 如果需要弱一致性(即程序运行时不出问题但不保证前后一致,允许漏看多看)的全局遍历(可修改value), key只读快照遍历 + insert/atomic_upsert调用
+
+    *   2. const迭代器, 允许并发迭代, 应该共享表锁(禁止了需要独占表锁的rehash/clear), 共享桶锁(禁止了需要独占桶锁的insert/atomic_upsert/pop)
+    *      迭代器是只读的. 哈希表不可被任何change, 即线程A迭代bucket_i时, 不该允许线程B在bucket_i作insert和remove
+    *      这里似乎可以允许线程B在bucket_j作insert和remove, 因为线程A在迭代bucket_i时, 对其他桶似乎可以不作要求. 只不过这样的话，
+    *      多线程并发迭代的结果可能会不一样. 如果要求保证并发迭代的结果一致, 那么线程A在迭代bucket_i时, 应该对全部bucket都共享锁.
+    *      可是这种需求有更好的实现方式: 先单线程迭代一遍哈希表并dump成副本, 然后多线程使用该副本. 所以这里不对全部桶上共享锁.
+    *      并发迭代有不同的设计模式: 1. 多个线程并发无误遍历一遍哈希表（总共一遍），2. 多个线程各自并发无误遍历一遍哈希表（总共多遍）
+    *      前者多个线程并发遍历一遍哈希表,（迭代器的_node指针是线程local的, 不能多线程共享. 遍历过程中_node指针很多跳转, 共享需要极其精细的
+    *      同步机制, 那就不现实.）即使是为了加速迭代也应该使用分片（sharding）多线程迭代的方式（每个线程负责一部分bucket）. 
+    *      那么这样的迭代器和全迭代肯定是不同设计的（需要输入bucket id以发送给不同线程，以实现sharding并行扫描），是高性能哈希表TBB/folly::F14的做法,
+    *      并不是常规iterator的职责范围. 在这里首先实现的是“多个线程各自并发无误遍历一遍哈希表（总共多遍）”的const只读迭代器。
+    *      : 完全阻塞了hashtable的表级操作(rehash/clear)
+    *      : ++it的时候存在共享桶锁交接, 这个间隙里如果有线程独占桶锁并执行了桶的改变(insert/upsert/pop), 会造成遍历前后不一致
+    *      : 返回引用的悬垂问题: 返回了const T& 后迭代器内部锁就释放了, 此时若其他线程删除了node, 就会出现use-after-free问题
+    *      --> 如果允许阻塞写 <==> 强一致性的 只读遍历, 那么复用 独占表锁 + unsafe遍历(*返回ConstProxy)
+    *      --> 如果不允许阻塞写 <==> 弱一致性的 只读遍历, 那么 key只读快照遍历 + get调用
+    */
+
+
     // 迭代相关的正确设计模式: 只要是迭代(const / value-mutable / drain), 都要阻塞写——即独占写锁给全局表锁. 这样完全放弃了并发, 好处是得到了完全的强一致性迭代
 
     // 至于需要并发的场景, 那么只能提供弱一致性(某个状态下的可运行状态). 不提供 并发+强一致性遍历 的原因, 是其极难处理且严重影响性能.
@@ -1339,18 +1377,18 @@ public:
     private:
         const pooled_concurrent_hashtable& _map;
         std::unique_lock<std::shared_mutex> _map_write_lock;
-        explicit write_lock_const_view(const pooled_concurrent_hashtable& hashtable):
-            _map(hashtable)
-            // _map_write_lock(hashtable._table_mutex)
+        explicit write_lock_const_view(const pooled_concurrent_hashtable& hashtable): // 不希望数据源hashtable改动数据, 所以const引用之; 但是其内部锁已经被mutable修饰, 故而还是可以传递给 unique_lock 供改变锁状态, 达到"数据只读, 锁可写"的目的
+            _map(hashtable),
+            _map_write_lock(hashtable._table_mutex) // 成员对象必须在初始化列表中初始化
         {
             // 在此 write_lock_const_view 被构造出来(临时对象)后, 其有效存续期间, _table_mutex 传入 独占写锁_map_write_lock, 从而全表上写锁 阻塞写
             // 在for循环中构造它, for循环结束后自然析构, 从而释放 写锁
-            _map_write_lock(_map._table_mutex);
         }
     public:
         // 禁用拷贝, 防止锁被意外释放或多次释放
         write_lock_const_view(const write_lock_const_view&) = delete; // 禁用拷贝构造
         write_lock_const_view& operator=(const write_lock_const_view&) = delete; // 禁用拷贝赋值
+        // 没有禁止的理由, 就得允许移动. 因为可能有编译器优化依靠移动. 这里需要显式确认
         write_lock_const_view(write_lock_const_view&&) = default; // 显式确认 default 移动构造
         write_lock_const_view& operator=(write_lock_const_view&&) = default; // 显式确认 default 移动赋值
 
@@ -1382,17 +1420,48 @@ public:
         // ---> 嵌套类自动是母类的 friend, 而母类访问嵌套类的 private 需要 申明母类是friend
         friend class pooled_concurrent_hashtable;
     public:
-        MutableProxy operator*() const {}
-        unsafe_iterator& operator++() {}
-        unsafe_iterator operator++(int) {}
-        bool operator==(const unsafe_iterator& other) const {}
-        bool operator!=(const unsafe_iterator& other) const {}
+        MutableProxy operator*() const {
+            return MutableProxy{_node->key, _node->value};
+        }
+        unsafe_iterator& operator++() {
+            if (_node) {
+                _node = _node->next;
+            }
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket();
+            }
+            return *this;
+        }
+        unsafe_iterator operator++(int) {
+            unsafe_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+        bool operator==(const unsafe_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+        bool operator!=(const unsafe_iterator& other) const {
+            return !(*this == other);
+        }
     private:
-        explicit unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit unsafe_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node)
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
         pooled_concurrent_hashtable* _hash_table; // 迭代器所迭代的容器, 在这里是哈希表. 从这里得到bucket/node等内部结构
         size_t _bucket_index; // 遍历哈希表的所有桶, 0 -> _capacity-1
         HashTableNode* _node; // 遍历所有桶的所有node
-        void _null_node_advance_to_next_valid_bucket() {}
+        void _null_node_advance_to_next_valid_bucket() {
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                _node = (_hash_table->_table)[_bucket_index];
+                if (_node) break;
+                _bucket_index++;
+            }
+        }
     };
 
     // 暴露 unsafe_iterator 迭代器接口. 仅供 write_lock_view 内部或明确知道风险的外部使用
@@ -1444,6 +1513,15 @@ public:
         // 代理对象, 用于零拷贝转移. 这里必须是值类型, 因为代理类型作为 operator* 的返回类型, 需要被触发 移动构造 成临时值, 才能将 kv 资源窃取出来, 从而达到drain语义
         TYPE_K key;
         TYPE_V value;
+
+        // 禁止深拷贝: 这个 drain遍历返回的结果, 强制只能移动使用. 实际上尽量使用 C++17的结构化绑定 auto&& [k,v]
+        DrainProxy(const DrainProxy&) = delete;
+        DrainProxy& operator=(const DrainProxy&) = delete;
+
+        // 允许移动: 显式
+        DrainProxy(DrainProxy&&) = default;
+        DrainProxy& operator=(DrainProxy&&) = default;
+
     };
 
     /*
@@ -1454,23 +1532,58 @@ public:
         friend class write_lock_drain_range;
     private:
         // 显式构造
-        explicit unsafe_drain_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) {}
+        explicit unsafe_drain_iterator(pooled_concurrent_hashtable* hash_table, size_t bucket_index, HashTableNode* node) 
+            :_hash_table(hash_table),
+            _bucket_index(bucket_index),
+            _node(node)
+        {
+            _null_node_advance_to_next_valid_bucket();
+        }
         pooled_concurrent_hashtable* _hash_table;
         size_t _bucket_index;
         HashTableNode* _node;
-        void _null_node_advance_to_next_valid_bucket() {}
+        void _null_node_advance_to_next_valid_bucket() {
+            while (!_node && _bucket_index < _hash_table->_capacity) {
+                _node = (_hash_table->_table)[_bucket_index];
+                if (_node) break;
+                _bucket_index++;
+            }
+        }
     public:
         // 不同于其他 迭代器, 因为 drain是破坏性的, 相当于rehash, 故禁用拷贝, 防止多个迭代器竞争移动同一张表
         unsafe_drain_iterator(const unsafe_drain_iterator&) = delete;
         unsafe_drain_iterator& operator=(const unsafe_drain_iterator&) = delete;
-        // 移动构造
+        // 允许移动，原迭代器失效
         unsafe_drain_iterator(unsafe_drain_iterator&&) = default;
         unsafe_drain_iterator& operator=(unsafe_drain_iterator&&) = default;
-        DrainProxy operator*() {}
-        unsafe_drain_iterator& operator++() {}
-        unsafe_drain_iterator operator++(int) {}
-        bool operator==(const unsafe_drain_iterator& other) const {}
-        bool operator!=(const unsafe_drain_iterator& other) const {}
+        DrainProxy operator*() {
+            return DrainProxy{std::move(_node->key), std::move(_node->value)};
+        }
+        unsafe_drain_iterator& operator++() {
+            if (_node) {
+                HashTableNode* curr = _node;
+                HashTableNode* next_node = _node->next;
+                if constexpr(!std::is_trivially_destructible<TYPE_K>::value) curr->key.~TYPE_K();
+                if constexpr(!std::is_trivially_destructible<TYPE_V>::value) curr->value.~TYPE_V();
+                _hash_table->_table[_bucket_index] = next_node;
+                _hash_table->_size.fetch_sub(1, std::memory_order_relaxed);;
+                // 可以设计成 moved-from 节点在析构后加入 free_list. 不过其实没有必要, 因为drain之后全表应该处于clear状态
+                _node = next_node;
+            }
+            if (!_node) {
+                _bucket_index++;
+                _null_node_advance_to_next_valid_bucket();
+            }
+            return *this;
+        }
+        // it++ 迭代器对象自增后, 返回自增前的自身拷贝. 由于 drain_iterator 禁止了拷贝构造, 且 input_iterator 也不需要返回值的后置++ 
+
+        bool operator==(const unsafe_drain_iterator& other) const {
+            return _node == other._node && _hash_table == other._hash_table;
+        }
+        bool operator!=(const unsafe_drain_iterator& other) const {
+            return !(*this == other);
+        }
     };
 
     
@@ -1482,6 +1595,7 @@ public:
         friend class pooled_concurrent_hashtable;
     private:
         pooled_concurrent_hashtable* _map;
+        bool _fully_drained = false;
         std::unique_lock<std::shared_mutex> _map_write_lock;
         explicit write_lock_drain_range(pooled_concurrent_hashtable* hashtable):
             _map(hashtable),
@@ -1495,34 +1609,58 @@ public:
         // 禁用拷贝, 防止锁被意外释放或多次释放
         write_lock_drain_range(const write_lock_drain_range&) = delete; // 禁用拷贝构造
         write_lock_drain_range& operator=(const write_lock_drain_range&) = delete; // 禁用拷贝赋值
-        write_lock_drain_range(write_lock_drain_range&&) = default; // 显式确认 default 移动构造
-        write_lock_drain_range& operator=(write_lock_drain_range&&) = default; // 显式确认 default 移动赋值
+         // 显式确认移动
+        write_lock_drain_range(write_lock_drain_range&&) = default;
+        write_lock_drain_range& operator=(write_lock_drain_range&&) = default;
 
         // drain write_lock_drain_range 的析构: 在退出(无论是正常还是非正常)for循环时, write_lock_drain_range 被析构, 此时要清空已经被drain破坏掉的哈希表为 空表状态
         ~write_lock_drain_range() {
             if (!_map) return;
-            // TODO: 析构所有未被转移的资源. free_list置空, _table置空
+            if (_fully_drained) {
+                // 当明确已经全部 drain, 走快速 置空置零命令. 此时还在 表级写锁_map_write_lock的作用之下, 所以下面操作安全
+                std::fill(_map->_table, _map->_table + _map->_capacity, nullptr);
+                _map->_generation.fetch_add(1, std::memory_order_release);
+                _map->_size.store(0, std::memory_order_relaxed);
+                _map->_global_free_head = nullptr; 
+            }
+            else {
+                // 当中途break, 兜底清理剩余node. 如果直接调用 _map的clear方法, 有死锁风险. 把clear的内部逻辑去掉上锁在这里重写一份
+                // _map->clear();
+                for (size_t index = 0; index < _map->_capacity; ++index) {
+                    HashTableNode* head = _map->_table[index];
+                    if constexpr(!std::is_trivially_destructible<HashTableNode>::value) {
+                        while (head) {
+                            HashTableNode* next = head->next;
+                            destroy_node(head);
+                            head = next;
+                        }
+                    }
+                    _map->_table[index] = nullptr;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(_map->_global_free_mutex);
+                    _map->_global_free_head = nullptr; 
+                }
+                _map->_generation.fetch_add(1, std::memory_order_release);
+                _map->_size.store(0, std::memory_order_relaxed);
+            }
         }
 
-        // 作为 friend, write_lock_drain_range 封装 unsafe_drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
+        // 作为 unsafe_drain_iterator的 friend, write_lock_drain_range 封装 unsafe_drain_iterator 的 首迭代器 和 尾后迭代器为 begin & end 成员方法
         unsafe_drain_iterator begin() {
-            // TODO
+            return unsafe_drain_iterator(_map, 0, nullptr);
         }
         unsafe_drain_iterator end() {
-            // TODO
+            _fully_drained = true;
+            return unsafe_drain_iterator(_map, _map->_capacity, nullptr);
         }
     };
 
     write_lock_drain_range drain_map_locked_view() {
-        return write_lock_drain_range{this};
+        return write_lock_drain_range(this);
     }
-
 
 }; // end of pooled_concurrent_hashtable definition
 
-
-
-// include separated nested iterator classes for mempooled_concurrent_hashtable 
-#include "mempooled_concurrent_hashtable_iterators.inl"
 
 #endif
