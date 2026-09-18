@@ -1801,9 +1801,9 @@ class bbpeTokenizer(baseBBPETokenizer):
         freqs_ptr = freq_buf[1].address # uint64类型地址
         # num_freqs 应该等于 num_words, 无需再取
 
-        # 传给 cython: _num_merges & tokens_ptr & offsets_ptr & freqs_ptr & num_words & word_arr & freq_arr
+        # 传给 cython函数 bpe_train_loop: _num_merges & tokens_ptr & offsets_ptr & freqs_ptr & num_words & word_arr & freq_arr
         # 留在cython层即可(只要传进入cython函数，就可以保证其在cython函数return前保持alive避免gc): word_arr & freq_arr
-        #   传给 cpp:
+        #   传给 cpp函数 c_nonpar_bpe(非并行) / c_par_bpe(并行):
         #       _num_merges(bpe循环的最大次数)
         #       num_words(word个数 = freqs长度 = offsets长度 - 1)
         #       tokens_ptr(初始 u32 tokens的起始地址)
@@ -1811,9 +1811,9 @@ class bbpeTokenizer(baseBBPETokenizer):
         #       freqs_ptr(word对应频率uint64 freqs的起始地址)
 
 
-        #   cpp 传出:
+        #   cpp函数 c_nonpar_bpe 传出:
         #       merges(vector of(u32 token-pair: (u32, u32), token-pair counts: u64))
-        # cython 传出: merges(tuple/list of (u32 token-pair, p_cnts)
+        # cython函数 bpe_train_loop 传出: merges(tuple/list of (u32 token-pair, p_cnts)
         merges = bpe_train_loop(_num_merges, tokens_ptr, offsets_ptr, freqs_ptr, num_words, word_arr, freq_arr)
 
         for i, (l_tok, r_tok), p_counts in enumerate(merges):
