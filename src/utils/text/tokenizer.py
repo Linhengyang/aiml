@@ -1801,7 +1801,7 @@ class bbpeTokenizer(baseBBPETokenizer):
         freqs_ptr = freq_buf[1].address # uint64类型地址
         # num_freqs 应该等于 num_words, 无需再取
 
-        # 传给 cython: tokens_ptr & offsets_ptr & freqs_ptr & num_words & _num_merges & word_arr & freq_arr
+        # 传给 cython: _num_merges & tokens_ptr & offsets_ptr & freqs_ptr & num_words & word_arr & freq_arr
         # 留在cython层即可(只要传进入cython函数，就可以保证其在cython函数return前保持alive避免gc): word_arr & freq_arr
         #   传给 cpp:
         #       _num_merges(bpe循环的最大次数)
