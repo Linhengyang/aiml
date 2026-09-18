@@ -11,7 +11,7 @@ from .predictor import fmnistClassifier
 import yaml
 import json
 
-configs = yaml.load(open('src/projs/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('src/projects/vit/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## image arguments in workspace/cache ##################
 # json file for image data arguments

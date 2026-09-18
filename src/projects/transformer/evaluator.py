@@ -5,7 +5,7 @@ import typing as t
 import torch
 
 
-configs = yaml.load(open('src/projs/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('src/projects/transformer/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 class transformerEpochEvaluator(epochEvaluator):
 

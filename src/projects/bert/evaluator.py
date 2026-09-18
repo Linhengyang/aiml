@@ -5,7 +5,7 @@ import typing as t
 
 
 
-configs = yaml.load(open('src/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('src/projects/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 
 class bertEpochEvaluator(epochEvaluator):

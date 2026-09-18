@@ -15,7 +15,7 @@ from src.utils.text.vocabulize import Vocab
 from src.utils.text.glossary import get_BPE_glossary
 from src.utils.math import cosine_similarity
 
-configs = yaml.load(open('src/projs/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('src/projects/bert/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 ################## symbols and vocabs in workspace/cache ##################
 glossary_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'glossary' )

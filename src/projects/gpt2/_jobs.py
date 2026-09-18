@@ -10,7 +10,7 @@ from .dataset import mtDataset
 from .trainer import gpt2Trainer
 from .evaluator import gpt2EpochEvaluator
 
-configs = yaml.safe_load(open('src/projs/gpt2/configs.yaml', 'rb'))
+configs = yaml.safe_load(open('src/projects/gpt2/configs.yaml', 'rb'))
 
 ################## tokenizer in workspace/artifact ##################
 tokenizer_dir = os.path.join( configs['artifact_dir'], configs['proj_name'], 'tokenizer' )

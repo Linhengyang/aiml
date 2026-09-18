@@ -27,7 +27,7 @@
     * image:&nbsp;&nbsp;image related   
     * parquet:&nbsp;&nbsp;parquet format related   
     * ...
-* projs:
+* projects:
     * gpt2:   
     * bert:   
     * transformer:   

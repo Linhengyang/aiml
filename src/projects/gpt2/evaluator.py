@@ -4,7 +4,7 @@ from src.core.interface.infra_easy import epochEvaluator
 import torch
 import yaml
 
-configs = yaml.load(open('src/projs/gpt2/configs.yaml', 'rb'), Loader=yaml.FullLoader)
+configs = yaml.load(open('src/projects/gpt2/configs.yaml', 'rb'), Loader=yaml.FullLoader)
 
 
 class gpt2EpochEvaluator(epochEvaluator):
